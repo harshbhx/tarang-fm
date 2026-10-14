@@ -128,18 +128,40 @@ const LANGUAGE_STYLE: Partial<Record<TtsLanguage, LanguageStyle>> = {
       'Natural, grammatical spoken Bangla as on a Kolkata FM station (চলিত ভাষা, never সাধু ভাষা), witty and full of adda energy. Use only real, common Bangla words. Common English words (FM, phone, traffic, weekend) may stay in Latin script, but every Bangla word must be in Bengali script.',
     punctuation: 'End every sentence with । or ! or ?.',
   },
+  'mr-IN': {
+    name: 'Marathi',
+    script: 'Devanagari',
+    register:
+      'Natural spoken Marathi like a popular Pune or Mumbai FM RJ: warm, witty and conversational (बोलीभाषा, not stiff written Marathi), with correct Marathi grammar and vocabulary, never Hindi words. Common English words (FM, traffic, weekend) may stay in Latin script, but every Marathi word must be in Devanagari.',
+    punctuation: 'End every sentence with . or ! or ? (Marathi uses the full stop, not the danda).',
+    gender:
+      "Marathi verbs agree with the speaker's gender: a masculine speaker says 'मी आलो / मी दमलो', a feminine speaker says 'मी आले / मी दमले'. Get this right in every line.",
+  },
+  'gu-IN': {
+    name: 'Gujarati',
+    script: 'Gujarati',
+    register:
+      'Natural spoken Gujarati like a popular Ahmedabad or Vadodara FM RJ: warm, playful and full of Gujarati charm (garba, farsan, chai), with correct Gujarati grammar and vocabulary, never Hindi words. Common English words (FM, traffic, weekend) may stay in Latin script, but every Gujarati word must be in Gujarati script.',
+    punctuation: 'End every sentence with . or ! or ? (Gujarati uses the full stop, not the danda).',
+    gender:
+      "Gujarati verbs agree with the speaker's gender: a masculine speaker says 'હું આવ્યો / હું થાકી ગયો', a feminine speaker says 'હું આવી / હું થાકી ગઈ'. Get this right in every line.",
+  },
 };
 
 const DAYPART_WORDS: Partial<Record<TtsLanguage, Record<Daypart, string>>> = {
   'hi-IN': { morning: 'सुबह', afternoon: 'दोपहर', evening: 'शाम', night: 'रात' },
   'ta-IN': { morning: 'காலை', afternoon: 'மதியம்', evening: 'மாலை', night: 'இரவு' },
   'bn-IN': { morning: 'সকাল', afternoon: 'দুপুর', evening: 'সন্ধে', night: 'রাত' },
+  'mr-IN': { morning: 'सकाळ', afternoon: 'दुपार', evening: 'संध्याकाळ', night: 'रात्र' },
+  'gu-IN': { morning: 'સવાર', afternoon: 'બપોર', evening: 'સાંજ', night: 'રાત' },
 };
 
 const KAHANI_NAMES: Partial<Record<TtsLanguage, string>> = {
   'hi-IN': 'कहानी कॉर्नर',
   'ta-IN': 'கதை நேரம்',
   'bn-IN': 'গল্পের আসর',
+  'mr-IN': 'गोष्टींचा कट्टा',
+  'gu-IN': 'વાર્તાનો ઓટલો',
 };
 
 /** RJ names in native script, keyed by the persona's first name. */
@@ -147,6 +169,8 @@ const NATIVE_NAMES: Record<string, Partial<Record<TtsLanguage, string>>> = {
   Sunny: { 'hi-IN': 'सनी' },
   Gokul: { 'ta-IN': 'கோகுல்' },
   Arnab: { 'bn-IN': 'অর্ণব' },
+  Ishita: { 'mr-IN': 'इशिता' },
+  Pooja: { 'gu-IN': 'પૂજા' },
 };
 
 const ROLE_DESCRIPTION: Record<Role, string> = {

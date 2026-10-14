@@ -89,7 +89,7 @@ Open link → Tuner screen (station dial, optional name, "Tune in")
 ### 6.1 Must ship (MVP)
 | ID | Requirement |
 |---|---|
-| M1 | **Three stations:** Hindi (`hi-IN`), Tamil (`ta-IN`), Bangla (`bn-IN`), each with a name, frequency label, tagline, accent colour and voice cast ([VOICE-CASTING.md](./VOICE-CASTING.md)) |
+| M1 | **Five stations:** Hindi (`hi-IN`) 91.1, Marathi (`mr-IN`) 94.3, Tamil (`ta-IN`) 98.3, Bangla (`bn-IN`) 102.7, Gujarati (`gu-IN`) 106.1, each with a name, frequency label, tagline, accent colour and voice cast ([VOICE-CASTING.md](./VOICE-CASTING.md)) |
 | M2 | **Show clock** per station, looping: `station_id → rj_link → news → ad_break → kahani → rj_link → ad_break → kahani → …` |
 | M3 | **Station ID.** A fixed jingle line per station in an ads voice, over a synthesized sting |
 | M4 | **RJ link.** 2–4 lines, personalized with listener name, city and time of day, teasing what's next |

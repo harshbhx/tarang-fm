@@ -87,9 +87,7 @@ Station ID text: "আপনি শুনছেন তরঙ্গ FM 102.7… �
 | char_b | `arnab_bn_conversation` | 1.0 | 0.9 | masculine |
 | char_kid | `roopa_bn_conversational` | 1.15 | 0.9 | feminine |
 
-## If time
-
-### Tarang Marathi · `mr` · `mr-IN` · 94.3
+### 🩷 Tarang Marathi · `mr` · `mr-IN` · 94.3 (added to the MVP)
 Station ID: "तुम्ही ऐकत आहात तरंग FM 94.3!" · STT `transcribe` · feed `hl=mr`
 
 | Role | Speaker | Gender |
@@ -103,6 +101,12 @@ Station ID: "तुम्ही ऐकत आहात तरंग FM 94.3!" ·
 | char_a | `mukul_mr_stories` | masculine |
 | char_b | `soham_mr_narration` | masculine |
 | char_kid | `mrunal_mr_narration` | feminine |
+
+### 💜 Tarang Gujarati · `gu` · `gu-IN` · 106.1 (added to the MVP)
+Station ID: "તમે સાંભળી રહ્યા છો તરંગ FM 106.1… દિલથી સાંભળો, દિલની વાત!" · STT `transcribe` · feed `hl=gu` (BBC Gujarati first)
+Roster has 3 voices: `bhavik_gu_conversation` (M) does the station ID, ads and char_a; `pooja_gu_conversational` (F) does the RJ, ad customer and char_b; `pooja_gu_customer` (F) does news, narrator and the kid.
+
+## If time
 
 ### Tarang Bombay (Hinglish/English) · `en` · `en-IN`
 `enhi` personas work with `en-IN` (spike: 200 OK).

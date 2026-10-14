@@ -90,8 +90,60 @@ const bangla: Station = {
   },
 };
 
-/** Stations on the dial, in dial order. If-time stations are appended here. */
-export const STATIONS: Station[] = [hindi, tamil, bangla];
+const marathi: Station = {
+  id: 'mr',
+  name: 'Tarang Marathi',
+  nativeName: 'तरंग मराठी',
+  frequency: '94.3',
+  language: 'mr-IN',
+  languageName: 'Marathi',
+  tagline: 'मनातलं, मनापासून',
+  accent: '#ec4899',
+  newsFeedUrl: newsFeed('mr'),
+  sttMode: 'transcribe',
+  stationIdText: 'तुम्ही ऐकत आहात तरंग FM 94.3… मनातलं, मनापासून!',
+  stationIdEn: "You're listening to Tarang FM 94.3… straight from the heart!",
+  cast: {
+    station_id: voice('nilesh_mr_conversation', 1.0, 0.7, M),
+    rj: voice('ishita_mr_conversational', 1.05, 0.8, F),
+    news: voice('neha_mr_narration', 1.0, 0.4, F),
+    ad_announcer: voice('nilesh_mr_conversation', 1.1, 0.8, M),
+    ad_customer: voice('ritu_mr_insurance', 1.0, 0.8, F),
+    narrator: voice('rupali_mr_stories', 0.95, 0.75, F),
+    char_a: voice('mukul_mr_stories', 0.9, 0.8, M),
+    char_b: voice('soham_mr_narration', 1.0, 0.85, M),
+    char_kid: voice('mrunal_mr_narration', 1.1, 0.85, F),
+  },
+};
+
+const gujarati: Station = {
+  id: 'gu',
+  name: 'Tarang Gujarati',
+  nativeName: 'તરંગ ગુજરાતી',
+  frequency: '106.1',
+  language: 'gu-IN',
+  languageName: 'Gujarati',
+  tagline: 'દિલથી સાંભળો, દિલની વાત',
+  accent: '#a855f7',
+  newsFeedUrl: newsFeed('gu'),
+  sttMode: 'transcribe',
+  stationIdText: 'તમે સાંભળી રહ્યા છો તરંગ FM 106.1… દિલથી સાંભળો, દિલની વાત!',
+  stationIdEn: "You're listening to Tarang FM 106.1… listen with your heart!",
+  cast: {
+    station_id: voice('bhavik_gu_conversation', 1.0, 0.7, M),
+    rj: voice('pooja_gu_conversational', 1.05, 0.8, F),
+    news: voice('pooja_gu_customer', 1.0, 0.4, F),
+    ad_announcer: voice('bhavik_gu_conversation', 1.1, 0.85, M),
+    ad_customer: voice('pooja_gu_conversational', 1.0, 0.9, F),
+    narrator: voice('pooja_gu_customer', 0.95, 0.7, F),
+    char_a: voice('bhavik_gu_conversation', 0.95, 0.8, M),
+    char_b: voice('pooja_gu_conversational', 1.05, 0.9, F),
+    char_kid: voice('pooja_gu_customer', 1.15, 0.9, F),
+  },
+};
+
+/** Stations on the dial, in frequency order. */
+export const STATIONS: Station[] = [hindi, marathi, tamil, bangla, gujarati];
 
 export const STATION_BY_ID = Object.fromEntries(STATIONS.map((s) => [s.id, s])) as Partial<
   Record<StationId, Station>
