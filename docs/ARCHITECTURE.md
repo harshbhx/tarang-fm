@@ -15,11 +15,12 @@ A guided tour of the running system, diagram first. Every diagram here is drawn 
 9. [Call-in: push to talk](#9-call-in-push-to-talk)
 10. [A story request rewires the clock](#10-a-story-request-rewires-the-clock)
 11. [The studio phone line](#11-the-studio-phone-line)
-12. [News and listener context](#12-news-and-listener-context)
-13. [Safety layers](#13-safety-layers)
-14. [Failure handling](#14-failure-handling)
-15. [Deployment](#15-deployment)
-16. [Numbers worth knowing](#16-numbers-worth-knowing)
+12. [Listen together: one shared show per station](#12-listen-together-one-shared-show-per-station)
+13. [News and listener context](#13-news-and-listener-context)
+14. [Safety layers](#14-safety-layers)
+15. [Failure handling](#15-failure-handling)
+16. [Deployment](#16-deployment)
+17. [Numbers worth knowing](#17-numbers-worth-knowing)
 
 ---
 
@@ -34,10 +35,12 @@ flowchart TB
     CTRL["RadioController<br/>show clock · prefetch · call-in<br/>src/radio"]
     ENG["Web Audio engine<br/>PCM stream · music bed · SFX<br/>src/audio"]
     REC["Recorder<br/>MediaRecorder"]
+    LIVEC["LiveController<br/>Listen together · clock sync<br/>src/live"]
     LAND -->|Tune in| CTRL
     RADIO <--> CTRL
     CTRL --> ENG
     REC --> CTRL
+    LIVEC --> ENG
   end
 
   subgraph Edge["☁️ Cloudflare Worker (Hono) · worker/"]
@@ -54,7 +57,7 @@ flowchart TB
     TTS["Bulbul v4 Flash<br/>streaming TTS"]
     LLM["Sarvam-105B<br/>JSON scripts"]
     STT["Saaras v4<br/>speech-to-text"]
-    TR["Mayura<br/>Translate · Transliterate"]
+    TR["Transliterate<br/>names → native script"]
     VA["Voice Agents<br/>phone RJ"]
   end
 
@@ -65,10 +68,15 @@ flowchart TB
 
   KV[("Workers KV<br/>show memory")]
   DO[("StudioLine<br/>Durable Object · SQLite<br/>call table")]
+  LIVE[("LiveStation<br/>Durable Object · one per station<br/>shared show")]
   PHONE["☎️ Caller's phone"]
 
   CTRL -- "JSON" --> API
   ENG -- "streamed PCM" --- API
+  LIVEC -- "WebSocket · line audio" --- API
+  API --> LIVE
+  LIVE --> SEG & TTS
+  LIVE -- "claim · mark aired" --> DO
   SEG --> LLM & TR
   API --> TTS
   CALL --> STT & LLM & TR
@@ -81,7 +89,7 @@ flowchart TB
 
 Three ideas carry the whole design:
 
-- **The browser runs the show; the Worker writes it.** The client owns the clock, timing, audio and state. The Worker is stateless apart from two shared records: the studio line's call table (a Durable Object) and the show memory (KV) and answers one question at a time: *write this segment*, *speak this line*, *answer this caller*.
+- **The browser runs the show; the Worker writes it.** On the personal radio the client owns the clock, timing, audio and state. The Worker is stateless apart from two shared records, the studio line's call table (a Durable Object) and the show memory (KV), and answers one question at a time: *write this segment*, *speak this line*, *answer this caller*. The one exception is *Listen together* ([§12](#12-listen-together-one-shared-show-per-station)), where a Durable Object per station runs one shared show and the browser only keeps time.
 - **Everything is streamed or prefetched.** Speech is piped byte by byte from Bulbul to the speaker, and the next line and next segment are always being prepared while the current one plays.
 - **Every model output is checked before it's heard.** Scripts are validated, cleaned and cast on the server. Subtitles and phone messages are filtered. A crisis on a call-in never reaches the model.
 
@@ -110,8 +118,7 @@ sequenceDiagram
   Note over C: status = playing
   par while the jingle plays
     C->>W: POST /api/segment (rj_link)
-    W->>S: chat/completions (sarvam-105b, json_schema)
-    W->>S: translate (English subtitles)
+    W->>S: chat/completions (sarvam-105b, json_schema)<br/>English subtitles in the same JSON, if on
     W-->>C: Segment
   and
     W-->>C: context: city · weather · headlines
@@ -204,7 +211,7 @@ gantt
   line 2 audio streaming     :t2, 00, 1s
   line 3 audio streaming     :t3, 05, 1s
   section Segment fetches
-  write segment n+1 (LLM + translate) :s1, 00, 5s
+  write segment n+1 (LLM) :s1, 00, 5s
 ```
 
 | Lookahead | Trigger | Code |
@@ -221,14 +228,14 @@ Old prefetches are aborted (`pruneSegments()`), so the browser holds at most the
 
 ```mermaid
 flowchart TD
-  REQ["SegmentRequest<br/>station · type · listener · headlines<br/>showLog · producer plan · theme · recentCalls<br/>dedications (studio calls)"] --> T{type?}
-  T -->|station_id| SID["Fixed jingle line<br/>+ English subtitle"] --> OUT
+  REQ["SegmentRequest<br/>station · type · listener · headlines<br/>showLog · producer plan · theme · recentCalls<br/>dedications (studio calls) · subtitles?"] --> T{type?}
+  T -->|station_id| SID["Fixed jingle line<br/>+ fixed English subtitle"] --> OUT
   T -->|news| H{headlines?}
   H -->|none, even after fetching| FB
   H -->|yes| NAME
   T -->|rj_link · ad_break · kahani| NAME["Listener name → native script<br/>(Sarvam Transliterate, cached)"]
   NAME --> P["Build prompt<br/>preamble + cast sheet + RJ bible<br/>+ show log + local pack<br/>prompts.ts"]
-  P --> LLM["Sarvam-105B<br/>json_schema · reasoning off<br/>attempt 1 at plan temperature"]
+  P --> LLM["Sarvam-105B<br/>json_schema · reasoning off<br/>attempt 1 at plan temperature<br/>+ an English 'en' per line if subtitles are on"]
   LLM --> V{"validateScript()<br/>romanized? filler? copied example?<br/>too long? invented number?<br/>missing {name}?"}
   V -->|problems on attempt 1| R["Retry once<br/>temperature − 0.1 · +3 s timeout"]
   R --> LLM
@@ -236,13 +243,15 @@ flowchart TD
   CLEAN --> MIN{"enough lines?"}
   MIN -->|no| FB["Fallback segment<br/>one template RJ line<br/>fallback: true"]
   MIN -->|yes| CAST["Cast each role → voice<br/>delivery → pace · pitch · loudness · temp<br/>gap after each line"]
-  CAST --> SUB["English subtitles<br/>Translate × 6 in parallel<br/>profanity guard"]
+  CAST --> SUB["English subtitles (if on)<br/>written with the script<br/>tidied · profanity guard"]
   FB --> SUB
   SUB --> OUT["Segment JSON"]
   LLM -.->|"error / timeout<br/>(19 s total budget)"| FB
 ```
 
 **What the model sees.** Each prompt carries: the station's preamble (native script only, no romanization, `।` punctuation, digits), a cast sheet with each role's grammatical gender, the RJ's character sheet, the last four aired segments as a show log (so the RJ can refer back), the producer plan (greet? catchphrase? running bit?), the mood of the previous segment (no jokes after heavy news), a local pack for known cities and any caller requests.
+
+**Subtitles come with the script.** English subtitles are off by default. When the listener turns them on, the request carries `subtitles: true`, the JSON schema gains an `en` field right after each line's `text`, the system prompt gets a short subtitle rule (the meaning, not word for word, never changing the script) and the token budget grows by 40 % (`maxTokensFor()`). Upcoming segments that were already written without them are written again. `modelSubtitle()` (`worker/subtitle.ts`) tidies each subtitle and drops any that trips the profanity list. There is no separate translation step, so subtitles add no extra round trip.
 
 **What the model never decides.** The voice, pace and loudness of each line; whether a news line keeps a number that isn't in the headlines; the listener's name spelling (`{name}` is filled by the server); and anything said to a caller in distress.
 
@@ -360,7 +369,6 @@ sequenceDiagram
   participant W as Worker /api/call
   participant STT as Saaras v4
   participant LLM as Sarvam-105B
-  participant TR as Translate
 
   U->>C: hold "Call RJ"
   C->>C: remember position after the current line<br/>fade voice (200 ms) · status = call_recording
@@ -369,7 +377,7 @@ sequenceDiagram
   alt shorter than 0.5 s
     C-->>U: "That was too short…" · resume
   else
-    C->>W: multipart: audio · station · listener · nowPlaying · showLog
+    C->>W: multipart: audio · station · listener · nowPlaying · showLog · subtitles
     W->>STT: transcribe (codemix for Hindi, transcribe otherwise)
     STT-->>W: transcript
     alt no words heard
@@ -377,15 +385,10 @@ sequenceDiagram
     else crisis words (care.ts)
       W-->>C: intent care · fixed warm reply + Tele-MANAS 14416
     else normal
-      par
-        W->>TR: caller transcript → English
-      and
-        W->>LLM: intent + on-air reply (8 s timeout)
-        LLM-->>W: {intent, lines, nickname, story_theme}
-      end
-      W-->>C: NDJSON line 1: CallResponse (no subtitles yet)
-      W->>TR: RJ reply → English
-      W-->>C: NDJSON line 2: {subtitles}, filled in on screen
+      W->>LLM: intent + on-air reply (8 s timeout)<br/>with subtitles on: caller_en first, en per line
+      LLM-->>W: {caller_en?, intent, lines, nickname, story_theme}
+      W-->>C: NDJSON line 1: CallResponse
+      W-->>C: NDJSON line 2: {subtitles} (empty when off), filled in on screen
     end
     C->>C: status = call_on_air · ring tone
     C->>W: POST /api/tts (RJ reply)
@@ -478,7 +481,68 @@ stateDiagram-v2
 
 The caller's number is never stored in full: `maskNumber()` keeps only the country code and last four digits (`+91 ••••• 4148`).
 
-## 12. News and listener context
+## 12. Listen together: one shared show per station
+
+`/live` turns the radio into a broadcast. Instead of a show per browser, each station runs one show on the server, and everyone tuned in hears the same line at the same moment. Each station is one Durable Object (`LiveStation`, `worker/live/station.ts`, addressed by station id); the wire contract is `shared/live.ts`.
+
+```mermaid
+flowchart LR
+  subgraph Browsers["📱 Every listener's browser · src/live"]
+    LC["LiveController<br/>server clock · plays each line<br/>at its start time"]
+    UI["Name chips · welcome banner<br/>off-air screen · Studio controls"]
+    LC <--> UI
+  end
+
+  subgraph Edge["☁️ Worker · worker/index.ts"]
+    WS["/api/live/:station/ws"]
+    AUD["/api/live/:station/audio/:lineId"]
+    CTL["/api/live/:station/control<br/>owner's bearer key"]
+    CACHE[("Edge cache<br/>immutable PCM")]
+    AUD <--> CACHE
+  end
+
+  subgraph Station["LiveStation · Durable Object per station"]
+    PROD["Producer<br/>alarm tick every 1.5 s<br/>keeps 45 s voiced ahead"]
+    TL["Shared timeline<br/>lines with startAt · listeners"]
+    PCM[("Stored PCM<br/>one copy per line")]
+    WEL["Live welcome<br/>batch joins · fixed templates"]
+    PROD --> TL
+    WEL -->|"cut in after the line on air"| TL
+  end
+
+  LLM["Sarvam-105B<br/>writes each segment"]
+  TTS["Bulbul v4 Flash<br/>voices each line once"]
+  SL[("StudioLine<br/>shared call table")]
+
+  LC <-->|"join · ping ⇄ timeline · presence · status · pong"| WS
+  WS <--> TL
+  LC -->|"GET a line's audio"| AUD
+  AUD -->|"cache miss"| PCM
+  UI -->|"start · stop"| CTL --> PROD
+  PROD --> LLM
+  PROD --> TTS
+  WEL --> TTS
+  TTS --> PCM
+  PROD -->|"claim calls · mark aired"| SL
+```
+
+**The producer.** A station only wakes when a listener joins and the owner has started it. Waking begins a fresh show (a new `showId`, the clock back at the jingle), and a storage alarm ticks every 1.5 s while anyone is listening. Whenever less than 45 s of voiced audio is queued ahead of the on-air clock, the next entry of the same `SHOW_CLOCK` as the personal radio is written by `buildSegment()`, the pipeline behind `/api/segment` ([§6](#6-how-a-segment-gets-written)). The context is shared rather than personal: India time, the most common city among the listeners (for the weather and city news) and no listener names in the script. Every live script carries English subtitles, since one script serves everyone; each listener decides whether to show them (off by default). Each line is voiced once by Bulbul (at most 3 requests in flight per station), its PCM is stored in the Durable Object, and the line goes on the timeline. A segment that fails twice is skipped, and the clock moves on.
+
+**The timeline.** Every `LiveLine` carries its server start time (`startAt`) and its exact length from the PCM byte count (48 bytes per ms). A new line goes back to back after the last line and its pause, never sooner than 1.5 s from now, so every listener has time to fetch it (`appendLine()`, `worker/live/timeline.ts`). Each change sends the whole upcoming timeline to every listener. Finished lines drop off; their audio stays fetchable for 5 more minutes and is then deleted.
+
+**One voice, many listeners.** Browsers fetch each line from `/api/live/:station/audio/:lineId`. The Worker answers from the edge cache when it can, otherwise asks the station and caches the reply (`Cache-Control: public, max-age=86400, immutable`). Sarvam is paid once per line whether 2 or 200 people (the cap per station) are listening, and the Durable Object serves a line roughly once per Cloudflare location. On `*.workers.dev` the Cache API is a no-op, so every fetch goes to the station.
+
+**Clock sync and joining mid-line** (`src/live/controller.ts`, `src/live/clock.ts`). The browser pings over the socket (three quick pings on connect, then every 10 s) and keeps the median of the last five offsets, each worked out as server time − (send time + round trip / 2). It starts each line when its estimate of server time reaches `startAt` and fetches the next two lines ahead. Joining, or unmuting, part-way through a line plays the rest of it from the matching byte offset; a line that is more than 85 % over is skipped. A dropped socket reconnects with backoff (0.5 s growing to 15 s, up to 12 tries) while the timeline already received keeps playing.
+
+**The live welcome** (`worker/live/welcome.ts`). Joins within 4 s of each other share one welcome. The line comes from fixed templates in Hindi, Marathi, Tamil, Bangla and Gujarati, chosen by the situation (alone in the studio, one new name, two, or a crowd) and filled with the names and how many are listening: "स्वागत है प्रिया! महफ़िल जम रही है, अब हम 2 लोग साथ हैं।" A crowd is shortened to a name or two and "2 more friends", and Latin-script names are transliterated into the station's script. The RJ on air at this hour voices it with the `excited` delivery, ahead of any programme lines waiting for TTS. `insertLine()` then cuts it in at the first line boundary at least 0.7 s away, which is right after the line on air, and pushes every later line back by the welcome's length plus a 400 ms gap. Welcomes start at least 12 s apart. Each welcome line lists the listener ids it greets, which lights the "…is welcoming you live!" banner in those browsers and an "On air now: a hello for …" note for everyone else.
+
+**Name safety.** `sanitizeLiveName()` strips control characters, emoji, links, emails, @handles, hashtags and phone-number-like digit runs, keeps Latin and Indic letters, drops a leading "my name is", and caps the name at 24 characters on a word boundary. Abuse in Latin script, Devanagari, Bengali, Tamil or Gujarati, and anything that reads like an instruction or spam ("ignore", "prompt", "whatsapp" …), is rejected, and that listener is welcomed with the station's word for friend. A name never reaches Sarvam-105B; it only fills a template.
+
+**Studio calls on a live show.** Each RJ link asks the shared call table (`StudioLine`, [§11](#11-the-studio-phone-line)) for up to two unread calls, oldest first, and claims them as `live:<station>:<showId>`. Calls the script leaves out are released at once. When the link's first line is placed, its start time is noted, and the first alarm tick after that moment marks the calls aired. A call therefore reaches exactly one RJ, on whichever show claims it first, live or personal, and every radio then shows it *Read on air*. A show that stops hands back any calls it claimed but never aired, and a caller's story request themes the live show's next Kahani.
+
+**The studio switch and auto-off.** Every station is off air by default. `POST /api/live/:station/control` with `{"action":"start"}` and the owner's key (`Authorization: Bearer <LIVE_ADMIN_TOKEN>`, compared in constant time, 401 otherwise) switches it on for 6 minutes (`LIVE_AUTO_OFF_MS`). Listeners already waiting wake the show at once, and each of them gets a welcome. The station then switches itself off when the 6 minutes are up, whatever is happening, or sooner after 3 minutes with nobody listening (`LIVE_IDLE_SLEEP_MS`), which also covers a started station nobody joined. Stopping, by hand or automatically, puts the show to sleep, deletes its stored audio and releases unaired calls. Listeners stay connected on the off-air screen, and the join form says the station is off air but can be joined anyway. The owner opens `/live?admin=<key>`: the key is saved in the browser and removed from the address bar, and the Studio controls list every station with its state, listener count and auto-off countdown (refreshed every 10 s), with Start, Stop and Stop all. Two more guardrails: at most 600 segments per station per India day, and 200 listeners per station.
+
+## 13. News and listener context
 
 ```mermaid
 flowchart LR
@@ -499,7 +563,7 @@ flowchart LR
 - On `*.workers.dev` the Cache API is a no-op, which is why there's also a per-isolate memory cache.
 - No location prompt is ever shown: everything comes from Cloudflare's edge.
 
-## 13. Safety layers
+## 14. Safety layers
 
 ```mermaid
 flowchart TB
@@ -507,6 +571,7 @@ flowchart TB
     N["News headlines"]
     CI["Caller audio"]
     PC["Phone-call summaries"]
+    LN["Typed listener names<br/>(Listen together)"]
   end
   subgraph Out["What goes out"]
     S["Spoken lines"]
@@ -518,16 +583,20 @@ flowchart TB
   G2 -->|distress| CARE["Fixed reply + Tele-MANAS 14416"]
   G2 -->|otherwise| G3["Model: deflect injection,<br/>never repeat personal data"]
   PC --> G4["on_air_ok flag · grim filter<br/>number masked"]
+  LN --> G7["Name filter<br/>links · numbers · abuse · instructions<br/>fixed welcome templates only"]
   G1 --> G5["Script validator<br/>no invented numbers in news"]
   G3 --> S
   G5 --> S
   G4 --> S
+  G7 --> S
   S --> G6["Subtitle profanity guard"] --> SUB
 ```
 
 On the infrastructure side: the Sarvam key only lives in the Worker; `/api/tts` only speaks with voices from the station casts; inputs are validated with zod; recordings are capped at 2 MB and 15 s and never stored; and the three routes that cost money are rate-limited per IP.
 
-## 14. Failure handling
+Spending stops when nobody is listening. The personal radio pauses itself after 6 minutes with no tap, key press or call and asks "Still listening?" (`listenCapMs` in `src/radio/controller.ts`; a call in progress is never cut off), so a forgotten tab stops writing and voicing segments. A live station switches itself off 6 minutes after it is started, or after 3 minutes with nobody listening, and writes at most 600 segments a day ([§12](#12-listen-together-one-shared-show-per-station)).
+
+## 15. Failure handling
 
 | What fails | What the listener hears | Where |
 |---|---|---|
@@ -537,14 +606,17 @@ On the infrastructure side: the Sarvam key only lives in the Worker; `/api/tts` 
 | Segment request fails in the browser | One retry after 800 ms; then the clock skips to the next segment | `fetchSegment()` |
 | Three segments in a row fail | "Weak signal. Retrying…" and a 3 s back-off | `run()` |
 | One line's TTS fails | Its caption shows for 2 s, then the show moves on | `playLine()` |
-| Translate fails or is profane | The native caption shows without a subtitle | `annotate()` |
+| A subtitle is missing, empty or profane | The native caption shows without it | `modelSubtitle()` |
 | Weather or a news feed fails | The last cached value, or nothing | `worker/context.ts` |
 | Call-in model fails | A warm "thanks for calling" line | `worker/call.ts` |
 | Mic blocked / recording empty | A message under the call button; the show resumes | `startCall()` · `endCall()` |
 | Call table unreachable | No phone calls listed, and RJ links go without them; the show is unaffected | `/api/phone/recent` · `/api/segment` |
 | KV unreachable | The show memory is skipped; stories and ads are still checked against this session's own log | `worker/memory.ts` |
+| A live segment fails twice, or one of its lines can't be voiced | The segment (or that line) is left out and the live clock moves on; the timeline closes up | `writeNext()` · `enqueue()` |
+| Live socket drops | "Reconnecting…"; the timeline already received keeps playing while it retries with backoff | `src/live/controller.ts` |
+| A live line's audio fails to load | The caption stays up, silent, until the line's end time, so the listener stays in step | `playEntry()` |
 
-## 15. Deployment
+## 16. Deployment
 
 ```mermaid
 flowchart LR
@@ -555,13 +627,14 @@ flowchart LR
   CFW --- RL["Rate limiters<br/>RL_SEGMENT · RL_TTS · RL_CALL"]
   CFW --- KVB[("KV: PHONE<br/>show memory")]
   CFW --- DOB[("Durable Object: StudioLine<br/>call table · SQLite")]
-  CFW --- SEC["Secrets<br/>SARVAM_API_KEY<br/>PHONE_WEBHOOK_TOKEN"]
+  CFW --- DOL[("Durable Object: LiveStation<br/>one per station · SQLite")]
+  CFW --- SEC["Secrets<br/>SARVAM_API_KEY<br/>PHONE_WEBHOOK_TOKEN<br/>LIVE_ADMIN_TOKEN"]
   CFW --- OBS["Workers Logs<br/>+ Server-Timing"]
 ```
 
-`/api/*` runs the Worker first (`run_worker_first`); every other path is a static asset, and unknown paths such as `/listen` fall back to `index.html` for the client-side router.
+`/api/*` runs the Worker first (`run_worker_first`); every other path is a static asset, and unknown paths such as `/listen` and `/live` fall back to `index.html` for the client-side router.
 
-## 16. Numbers worth knowing
+## 17. Numbers worth knowing
 
 | Thing | Value | Defined in |
 |---|---|---|
@@ -579,5 +652,16 @@ flowchart LR
 | A call brings an RJ link forward if made within | 15 min | `PHONE_JUMP_MS` |
 | Dedications per RJ link | up to 2 | `MAX_PHONE_CALLS_PER_LINK` |
 | Rate limits per IP | segment 30/min · tts 120/min · call 8/min | `wrangler.jsonc` |
+| Personal show pauses ("Still listening?") after | 6 min with no tap, key press or call | `DEFAULT_TIMINGS.listenCapMs` |
+| Live station switches itself off after | 6 min from Start, whatever happens | `LIVE_AUTO_OFF_MS` |
+| … or with nobody listening, after | 3 min | `LIVE_IDLE_SLEEP_MS` |
+| Live audio kept voiced ahead of the on-air clock | 45 s | `LIVE_BUFFER_AHEAD_MS` |
+| Earliest a new live line starts | 1.5 s after it is placed | `MIN_LEAD_MS` |
+| Live welcome: joins batched / gap between welcomes | 4 s / at least 12 s | `LIVE_WELCOME_BATCH_MS`, `LIVE_WELCOME_MIN_GAP_MS` |
+| Live welcome placement | first line boundary ≥ 0.7 s ahead, then a 400 ms gap | `WELCOME_LEAD_MS`, `WELCOME_GAP_MS` |
+| Live clock sync | 3 pings on connect, then every 10 s; median of the last 5 | `src/live/clock.ts` |
+| Listeners per live station / name length | 200 / 24 characters | `LIVE_MAX_LISTENERS`, `LIVE_NAME_MAX` |
+| Live segments per station per India day | 600 | `DAILY_SEGMENT_LIMIT` |
+| Live line audio kept after the line ends | 5 min in the station, 1 day in the edge cache | `AUDIO_KEEP_MS`, `/api/live/:station/audio` |
 | Measured warm TTS first byte | 190–390 ms | spike, TECH-SPEC §11 |
 | Measured call-in round trip | 1.7–2.5 s | TECH-SPEC §8.6 |

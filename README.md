@@ -6,7 +6,7 @@
 
 Every voice is [Sarvam **Bulbul v4 Flash**](https://docs.sarvam.ai/api/api-guides-tutorials/text-to-speech/best-practice-guide-for-bulbul-v-4-flash). Each line on screen shows exactly which of its personas is speaking.
 
-**▶ Live:** https://tarang-fm.dualmindlab.tech (the landing page, with a playable voice gallery for all five stations) · **Straight to the radio:** https://tarang-fm.dualmindlab.tech/listen · Works on any phone or laptop, with no install or login.
+**▶ Live:** https://tarang-fm.dualmindlab.tech (the landing page, with a playable voice gallery for all five stations) · **Straight to the radio:** https://tarang-fm.dualmindlab.tech/listen · **Listen together:** https://tarang-fm.dualmindlab.tech/live · Works on any phone or laptop, with no install or login.
 
 > 🎬 Demo video: _recording in progress; the shot list is in [docs/BUILD-PLAN.md §6](./docs/BUILD-PLAN.md#6-demo-video-7590-s-shot-list)_
 
@@ -38,18 +38,40 @@ Every segment of a real radio station has its own vocal style: the newsreader, t
 | 👻 Kahani Corner | A 60–90 s radio drama with narrator, characters and a twist | `shubh_hi_stories_dramatic`, `mukul_hi_suspense`, `sanchita_hi_romantic`, `chhavi_hi_kids` |
 | ☎️ Call-in | Push to talk. The RJ replies live, and a story request changes the next Kahani | the station's RJ |
 
-**Stations:** Hindi (91.1), Marathi (94.3), Tamil (98.3), Bangla (102.7) and Gujarati (106.1), each cast with native v4 voices: 29 distinct personas across the dial. Captions show the native script with an English subtitle underneath, so anyone can follow any station.
+**Stations:** Hindi (91.1), Marathi (94.3), Tamil (98.3), Bangla (102.7) and Gujarati (106.1), each cast with native v4 voices: 29 distinct personas across the dial. Captions show the native script, and one tap (or <kbd>C</kbd>) adds an English subtitle underneath, so anyone can follow any station. Subtitles are off by default; when they're on, Sarvam-105B writes them with the script.
+
+## Listen together
+
+**One shared live show per station.** On `/live`, everyone tuned in to a station hears the same line at the same moment, like a real broadcast. Type your name and, a few seconds later, the RJ welcomes you on air right after the line that's playing: "स्वागत है प्रिया! महफ़िल जम रही है, अब हम 2 लोग साथ हैं।" (Welcome, Priya! The party is warming up, now there are 2 of us together.)
+
+**▶ Listen together:** https://tarang-fm.dualmindlab.tech/live
+
+<p align="center">
+  <img src="docs/images/listen-together.jpg" alt="Listen together on a laptop: the RJ welcoming a new listener by name live on air, with the welcome in a Hindi caption and a name chip for everyone listening" width="66%" />
+  <img src="docs/images/listen-together-phone.jpg" alt="Listen together on a phone: the RJ's live welcome in a Hindi caption, above the name chips of the listeners tuned in together" width="24%" />
+</p>
+
+**How it works**
+
+- **One Cloudflare Durable Object per station** (`LiveStation`) runs the show. It writes segments along the same show clock as the personal radio, voices each line and places it on one shared timeline with a server start time.
+- **WebSocket timeline and clock sync.** Each browser syncs to the server clock with pings over the socket and starts every line at its start time. Join mid-line and you hear the rest of that line, in step with everyone else.
+- **Each line is voiced once** and served from the edge cache, so 2 listeners or 200 (the cap per station) cost the same Sarvam credits.
+- **Live welcomes** in Hindi, Marathi, Tamil, Bangla and Gujarati. Joins a few seconds apart share one welcome, which is cut in right after the line on air. Everyone listening shows up as a name chip, and a banner lights up while the RJ is saying your name.
+- **A studio switch.** Stations are off air by default and only the owner can start one. A started station switches itself off after 6 minutes, or after 3 minutes with nobody listening. Listeners can join an off-air station and wait; the show starts for them the moment the studio goes live.
+- **Studio calls are read once, across every show.** Live RJ links claim calls from the same shared call table as the personal radio and mark them aired when the link starts, so a call read on a live show is never read again on anyone's radio.
+- **Name safety.** A typed name never reaches the script-writing model. It's only dropped into fixed welcome templates, after a filter removes links, emails, @handles, phone numbers and emoji, and rejects abuse and anything that reads like an instruction. A rejected name is welcomed with the station's word for friend ("दोस्त" on Hindi).
+
+For the timeline, the welcome insertion and the auto-off in detail see [How it works §12](./docs/ARCHITECTURE.md#12-listen-together-one-shared-show-per-station).
 
 ## How the show is written
 
 ```mermaid
 flowchart LR
-  A["Show clock<br/>picks the next segment"] --> B["Sarvam-105B<br/>writes the script as JSON"]
+  A["Show clock<br/>picks the next segment"] --> B["Sarvam-105B<br/>writes the script as JSON<br/>+ English subtitles if on"]
   B --> C{"Validator<br/>romanized? filler? invented numbers?"}
   C -->|fails| B2["Retry once,<br/>cooler temperature"] --> C
   C -->|passes| D["Cast each line<br/>role → Bulbul voice<br/>delivery → pace · loudness"]
-  D --> E["Sarvam Translate<br/>English subtitles"]
-  E --> F["Bulbul v4 Flash<br/>streams each line"]
+  D --> F["Bulbul v4 Flash<br/>streams each line"]
   F --> G["🔊 Web Audio<br/>over a ducked music bed"]
 ```
 
@@ -86,8 +108,7 @@ sequenceDiagram
   Radio->>W: POST /api/call (audio)
   W->>S: Saaras v4 → transcript
   W->>W: distress check (care.ts)
-  W->>S: Sarvam-105B → intent + reply
-  W->>S: Translate → English subtitles
+  W->>S: Sarvam-105B → intent + reply<br/>(+ English subtitles if on)
   W-->>Radio: reply line
   Radio->>W: POST /api/tts
   W->>S: Bulbul v4 Flash (stream)
@@ -121,9 +142,9 @@ flowchart LR
 | Model / API | Job in Tarang FM |
 |---|---|
 | **Bulbul v4 Flash**, HTTP streaming (`linear16`, 24 kHz) | Every spoken line. Raw PCM is streamed straight into Web Audio, so speech starts in a few hundred ms. Delivery is shaped by persona choice, `pace`, `loudness` and `temperature` |
-| **Sarvam-105B**, structured outputs (`json_schema`) | Writes every script (RJ links, news, ads, dramas) in the station's language with a per-role cast sheet, and understands call-ins (intent + on-air reply) |
+| **Sarvam-105B**, structured outputs (`json_schema`) | Writes every script (RJ links, news, ads, dramas) in the station's language with a per-role cast sheet, and understands call-ins (intent + on-air reply). When subtitles are on, it writes each line's English subtitle in the same response |
 | **Saaras v4** speech-to-text | Transcribes callers (`codemix` for Hinglish, `transcribe` for Marathi, Tamil, Bangla and Gujarati) |
-| **Sarvam Translate** (`mayura:v1`) | English subtitles under every caption |
+| **Sarvam Transliterate** | Puts names typed in English letters (yours, a studio caller's) into the station's script, so the RJ says them naturally |
 | **Sarvam Voice Agents** | The studio phone line: RJ Sunny (Bulbul v4) answers calls on +91 79 6585 4148, with a headlines tool and a call-end webhook |
 
 ## Architecture
@@ -142,7 +163,7 @@ flowchart LR
     TTS[/api/tts — streamed/]
     CALL[/api/call/]
   end
-  SAR[(Sarvam AI<br/>Bulbul v4 Flash · Saaras v4<br/>Sarvam-105B · Translate)]
+  SAR[(Sarvam AI<br/>Bulbul v4 Flash · Saaras v4<br/>Sarvam-105B · Transliterate)]
   UI <--> SCH --> ENG
   SCH --> CTX & SEG & TTS
   MIC --> CALL
@@ -160,9 +181,11 @@ For every flow in detail (state machine, prefetch timing, segment pipeline, audi
 
 - **Grim news stays off air.** Headlines about murder, sexual violence or suicide are filtered out before the news is written.
 - **A fixed safety net on call-ins.** A deterministic check (`worker/care.ts`) runs on every caller's words, in all five station languages and English. If a caller sounds distressed, the RJ always gives a warm, fixed reply in the station's language with the Tele-MANAS helpline (14416, free, 24×7), whatever the model decided.
-- **Clean subtitles.** Machine translation occasionally turns a harmless line into an English swear word. Any subtitle that trips a profanity list (`worker/subtitle.ts`) is dropped, and the native-script caption still shows.
+- **Clean subtitles.** The English subtitles come from the model, so each one is tidied and checked against a profanity list (`worker/subtitle.ts`). One that trips it is dropped, and the native-script caption still shows.
 - **Prompt injection gets deflected.** Callers who try to make the RJ break character, ignore its rules or say something unsafe get one cheerful "that's for off-air" line, and their words are never repeated on air.
 - **The key stays on the server.** All Sarvam calls go through the Worker. `/api/tts` only accepts voices from the station casts, inputs are validated, and the routes that call Sarvam are rate-limited per IP.
+- **Names you type are filtered.** On Listen together a name only ever fills a fixed welcome template, after links, numbers, abuse and instruction-like text are stripped or rejected (`worker/live/welcome.ts`).
+- **No show plays to an empty room.** The personal show pauses itself after 6 minutes with no tap, key press or call and asks "Still listening?"; one tap picks it up where it stopped. A live station switches itself off 6 minutes after the studio starts it, or after 3 minutes with nobody listening, and writes at most 600 segments a day.
 
 ## Run it locally
 
@@ -175,6 +198,8 @@ npm install
 echo "SARVAM_API_KEY=your_key_here" > .dev.vars
 npm run dev            # http://localhost:5173
 ```
+
+To try Listen together locally, also put `LIVE_ADMIN_TOKEN=<any long key>` in `.dev.vars`, open `http://localhost:5173/live?admin=<that key>` and start a station from the Studio controls. The key is saved in the browser and removed from the address bar.
 
 | Command | What it does |
 |---|---|
@@ -194,10 +219,11 @@ npm run dev            # http://localhost:5173
 |---|---|
 | `SARVAM_API_KEY` | Everything that speaks, listens or writes |
 | `PHONE_WEBHOOK_TOKEN` | Only the studio phone line: the `?token=` the Sarvam call-end webhook must send |
+| `LIVE_ADMIN_TOKEN` | Only Listen together: the owner's key for starting and stopping stations |
 
-The phone line also uses the `PHONE` KV namespace declared in `wrangler.jsonc`. Create your own with `npx wrangler kv namespace create PHONE` and put its id there.
+The phone line also uses the `PHONE` KV namespace declared in `wrangler.jsonc`. Create your own with `npx wrangler kv namespace create PHONE` and put its id there. The two Durable Objects (`StudioLine` for the call table, `LiveStation` for the shared shows) are created on the first deploy from the migrations in the same file.
 
-**Debug views:** `/?debug=audio` (audio engine test page) and `/?preview=ui` (every UI state with mock data).
+**Debug views:** `/?debug=audio` (audio engine test page), `/?preview=ui` (every UI state with mock data) and `/?preview=live` (every Listen together state with mock data).
 
 ## CI/CD
 
@@ -219,7 +245,7 @@ flowchart LR
 
 | Job | What it proves |
 |---|---|
-| Typecheck, unit tests, build | Types across app, Worker and shared code; 135+ unit tests (JUnit report kept as an artifact); the bundle builds, with sizes in the run summary |
+| Typecheck, unit tests, build | Types across app, Worker and shared code; 230+ unit tests (JUnit report kept as an artifact); the bundle builds, with sizes in the run summary |
 | Browser tests | The built app plus Worker serves every page and API route correctly; Playwright checks the landing page, the radio and the studio panel at desktop and phone sizes, with no page errors or sideways scrolling |
 | Docs diagrams | Every Mermaid diagram in the README and `docs/` renders |
 | Dependency audit | No high-severity advisories in shipped dependencies |
@@ -242,41 +268,50 @@ All routes live under `/api` on the same Worker that serves the app. Errors are 
 |---|---|---|
 | `GET /api/health` | Liveness, and whether the Sarvam key is set | n/a |
 | `GET /api/context?station=hi` | Listener city and timezone (from the edge), weather and headlines | n/a |
-| `POST /api/segment` | Writes one show segment (RJ link, news, ad or Kahani) as cast, cleaned, subtitled lines | 30 / min |
+| `POST /api/segment` | Writes one show segment (RJ link, news, ad or Kahani) as cast, cleaned lines, with English subtitles when asked | 30 / min |
 | `POST /api/tts` | Streams one line from Bulbul v4 Flash as raw 24 kHz PCM. Only cast voices are allowed | 120 / min |
 | `POST /api/call` | Push-to-talk call-in: Saaras v4 transcript, then the RJ's on-air reply | 8 / min |
 | `GET /api/phone/headlines` | Headlines tool for the phone RJ | 30 / min |
 | `POST /api/phone/call-end` | Sarvam call-end webhook (token-protected) | n/a |
 | `GET /api/phone/recent` | Recent studio calls, numbers masked, each with when it was read on air | n/a |
 | `POST /api/phone/aired` | An RJ link has started reading these calls (only the listener holding the claim can mark them) | 30 / min |
+| `GET /api/live/:station/ws` | Listen together: WebSocket into the station's shared show (join and clock-sync pings in; timeline, listeners and status out) | n/a |
+| `GET /api/live/:station/audio/:lineId` | One line of the shared show as raw 24 kHz PCM; immutable, served from the edge cache | n/a |
+| `GET /api/live/:station/now` | The station's snapshot: on or off air, who is listening, the upcoming lines | n/a |
+| `POST /api/live/:station/control` | Studio switch, `{"action":"start"}` or `{"action":"stop"}`, with the owner's key as a bearer token | n/a |
 
-Request and response shapes are the zod schemas in `shared/schemas.ts` and the types in `shared/types.ts`.
+Request and response shapes are the zod schemas in `shared/schemas.ts` and the types in `shared/types.ts`; Listen together's messages are in `shared/live.ts`.
 
 ## Project layout
 
 ```
-shared/        station configs + voice casts, types, zod schemas, constants (used by both sides)
+shared/        station configs + voice casts, types, zod schemas, constants, the live contract (used by both sides)
 worker/        Cloudflare Worker (Hono)
   index.ts       routes, rate limits, error handling
-  sarvam.ts      Bulbul, Saaras, Sarvam-105B and Translate client with retries
-  segment.ts     builds a segment: prompt → validate → cast → clean → subtitle
+  sarvam.ts      Bulbul, Saaras, Sarvam-105B and Transliterate client with retries
+  segment.ts     builds a segment: prompt → validate → clean → cast (subtitles come with the script)
   prompts.ts     system and user prompts per segment type and for call-ins
   show.ts        RJ character sheets, deliveries, local packs, pauses
   validate.ts    script checks (romanization, filler, invented numbers …)
   call.ts        push-to-talk call-in pipeline
   care.ts        deterministic distress check with the helpline reply
   context.ts     geo, weather and news feeds, with the grim-news filter
-  subtitle.ts    profanity guard for English subtitles
+  subtitle.ts    tidies the model's English subtitles and drops profane ones
   phone.ts       studio phone line: webhook payloads, number masking, the phone RJ's headlines
   calls.ts       the shared call table: save, claim, release, mark aired (plain SQL, tested on node:sqlite)
   studio.ts      StudioLine Durable Object holding that table
   memory.ts      show memory: the stories and ads each station already aired
   story.ts       Kahani briefs and casting, ad briefs
   fallbacks.ts   template lines for when a segment fails
+  live/          Listen together
+    station.ts     LiveStation Durable Object: producer, shared timeline, welcomes, studio switch
+    timeline.ts    timeline math: place, cut in, shift; India time; producer plan
+    welcome.ts     name filter and welcome templates in 5 languages
 src/
   audio/         Web Audio engine: PCM stream decoder, music bed, SFX, recorder
-  radio/         show clock, controller (scheduler + prefetch), API client, state
+  radio/         show clock, controller (scheduler + prefetch, "Still listening?" pause), API client, state
   components/    the radio UI (tuner dial, captions, call panel, studio line)
+  live/          Listen together: socket + clock sync, name chips, welcome banner, Studio controls
   landing/       the landing page and voice gallery
 docs/          PRD, technical spec, voice casting, build plan
 scripts/       API spike and voice audition tools
@@ -288,7 +323,7 @@ Tests sit next to the code they cover (`*.test.ts`).
 
 | Doc | Read it for |
 |---|---|
-| [How it works](./docs/ARCHITECTURE.md) | 15+ diagrams of the running system: every flow from Tune in to call-in to the phone line, with the code behind each |
+| [How it works](./docs/ARCHITECTURE.md) | 19 diagrams of the running system: every flow from Tune in to call-in, the phone line and the shared live show, with the code behind each |
 | [PRD](./docs/PRD.md) | What the product is, who it's for, goals and the shipped scope |
 | [Tech spec](./docs/TECH-SPEC.md) | Architecture, API contracts, the audio engine, LLM prompt design and what live testing changed |
 | [Voice casting](./docs/VOICE-CASTING.md) | Every station's cast, with the pitch audition behind each voice's grammatical gender |
@@ -299,4 +334,4 @@ Tests sit next to the code they cover (`*.test.ts`).
 - Hosts, ads and stories are AI-generated and fictional. News lines rephrase real headlines, and the original sources are linked on screen.
 - Caller audio is sent to Sarvam for transcription and is never stored.
 - UI effects adapted from [React Bits](https://reactbits.dev) (Threads, CurvedLoop, BlurText, SpotlightCard, ClickSpark, DecryptedText, ShinyText; MIT + Commons Clause), [Magic UI](https://magicui.design) (BorderBeam, Ripple, NumberTicker; MIT) and [motion-primitives](https://motion-primitives.com) (TextLoop; MIT). Each adapted file names its source and what changed.
-- Headlines via BBC, Bing News and Google News. Weather by [Open-Meteo](https://open-meteo.com). Voices, transcription, translation and scripts by [Sarvam AI](https://www.sarvam.ai).
+- Headlines via BBC, Bing News and Google News. Weather by [Open-Meteo](https://open-meteo.com). Voices, transcription, scripts, subtitles and transliteration by [Sarvam AI](https://www.sarvam.ai).

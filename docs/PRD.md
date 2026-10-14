@@ -125,7 +125,7 @@ journey
 | M12 | **Fallbacks.** LLM failure → retry once → template RJ filler and skip the segment. TTS failure → show the caption and continue |
 | M13 | **Mobile-first**, responsive from 360 px, keyboard accessible. Works in current Chrome, Edge, Firefox and Safari (iOS 16.4+) |
 | M14 | **Deployed** on Cloudflare with a public URL. README with demo GIF/video and setup steps |
-| M15 | **Readable by everyone**: each caption shows the spoken line in its native script with an English subtitle (Sarvam Translate) underneath. All UI copy (buttons, labels, states) is in English or light Hinglish, never Hindi-only |
+| M15 | **Readable by everyone**: each caption shows the spoken line in its native script, and one tap adds an English subtitle underneath (off by default; written by Sarvam-105B together with the script). All UI copy (buttons, labels, states) is in English or light Hinglish, never Hindi-only |
 | M16 | **Landing page** at `/`: hero with a Tune in CTA that starts the radio in the same click, the programme, "Meet the voices" (every cast persona playable, with its V4 speaker ID), the call-in explainer, Built on Sarvam, and footer credits. The radio app lives at `/listen` |
 
 ### 6.2 If time (in this order; start one only when every MVP item is done and deployed)

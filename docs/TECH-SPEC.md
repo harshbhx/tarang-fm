@@ -122,7 +122,7 @@ export interface Line {
   role: Role;
   speaker: string;
   text: string;                 // ≤ 220 chars, already cleaned
-  en?: string;                  // English subtitle (Sarvam Translate); absent if translation failed or station is English
+  en?: string;                  // English subtitle, written by Sarvam-105B with the script; only when subtitles are on, never for an English station
   pace: number;
   temperature: number;
   pauseAfterMs: number;         // silence after this line
@@ -245,7 +245,7 @@ All routes are JSON unless noted. Errors use `{ error: { code: string, message: 
   2. maps role → cast voice (speaker, pace, temperature)
   3. cleans the text (§8.4)
   4. splits lines over 220 chars at sentence boundaries
-- After validation, every line's `en` subtitle is filled by `translate()` in parallel (Sarvam Translate `mayura:v1`, `modern-colloquial`, target `en-IN`). A failed translation leaves `en` undefined and never fails the segment.
+- English subtitles are off by default. With `subtitles: true` in the request (the listener turned them on), the json_schema gains an `en` field after each line's `text`, so Sarvam-105B writes every subtitle in the same response as the script, with no separate translation call. `modelSubtitle()` (`worker/subtitle.ts`) tidies each one and drops any that is empty or profane; a missing subtitle never fails the segment. Without the flag, `en` is absent.
 - On LLM failure it retries once, then returns a template segment with `fallback: true`.
 - Response: `Segment`.
 - Timeout: 20 s (the client requests the next segment a full segment ahead, so this isn't on the critical path).
@@ -271,10 +271,11 @@ All routes are JSON unless noted. Errors use `{ error: { code: string, message: 
   - `station`
   - `listener`: JSON string
   - `nowPlaying`: optional segment title
+  - `subtitles`: optional, `"true"` when the listener has English subtitles on
 - Pipeline:
   1. **STT:** `POST https://api.sarvam.ai/speech-to-text` (multipart) with `model=saaras:v4`, `language_code=<station language>`, and `mode=<station.sttMode>`. An empty transcript gets a "line not clear" reply.
   2. **LLM:** `POST https://api.sarvam.ai/v1/chat/completions` with `model: "sarvam-105b"` and `reasoning_effort: null`, `max_tokens: 400`, `temperature: 0.7`, json_schema `{ intent, reply, theme }`. Timeout 8 s, then a template reply.
-  3. Translate the transcript and reply to English (in parallel, best-effort) for `transcriptEn` and `reply.en`.
+  3. With the `subtitles` field set to `true`, the same LLM response also carries `caller_en` (the caller's words in English, written first) and an `en` for each reply line, which become `transcriptEn` and `reply.en`. There is no separate translation call.
   4. Return `CallResponse`. The client then calls `/api/tts` with `reply` (two round trips, which keeps the API simple).
 - Caller audio is never stored.
 
@@ -311,7 +312,7 @@ An `rj_link` request with `dedications` must carry `holder` (the tab's random id
 | `ttsStream(body)` | `POST /text-to-speech/stream` | Returns the upstream `Response`. Retries 429/5xx up to 2 times **before** the first byte (backoff 300 ms × 2ⁿ, jittered) |
 | `transcribe(blob, opts)` | `POST /speech-to-text` | multipart `file`, `model`, `language_code`, `mode`. Returns `{ transcript, language_code }` |
 | `chatJson(messages, schema, opts)` | `POST /v1/chat/completions` | `response_format: { type: "json_schema", json_schema: { name, schema, strict: true } }`. If the model wraps JSON in prose or fences, extract the first `{…}` block and validate with zod. Spike: `sarvam-105b` with `reasoning_effort: null` returned valid JSON in 1.3 s with 0 reasoning tokens |
-| `translate(text, source, target='en-IN')` | `POST /translate` | `{ input, source_language_code, target_language_code, model: "mayura:v1", mode: "modern-colloquial" }` → `translated_text`. Input ≤ 1,000 chars. Best-effort with a 4 s timeout |
+| `transliterate(text, source, target)` | `POST /transliterate` | `{ input, source_language_code, target_language_code }`, input ≤ 200 chars, 3 s timeout. Puts listener and caller names typed in Latin letters into the station's script; results are cached per name |
 
 - Auth header on every call: `api-subscription-key: ${env.SARVAM_API_KEY}`.
 - Log the `request_id` from error bodies.
@@ -405,9 +406,9 @@ Each station has 3 template RJ filler lines, for example "आप सुन र�
 - **Lower temperatures for coherence:** `rj_link` 0.7, `ad_break` 0.8, `kahani` 0.7, `news` 0.3.
 - **Listener names use a `{name}` placeholder** that the server fills in, because the model misspelled names when transliterating them (Harsh → हरश).
 - **STT `keyterms` dropped.** With them, a silent clip came back as a keyterm ("सनी").
-- **Brand-safe subtitles:** the Indic brand name is swapped to Latin "Tarang" before translation, because Translate rendered "तरंग FM" as "Waaree FM".
+- **Subtitles moved into the script:** Sarvam Translate rendered "तरंग FM" as "Waaree FM" and added a round trip per line, so English subtitles are now written by Sarvam-105B in the same JSON as the script, and only when the listener turns subtitles on.
 - **Measured latency:** `station_id` about 50 ms, `rj_link` 2.6–4.3 s, `news` 2.1–4.0 s, `ad_break` 2.4–2.7 s, `kahani` 3.7–5.0 s, TTS TTFB 190–390 ms, call-in 1.7–2.5 s.
-- **Subtitle guard:** Translate occasionally turned a harmless line into English profanity, so `cleanSubtitle()` (`worker/subtitle.ts`) drops any subtitle that trips a profanity list. The native caption still shows.
+- **Subtitle guard:** machine-written English occasionally turned a harmless line into profanity, so `cleanSubtitle()` (`worker/subtitle.ts`) drops any subtitle that trips a profanity list. It still runs on every subtitle the model writes. The native caption still shows.
 - **Known gaps:** Tamil and Bangla Kahani and ads are less coherent than Hindi. Some English subtitles are clumsy. On `*.workers.dev` the Cache API does nothing, so news is cached per isolate in memory.
 
 ## 9. Show scheduler (`src/radio`)
@@ -466,9 +467,9 @@ Each feature has a job. Nothing is added just to tick a box.
 | Platform | Feature | Used for | Tier |
 |---|---|---|---|
 | Sarvam | **Bulbul v4 Flash** HTTP streaming (`linear16`) | Every spoken line, with 14+ personas cast by style | MVP |
-| Sarvam | **Sarvam-105B** structured outputs (`json_schema`) | Radio scripts (RJ, news, ads, Kahani) and call-in understanding | MVP |
+| Sarvam | **Sarvam-105B** structured outputs (`json_schema`) | Radio scripts (RJ, news, ads, Kahani), call-in understanding, and English subtitles written with the script when the listener turns them on | MVP |
 | Sarvam | **Saaras v4** STT (`codemix` / `transcribe`) | Call-in transcription | MVP |
-| Sarvam | **Translate** (`mayura:v1`, modern-colloquial) | English subtitles under native captions, so non-native listeners and judges can follow | MVP |
+| Sarvam | **Transliterate** | Listener and caller names typed in Latin letters, into the station's script | MVP |
 | Sarvam | Bulbul **WebSocket** streaming | Call-in reply: stream LLM sentences into TTS for faster first audio | If time |
 | Cloudflare | **Workers + static assets** (Vite plugin) | UI + API in one deploy | MVP |
 | Cloudflare | **Rate-limiting binding** | Per-IP protection for `/api/segment`, `/api/tts`, `/api/call` | MVP |
