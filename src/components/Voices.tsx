@@ -19,8 +19,8 @@ export function VoicesOnAir({ station, heard, current, className = '' }: VoicesO
 
   return (
     <section aria-labelledby="voices-title" className={className}>
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 id="voices-title" className="text-sm font-medium">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h2 id="voices-title" className="section-title">
           Voices on air
         </h2>
         <p className="text-fg-3 font-mono text-xs tabular-nums">

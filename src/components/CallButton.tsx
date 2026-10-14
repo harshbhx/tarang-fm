@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, type CSSProperties } from 'react';
 import { CALL_MAX_SECONDS } from '../../shared/constants';
 import type { RadioStatus } from '../radio/state';
-import ShinyText from './ShinyText';
 import { Eq, MicIcon } from './icons';
 
 interface CallButtonProps {
@@ -72,11 +71,18 @@ export default function CallButton({ status, secondsLeft, rjName, onStart, onEnd
 
   const look = lookFor(status);
   const detail = {
-    off: status === 'tuning' ? 'Available once the show starts' : 'Tune in first',
-    ready: `${rjName} answers live, ${CALL_MAX_SECONDS} s max`,
+    off: status === 'tuning' ? 'Lines open once the show starts' : 'Tune in first',
+    ready: `Lines open. ${rjName} answers live`,
     live: secondsLeft > 0 ? `${secondsLeft} s left` : "Time's up, release to send",
-    busy: 'On air in a moment',
+    busy: 'Ringing the studio',
     onair: `${rjName} is answering you`,
+  }[look];
+  const label = {
+    off: 'Hold to talk to the RJ',
+    ready: 'Hold to talk to the RJ',
+    live: 'Release to send',
+    busy: 'Connecting…',
+    onair: "You're on air",
   }[look];
   const announce =
     look === 'live' && (secondsLeft === 10 || secondsLeft === 5 || secondsLeft <= 3) ? `${secondsLeft} seconds left` : '';
@@ -130,18 +136,11 @@ export default function CallButton({ status, secondsLeft, rjName, onStart, onEnd
           {look === 'busy' ? <Eq /> : <MicIcon width={22} height={22} />}
         </span>
         <span className="flex min-w-0 flex-col">
-          <span className="text-base leading-tight font-semibold lg:text-[1.05rem]">
-            {look === 'live' ? (
-              'Release to send'
-            ) : look === 'busy' ? (
-              <ShinyText text="RJ is listening…" color="#a1a1a1" shineColor="#ffffff" speed={1.8} />
-            ) : look === 'onair' ? (
-              'On air'
-            ) : (
-              'Hold to talk to the RJ'
-            )}
+          <span className="call-label">{label}</span>
+          <span className="call-detail">
+            <span className="call-led" aria-hidden="true" />
+            <span className="truncate">{detail}</span>
           </span>
-          <span className="text-[0.8rem] leading-snug tabular-nums opacity-75">{detail}</span>
         </span>
       </button>
       <span id="call-hint" className="sr-only">

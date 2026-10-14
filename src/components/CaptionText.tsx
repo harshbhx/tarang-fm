@@ -1,41 +1,74 @@
-import { useReducedMotion } from 'motion/react';
-import TextEffect from './TextEffect';
+import type { CSSProperties } from 'react';
+import { useReducedMotion } from './hooks';
 
 interface CaptionTextProps {
   text: string;
-  /** BCP-47 tag (hi-IN, ta-IN, bn-IN) so the right script font and shaping apply */
+  /** BCP-47 tag (hi-IN, ta-IN, bn-IN, …) so the right script font and shaping apply */
   lang: string;
   size?: 'lg' | 'sm';
   className?: string;
 }
 
-const MS_PER_CHAR = 70;
-const MAX_WORD_STAGGER_S = 0.09;
-const WHOLE_LINE_OVER_WORDS = 20;
+/** Rough Bulbul speaking rate, used to pace the word reveal (no word timings are available) */
+const MS_PER_CHAR = 68;
+/** Reveal words slightly ahead of the voice so reading never lags listening */
+const LEAD = 0.82;
+const MIN_WORD_MS = 160;
+
+interface Word {
+  text: string;
+  start: number;
+  dur: number;
+}
+
+/** Split on whitespace only (conjuncts and matras stay intact) and spread the estimated line time by length. */
+function timeWords(text: string): Word[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const total = text.length * MS_PER_CHAR * LEAD;
+  const chars = words.reduce((sum, w) => sum + w.length + 1, 0) || 1;
+  let at = 0;
+  return words.map((w) => {
+    const dur = Math.max(MIN_WORD_MS, ((w.length + 1) / chars) * total);
+    const word = { text: w, start: at, dur };
+    at += dur;
+    return word;
+  });
+}
 
 /**
- * A spoken line in native script, revealed word by word with a soft blur-in, roughly in step
- * with the voice. Words are split on whitespace only so conjuncts and matras stay intact.
+ * A spoken line in native script, revealed word by word at an estimated speaking pace, with a
+ * thin accent underline sweeping under the word being said (karaoke). Transform and opacity
+ * only; the whole line simply fades in under reduced motion.
  */
 export default function CaptionText({ text, lang, size = 'lg', className = '' }: CaptionTextProps) {
   const reduced = useReducedMotion();
-  const wordCount = text.split(/(\s+)/).filter((part) => part.trim()).length;
-  const estimatedMs = text.length * MS_PER_CHAR;
-  const stagger = Math.min(MAX_WORD_STAGGER_S, (estimatedMs * 0.8) / Math.max(1, wordCount) / 1000);
-  const wholeLine = wordCount > WHOLE_LINE_OVER_WORDS;
+  const classes = `caption-text ${size === 'sm' ? 'caption-text-sm' : ''} ${className}`;
 
+  if (reduced) {
+    return (
+      <p key={text} lang={lang} className={`${classes} fade-in`}>
+        {text}
+      </p>
+    );
+  }
+
+  const words = timeWords(text);
   return (
-    <TextEffect
-      key={text}
-      as="p"
-      lang={lang}
-      per={wholeLine ? 'line' : 'word'}
-      preset={reduced || wholeLine ? 'fade' : 'blur'}
-      containerTransition={{ staggerChildren: wholeLine ? 0 : stagger }}
-      segmentTransition={{ duration: wholeLine ? 0.4 : 0.35, ease: 'easeOut' }}
-      className={`caption-text ${size === 'sm' ? 'caption-text-sm' : ''} ${className}`}
-    >
-      {text}
-    </TextEffect>
+    <p key={text} lang={lang} className={`${classes} karaoke`}>
+      <span className="sr-only">{text}</span>
+      <span aria-hidden="true">
+        {words.map((word, i) => (
+          <span key={i}>
+            <span
+              className="kw"
+              style={{ '--d': `${Math.round(word.start)}ms`, '--w': `${Math.round(word.dur)}ms` } as CSSProperties}
+            >
+              {word.text}
+            </span>
+            {i < words.length - 1 ? ' ' : null}
+          </span>
+        ))}
+      </span>
+    </p>
   );
 }

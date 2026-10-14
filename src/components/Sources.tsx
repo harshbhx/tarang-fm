@@ -4,7 +4,7 @@ import type { Source } from '../../shared/types';
 export default function Sources({ sources, lang, className = '' }: { sources: Source[]; lang: string; className?: string }) {
   return (
     <section aria-labelledby="sources-title" className={className}>
-      <h2 id="sources-title" className="text-sm font-medium">
+      <h2 id="sources-title" className="section-title">
         Headlines in this bulletin
       </h2>
       <ul className="divide-line mt-1 divide-y">
@@ -19,7 +19,7 @@ export default function Sources({ sources, lang, className = '' }: { sources: So
           </li>
         ))}
       </ul>
-      <p className="text-fg-3 mt-2 text-xs">Via Google News. Rephrased for radio, no facts added.</p>
+      <p className="text-fg-3 mt-2 text-xs">Headlines via BBC, Bing News and Google News. Rephrased for radio, no facts added.</p>
     </section>
   );
 }

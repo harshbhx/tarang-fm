@@ -1,11 +1,11 @@
-import { useRef } from 'react';
+import { useRef, type CSSProperties } from 'react';
 import type { Station } from '../../shared/types';
 import type { Caption, CallState, RadioStatus } from '../radio/state';
-import { WaitingLine } from './CaptionStage';
 import CaptionText from './CaptionText';
 import SpeakerChip from './SpeakerChip';
 import { voiceName } from './format';
 import { useKeepInView, useReducedMotion } from './hooks';
+import { PhoneIcon } from './icons';
 
 interface CallPanelProps {
   status: RadioStatus;
@@ -18,7 +18,9 @@ interface CallPanelProps {
   secondsLeft: number;
 }
 
-/** The phone-in: live mic meter, then the caller's words, then the RJ's reply on air. */
+const SEGMENTS = Array.from({ length: 24 }, (_, i) => i);
+
+/** The phone-in, as a studio phone line: live mic meter, ringing, then "You're on air". */
 export default function CallPanel({
   status,
   call,
@@ -37,16 +39,45 @@ export default function CallPanel({
   useKeepInView(panelRef, `${status}:${call?.transcript ?? ''}:${call?.reply ?? ''}:${showSubtitles}`, reduced);
 
   return (
-    <div ref={panelRef} className="caption-current flex flex-col gap-6">
+    <div ref={panelRef} className="line" data-state={status}>
       {status === 'call_recording' ? (
-        <div role="status">
-          <p className="text-fg-2 text-sm">You&rsquo;re on the line with {rjName}</p>
-          <p className="mt-1 text-3xl font-semibold tracking-tight lg:text-4xl">Speak now</p>
-          <div className="vu mt-5" aria-hidden="true" />
+        <div role="status" className="line-block">
+          <p className="line-head">
+            <span className="line-led" aria-hidden="true" />
+            Line open, {rjName} is listening
+          </p>
+          <p className="display-md mt-2">Speak now</p>
+          <div className="mic-meter mt-5" aria-hidden="true">
+            {SEGMENTS.map((i) => (
+              <span key={i} style={{ '--i': i } as CSSProperties} data-zone={i >= 21 ? 'hot' : i >= 17 ? 'warm' : 'ok'} />
+            ))}
+          </div>
           <p className="text-fg-3 mt-3 text-sm tabular-nums">
-            {secondsLeft} s left. Release to send, or press Esc to cancel.
+            <span className="text-fg">{secondsLeft} s</span> left. Release to send, or press Esc to cancel.
           </p>
         </div>
+      ) : null}
+
+      {status === 'call_thinking' ? (
+        <div role="status" className="line-block line-ringing">
+          <span className="ring-icon" aria-hidden="true">
+            <span className="ring-wave" />
+            <span className="ring-wave" />
+            <PhoneIcon width={22} height={22} />
+          </span>
+          <div className="min-w-0">
+            <p className="line-head">Connecting you to the studio</p>
+            <p className="display-sm mt-1">{rjName} picks up in a moment…</p>
+          </div>
+        </div>
+      ) : null}
+
+      {status === 'call_on_air' ? (
+        <p className="you-on-air" role="status">
+          <span className="you-on-air-flash" aria-hidden="true" />
+          <span className="lamp-dot" aria-hidden="true" />
+          {call?.transcript ? `${caller === 'You' ? "You're" : `${caller}, you're`} on air` : "You're on air"}
+        </p>
       ) : null}
 
       {call?.transcript ? (
@@ -60,17 +91,10 @@ export default function CallPanel({
         />
       ) : null}
 
-      {status === 'call_thinking' && !call?.reply ? (
-        <div role="status" className="flex flex-col gap-2">
-          <WaitingLine>RJ is listening…</WaitingLine>
-          <p className="text-fg-3">{rjName} will answer you on air in a moment.</p>
-        </div>
-      ) : null}
-
       {call?.reply ? (
         <CallLine
-          who={voiceName(rj.label)}
-          role="RJ, on air"
+          who={rjName}
+          role="RJ, replying on air"
           speaker={replySpeaker}
           text={call.reply}
           en={showSubtitles ? call.replyEn : undefined}
@@ -106,16 +130,16 @@ function CallLine({
   size: 'lg' | 'sm';
 }) {
   return (
-    <div>
-      <div className="fade-in flex flex-wrap items-center gap-x-2.5 gap-y-2">
+    <div className="call-line" data-size={size}>
+      <div className="speaker fade-in">
         <span className="live-dot" data-live={!!speaker} aria-hidden="true" />
-        <span className="font-semibold">{who}</span>
-        <span className="text-fg-3 text-sm">{role}</span>
+        <span className="speaker-name">{who}</span>
+        <span className="speaker-role">{role}</span>
         {speaker ? <SpeakerChip id={speaker} speaking /> : null}
       </div>
       <CaptionText text={text} lang={lang} size={size} className="mt-2" />
       {en ? (
-        <p lang="en" className="caption-en fade-in mt-1.5">
+        <p lang="en" className="caption-en fade-in">
           {en}
         </p>
       ) : null}
