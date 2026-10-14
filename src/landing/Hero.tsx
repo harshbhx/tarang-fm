@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { m } from 'motion/react';
 import { STATIONS } from '../../shared/stations';
 import type { StationId } from '../../shared/types';
+import { onAppLink } from '../live/ui/navigate';
 import { STATION_COUNT_WORD, VOICE_COUNT, stationIdVoice } from './data';
 import RadioSet, { HERO_SAMPLE_PREFIX } from './RadioSet';
 import { TextSwap } from './TextSwap';
@@ -76,6 +77,9 @@ export default function Hero({ onTuneIn, player }: { onTuneIn: (id: StationId) =
         <m.p className="lp-trust" {...rise(0.22)}>
           No install, no login. Starts on Hindi 91.1.
         </m.p>
+        <m.a className="lp-ghost lp-ghost--sm mt-3" href="/live" onClick={onAppLink} {...rise(0.25)}>
+          Listen together · beta
+        </m.a>
         <m.div className="lp-hero-phone" {...rise(0.28)}>
           <StudioCall />
         </m.div>

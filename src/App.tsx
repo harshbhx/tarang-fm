@@ -6,10 +6,13 @@ import { getSharedEngine, useRadio } from './radio/useRadio';
 
 const AudioDebug = lazy(() => import('./audio/AudioDebug'));
 const Preview = lazy(() => import('./components/Preview'));
+const LiveApp = lazy(() => import('./live/LiveApp'));
+const LivePreview = lazy(() => import('./live/ui/LivePreview'));
 
-type View = 'landing' | 'listen' | 'audio-debug' | 'preview';
+type View = 'landing' | 'listen' | 'live' | 'audio-debug' | 'preview' | 'live-preview';
 
 const LISTEN_PATH = '/listen';
+const LIVE_PATH = '/live';
 
 // Every view starts at the top; restoring an old scroll position drops visitors mid-page on the landing page.
 if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual';
@@ -18,7 +21,10 @@ function viewFromUrl(): View {
   const params = new URLSearchParams(window.location.search);
   if (params.get('debug') === 'audio') return 'audio-debug';
   if (params.get('preview') === 'ui') return 'preview';
-  return window.location.pathname.startsWith(LISTEN_PATH) ? 'listen' : 'landing';
+  if (params.get('preview') === 'live') return 'live-preview';
+  const path = window.location.pathname;
+  if (path === LIVE_PATH || path.startsWith(`${LIVE_PATH}/`)) return 'live';
+  return path.startsWith(LISTEN_PATH) ? 'listen' : 'landing';
 }
 
 function Station({ view, onNavigate }: { view: 'landing' | 'listen'; onNavigate: (view: View) => void }) {
@@ -50,6 +56,15 @@ function Station({ view, onNavigate }: { view: 'landing' | 'listen'; onNavigate:
     if (view === 'landing' && (state.status === 'playing' || state.status === 'tuning')) actions.pause();
   }, [view, state.status, actions]);
 
+  // /live shares the audio engine, so opening it (which unmounts this view) stops the personal show.
+  useEffect(
+    () => () => {
+      actions.pause();
+      actions.cancelCall();
+    },
+    [actions],
+  );
+
   if (view === 'landing') return <Landing onTuneIn={tuneIn} engine={getSharedEngine()} />;
   return <RadioApp state={state} actions={actions} />;
 }
@@ -65,6 +80,9 @@ export default function App() {
 
   if (view === 'audio-debug' || view === 'preview') {
     return <Suspense fallback={null}>{view === 'audio-debug' ? <AudioDebug /> : <Preview />}</Suspense>;
+  }
+  if (view === 'live' || view === 'live-preview') {
+    return <Suspense fallback={null}>{view === 'live' ? <LiveApp /> : <LivePreview />}</Suspense>;
   }
   return <Station view={view} onNavigate={setView} />;
 }

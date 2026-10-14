@@ -1,0 +1,448 @@
+/* "Listen together" (/live). Builds on the radio styles in index.css; only what the shared show adds. */
+
+@layer components {
+  /* ---------- Join: name entry ---------- */
+  /* The heading sits beside the top of the form (the solo tune panel bottom-aligns its shorter form). */
+  @media (min-width: 1024px) {
+    .tune-panel.live-join {
+      align-items: start;
+    }
+  }
+
+  .live-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+    padding: 0 12px 0 10px;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--tfm-fg-2);
+    background: var(--tfm-surface);
+    border: 1px solid var(--tfm-line);
+  }
+
+  .live-eyebrow-dot,
+  .live-join-lamp {
+    width: 8px;
+    height: 8px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, #ff8a73, var(--tfm-lamp) 60%, #a5160a);
+    box-shadow: 0 0 10px rgb(255 59 47 / 0.75);
+  }
+
+  .live-beta {
+    font-family: var(--tfm-font-mono);
+    font-size: 0.66rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .live-count-hint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+    font-size: 0.92rem;
+    color: var(--tfm-fg-2);
+  }
+
+  .live-count-hint svg {
+    flex-shrink: 0;
+    color: var(--accent);
+  }
+
+  /* Station pills wrap instead of scrolling sideways */
+  .pills.live-stations {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .live-join-btn {
+    flex-wrap: wrap;
+    column-gap: 0.6rem;
+  }
+
+  .live-join-lamp {
+    width: 9px;
+    height: 9px;
+    box-shadow: 0 0 0 2px rgb(18 11 6 / 0.25), 0 0 10px rgb(255 59 47 / 0.9);
+  }
+
+  .live-join-station {
+    font-size: 0.92rem;
+    font-weight: 500;
+    opacity: 0.66;
+  }
+
+  /* ---------- Programme: now + up next ---------- */
+  .programme.live-programme {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'now'
+      'next';
+  }
+
+  @media (min-width: 768px) {
+    .programme.live-programme {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+      grid-template-areas: 'now next';
+      align-items: start;
+    }
+  }
+
+  .live-next {
+    grid-area: next;
+    display: flex;
+    min-width: 0;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .live-next .prog-k {
+    min-width: 3.6rem;
+    padding-top: 0.1rem;
+  }
+
+  .live-next-list {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .live-next-item {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    gap: 8px;
+    line-height: 1.5;
+  }
+
+  .live-next-type {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 6px;
+    align-self: center;
+    white-space: nowrap;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--tfm-fg-2);
+  }
+
+  .live-next-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.92rem;
+    color: var(--tfm-fg-3);
+  }
+
+  .live-next-empty {
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: var(--tfm-fg-3);
+  }
+
+  /* ---------- Presence: who is listening ---------- */
+  .live-presence {
+    scroll-margin-top: calc(var(--bar-h) + 16px);
+  }
+
+  .live-hello-note {
+    font-size: 0.85rem;
+    color: var(--tfm-fg-2);
+  }
+
+  .live-hello-note[data-hello='on_air'] {
+    color: var(--tfm-led-amber);
+  }
+
+  .live-hello-note[data-hello='done'] {
+    color: var(--tfm-fg-3);
+  }
+
+  .live-greeting {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 0.88rem;
+    color: var(--tfm-led-amber);
+  }
+
+  .live-greeting:empty {
+    margin-top: 0;
+  }
+
+  .live-greeting-dot {
+    width: 7px;
+    height: 7px;
+    flex-shrink: 0;
+    background: var(--tfm-led-amber);
+    box-shadow: 0 0 10px var(--tfm-led-amber);
+  }
+
+  .live-people {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  .live-person {
+    position: relative;
+    display: inline-flex;
+    max-width: 100%;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 4px 12px 4px 4px;
+    border-radius: 999px;
+    font-size: 0.9rem;
+    color: var(--tfm-fg-2);
+    background: var(--tfm-surface);
+    border: 1px solid var(--tfm-line);
+    transition: border-color 300ms, background-color 300ms;
+  }
+
+  .live-avatar {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    place-items: center;
+    border-radius: 50%;
+    font-size: 0.82rem;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--tfm-fg);
+    background: linear-gradient(180deg, #2d2e33 0%, #1a1b1e 100%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 0 0 1px rgb(0 0 0 / 0.6);
+  }
+
+  .live-person-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--tfm-fg);
+  }
+
+  .live-person-city {
+    flex-shrink: 0;
+    font-size: 0.78rem;
+    color: var(--tfm-fg-3);
+  }
+
+  .live-you-tag {
+    flex-shrink: 0;
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-family: var(--tfm-font-mono);
+    font-size: 0.64rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #120b06;
+    background: var(--accent);
+  }
+
+  .live-person[data-you='true'] {
+    border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+    background: color-mix(in oklab, var(--accent) 12%, var(--tfm-surface));
+  }
+
+  .live-person[data-you='true'] .live-avatar {
+    color: #120b06;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 62%, #fff), var(--accent));
+  }
+
+  .live-person-mic {
+    display: inline-flex;
+    flex-shrink: 0;
+    color: var(--tfm-led-amber);
+  }
+
+  /* Being welcomed on air: a warm glow that breathes (opacity only) */
+  .live-person[data-welcome='true'] {
+    border-color: color-mix(in oklab, var(--tfm-led-amber) 70%, transparent);
+  }
+
+  .live-person[data-welcome='true']::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow:
+      0 0 0 2px color-mix(in oklab, var(--tfm-led-amber) 55%, transparent),
+      0 0 26px -2px var(--tfm-led-amber);
+    animation: live-glow 1.3s ease-in-out infinite;
+  }
+
+  .live-person[data-you='true'][data-welcome='true']::after {
+    box-shadow:
+      0 0 0 2px color-mix(in oklab, var(--accent) 70%, transparent),
+      0 0 30px 0 var(--accent);
+  }
+
+  .live-more {
+    padding: 0 14px;
+    color: var(--tfm-fg-3);
+    border-style: dashed;
+    background: transparent;
+  }
+
+  /* ---------- The live welcome: floats under the top edge, clear of the captions ---------- */
+  .live-welcome-slot {
+    position: fixed;
+    inset-inline: 0;
+    top: calc(max(8px, env(safe-area-inset-top)) + var(--bar-h) - 4px);
+    z-index: 35;
+    display: flex;
+    justify-content: center;
+    padding-inline: max(12px, env(safe-area-inset-left));
+    pointer-events: none;
+  }
+
+  .live-welcome {
+    position: relative;
+    display: flex;
+    max-width: 560px;
+    align-items: center;
+    gap: 12px;
+    overflow: hidden;
+    padding: 12px 18px;
+    border-radius: 16px;
+    color: #fff4ee;
+    background: radial-gradient(120% 150% at 50% 30%, #ff5440 0%, #c11d0e 70%, #8f1308 100%);
+    box-shadow:
+      0 0 0 1px rgb(255 138 115 / 0.6),
+      0 0 56px -6px rgb(255 59 47 / 0.8),
+      0 18px 40px -16px rgb(0 0 0 / 0.9),
+      inset 0 0 10px rgb(255 200 180 / 0.45);
+  }
+
+  .live-welcome > .lamp-dot {
+    flex-shrink: 0;
+  }
+
+  .live-welcome-text {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .live-welcome-title {
+    font-family: var(--tfm-font-display);
+    font-size: clamp(1.05rem, 0.95rem + 0.6vw, 1.35rem);
+    font-weight: 650;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    text-shadow: 0 0 10px rgb(255 220 200 / 0.6);
+  }
+
+  .live-welcome-sub {
+    font-size: 0.85rem;
+    color: rgb(255 236 228 / 0.85);
+  }
+
+  /* ---------- Dock: mute · who's listening · leave ---------- */
+  .live-dock-who {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 8px 14px;
+    border-radius: 18px;
+    color: var(--tfm-fg);
+    background: var(--tfm-well);
+    box-shadow: inset 0 0 0 1px var(--tfm-line), inset 0 2px 4px rgb(0 0 0 / 0.6);
+    transition: box-shadow 150ms;
+  }
+
+  .live-dock-who:hover {
+    box-shadow: inset 0 0 0 1px #34363c, inset 0 2px 4px rgb(0 0 0 / 0.6);
+  }
+
+  .live-dock-count {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .live-dock-dot {
+    width: 8px;
+    height: 8px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--tfm-fg-3);
+  }
+
+  .live[data-status='on_air'] .live-dock-dot {
+    background: var(--accent);
+    animation: live-pulse 1.6s ease-out infinite;
+  }
+
+  .live-dock-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.78rem;
+    color: var(--tfm-fg-3);
+  }
+
+  .icon-btn.live-leave {
+    gap: 6px;
+    padding: 0 16px;
+    font-size: 0.95rem;
+    font-weight: 500;
+  }
+
+  /* Very narrow phones: the leave key shows only its icon (the label stays for screen readers) */
+  @media (max-width: 359.98px) {
+    .icon-btn.live-leave {
+      padding: 0;
+      font-size: 0;
+    }
+  }
+}
+
+@keyframes live-glow {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-person[data-welcome='true']::after,
+  .live[data-status='on_air'] .live-dock-dot {
+    animation: none;
+  }
+
+  .live-welcome .you-on-air-flash {
+    display: none;
+  }
+}
