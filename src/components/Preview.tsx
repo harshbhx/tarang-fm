@@ -124,6 +124,7 @@ type MockKey =
   | 'thinking'
   | 'onair'
   | 'callerror'
+  | 'care'
   | 'offline'
   | 'error';
 
@@ -142,12 +143,13 @@ const MOCK_LABELS: { key: MockKey; label: string }[] = [
   { key: 'thinking', label: 'Call ringing' },
   { key: 'onair', label: 'Call on air' },
   { key: 'callerror', label: 'Mic blocked' },
+  { key: 'care', label: 'Care note' },
   { key: 'offline', label: 'Offline' },
   { key: 'error', label: 'Signal lost' },
 ];
 
 /** States in which the fake analyser "speaks" */
-const SPEAKING_KEYS: MockKey[] = [...LIVE_IDS, 'linesopen', 'weak', 'onair', 'callerror', 'offline'];
+const SPEAKING_KEYS: MockKey[] = [...LIVE_IDS, 'linesopen', 'weak', 'onair', 'callerror', 'care', 'offline'];
 
 function buildState(key: MockKey, station: LiveId, index: number): RadioState {
   const live = liveState(station, index);
@@ -178,6 +180,8 @@ function buildState(key: MockKey, station: LiveId, index: number): RadioState {
       };
     case 'callerror':
       return { ...live, call: { error: 'Could not open the microphone.' } };
+    case 'care':
+      return { ...live, helpline: { name: 'Tele-MANAS', number: '14416' } };
     case 'error':
       return { ...live, status: 'error', error: 'Could not load the next segment (network error).' };
     default:

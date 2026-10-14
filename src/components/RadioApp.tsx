@@ -7,6 +7,7 @@ import type { RadioActions, RadioState } from '../radio/state';
 import AmbientBackground from './AmbientBackground';
 import CallButton from './CallButton';
 import CallPanel from './CallPanel';
+import CareBanner from './CareBanner';
 import CaptionStage, { ErrorNotice, OnAirSoon, StageNote, TuningNotice } from './CaptionStage';
 import CompactDialBar from './CompactDialBar';
 import Footer from './Footer';
@@ -318,6 +319,8 @@ function Show({
         ttfaMs={state.ttfaMs}
         clockKey={station.id}
       />
+
+      {state.helpline ? <CareBanner key={state.helpline.number} helpline={state.helpline} /> : null}
 
       <section aria-labelledby="now-title" className="stage">
         <div className="stage-head">
