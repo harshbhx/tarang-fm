@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { STATION_BY_ID } from '../shared/stations';
-import { describeWeather, isGrim, localFeedUrl, mixHeadlines, parseRss } from './context';
+import { describeWeather, isGrim, localFeedUrl, localFeeds, mixHeadlines, nationalFeeds, parseRss, unwrapLink } from './context';
 
 const item = (title: string, n: number) =>
   `<item><title>${title} - Daily News</title><link>https://news.example.com/${n}</link><source url="https://x">Daily News</source></item>`;
@@ -57,5 +57,24 @@ describe('local context helpers', () => {
     expect(describeWeather(0)).toBe('clear sky');
     expect(describeWeather(63)).toBe('rain');
     expect(describeWeather(999)).toBe('mild weather');
+  });
+});
+
+describe('fallback feeds', () => {
+  it('reads Bing News items: publisher URL and News:Source', () => {
+    const xml =
+      '<rss><channel><item><title>वडोदरा में नया फ्लाईओवर खुला</title>' +
+      '<link>http://www.bing.com/news/apiclick.aspx?ref=FexRss&amp;url=https%3a%2f%2fwww.example.in%2fstory%2f1&amp;c=1</link>' +
+      '<News:Source>Gujarat Samachar</News:Source></item></channel></rss>';
+    expect(parseRss(xml)).toEqual([
+      { title: 'वडोदरा में नया फ्लाईओवर खुला', url: 'https://www.example.in/story/1', source: 'Gujarat Samachar' },
+    ]);
+    expect(unwrapLink('https://bbc.com/x')).toBe('https://bbc.com/x');
+  });
+
+  it('tries BBC before Google for national news and Bing before Google for city news', () => {
+    const hi = STATION_BY_ID.hi!;
+    expect(nationalFeeds(hi).map((f) => f.url)).toEqual(['https://feeds.bbci.co.uk/hindi/rss.xml', hi.newsFeedUrl]);
+    expect(localFeeds(hi, 'Vadodara')[0].url).toBe('https://www.bing.com/news/search?q=Vadodara&format=rss&setlang=hi-IN&cc=IN');
   });
 });

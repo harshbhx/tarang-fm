@@ -1,11 +1,12 @@
 /** Listener context: Cloudflare geolocation plus news headlines. See docs/TECH-SPEC.md §10. */
 import { SourceSchema } from '../shared/schemas';
-import type { ContextResponse, Source, Station, Weather } from '../shared/types';
+import type { ContextResponse, Source, Station, StationId, Weather } from '../shared/types';
 
 const NEWS_TTL_S = 30 * 60;
 const NEWS_LIMIT = 4;
 const LOCAL_LIMIT = 2;
 const WEATHER_TTL_S = 15 * 60;
+const FEED_TIMEOUT_MS = 3000;
 
 /** Per-isolate cache; the Cache API is a no-op on workers.dev, so this keeps feeds warm there too. */
 const memory = new Map<string, { at: number; headlines: Source[] }>();
@@ -39,14 +40,24 @@ function tag(xml: string, name: string): string | undefined {
   return m ? decodeXml(m[1]) : undefined;
 }
 
+/** Bing News links go through a click tracker; keep the publisher's URL instead. */
+export function unwrapLink(link: string | undefined): string | undefined {
+  if (!link || !link.includes('bing.com/news/apiclick')) return link;
+  try {
+    return new URL(link).searchParams.get('url') ?? link;
+  } catch {
+    return link;
+  }
+}
+
 /** Parses Google News RSS items into sources, moving the " - Source" title suffix into `source`. */
-export function parseRss(xml: string, limit = NEWS_LIMIT): Source[] {
+export function parseRss(xml: string, limit = NEWS_LIMIT, defaultSource?: string): Source[] {
   const out: Source[] = [];
   const seen = new Set<string>();
   for (const [, item] of xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
     let title = tag(item, 'title');
-    const url = tag(item, 'link');
-    let source = tag(item, 'source');
+    const url = unwrapLink(tag(item, 'link'));
+    let source = tag(item, 'source') ?? tag(item, 'News:Source') ?? defaultSource;
     if (!title || !url) continue;
 
     if (source && title.endsWith(` - ${source}`)) {
@@ -70,23 +81,73 @@ export function parseRss(xml: string, limit = NEWS_LIMIT): Source[] {
   return out;
 }
 
-async function fetchFeed(url: string): Promise<Source[]> {
-  const res = await fetch(url, {
+interface Feed {
+  url: string;
+  source?: string;
+}
+
+async function fetchFeed(feed: Feed): Promise<Source[]> {
+  const res = await fetch(feed.url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TarangFM/1.0)', Accept: 'application/rss+xml, application/xml, text/xml' },
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`news feed ${res.status}`);
-  return parseRss(await res.text(), NEWS_LIMIT * 2);
+  const body = await res.text();
+  const items = parseRss(body, NEWS_LIMIT * 2, feed.source);
+  if (!items.length) console.warn(`[context] empty feed ${res.status} ${feed.url.slice(0, 100)}`);
+  return items;
+}
+
+/** First feed in the list that returns stories. Google News stalls from some edge locations, so each list has a fallback. */
+async function firstFeed(feeds: Feed[]): Promise<Source[]> {
+  for (const feed of feeds) {
+    try {
+      const items = await fetchFeed(feed);
+      if (items.length) return items;
+    } catch (err) {
+      console.error(`[context] ${feed.url.slice(0, 80)} failed: ${String(err)}`);
+    }
+  }
+  return [];
+}
+
+const BBC_SERVICE: Partial<Record<StationId, string>> = {
+  hi: 'hindi',
+  ta: 'tamil',
+  bn: 'bengali',
+  mr: 'marathi',
+  te: 'telugu',
+  gu: 'gujarati',
+  pa: 'punjabi',
+};
+
+function feedLanguage(station: Station): string {
+  return new URL(station.newsFeedUrl).searchParams.get('hl') ?? 'en';
 }
 
 /** Google News search feed for the listener's city, in the station language. */
 export function localFeedUrl(station: Station, city: string): string {
-  const hl = new URL(station.newsFeedUrl).searchParams.get('hl') ?? 'en';
+  const hl = feedLanguage(station);
   return `https://news.google.com/rss/search?q=${encodeURIComponent(city)}&hl=${hl}&gl=IN&ceid=IN:${hl}`;
 }
 
+/** National headlines: BBC's service in the station language, then Google News. */
+export function nationalFeeds(station: Station): Feed[] {
+  const bbc = BBC_SERVICE[station.id];
+  return [...(bbc ? [{ url: `https://feeds.bbci.co.uk/${bbc}/rss.xml`, source: 'BBC' }] : []), { url: station.newsFeedUrl }];
+}
+
+/** City headlines: Bing News search, then Google News search, in the station language. */
+export function localFeeds(station: Station, city: string): Feed[] {
+  const hl = feedLanguage(station);
+  return [
+    { url: `https://www.bing.com/news/search?q=${encodeURIComponent(city)}&format=rss&setlang=${hl}-IN&cc=IN` },
+    { url: localFeedUrl(station, city) },
+  ];
+}
+
 /** One feed, cached for 30 minutes (per isolate, plus the Cache API where it works). Never throws. */
-async function cachedFeed(key: string, url: string, origin: string, waitUntil?: (p: Promise<unknown>) => void): Promise<Source[]> {
+async function cachedFeed(key: string, feeds: Feed[], origin: string, waitUntil?: (p: Promise<unknown>) => void): Promise<Source[]> {
   const hit = memory.get(key);
   if (hit && Date.now() - hit.at < NEWS_TTL_S * 1000) return hit.headlines;
 
@@ -104,7 +165,7 @@ async function cachedFeed(key: string, url: string, origin: string, waitUntil?: 
   }
 
   try {
-    const headlines = await fetchFeed(url);
+    const headlines = await firstFeed(feeds);
     if (headlines.length) {
       memory.set(key, { at: Date.now(), headlines });
       if (cache) {
@@ -154,8 +215,8 @@ export async function getHeadlines(
 ): Promise<Source[]> {
   const place = city?.trim();
   const [national, local] = await Promise.all([
-    cachedFeed(station.id, station.newsFeedUrl, origin, waitUntil),
-    place ? cachedFeed(`${station.id}:${place.toLowerCase()}`, localFeedUrl(station, place), origin, waitUntil) : Promise.resolve([]),
+    cachedFeed(station.id, nationalFeeds(station), origin, waitUntil),
+    place ? cachedFeed(`${station.id}:${place.toLowerCase()}`, localFeeds(station, place), origin, waitUntil) : Promise.resolve([]),
   ]);
   return mixHeadlines(local, national);
 }
