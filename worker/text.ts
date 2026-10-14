@@ -108,6 +108,10 @@ export function splitLine(text: string, max = MAX_LINE_CHARS): string[] {
 export interface RawLine {
   role: Role;
   text: string;
+  /** Acting direction from the model (validated later) */
+  delivery?: string;
+  /** True for the second and later pieces of a line that was split for length */
+  continuation?: boolean;
 }
 
 /**
@@ -129,7 +133,7 @@ export function processLines(
     }
     const text = cleanText(line.text, language);
     if (!text) continue;
-    for (const chunk of splitLine(text)) out.push({ role, text: chunk });
+    splitLine(text).forEach((chunk, i) => out.push({ role, text: chunk, delivery: line.delivery, ...(i > 0 ? { continuation: true } : {}) }));
   }
   return out;
 }

@@ -27,6 +27,8 @@ export interface TtsBody {
   speaker: string;
   pace: number;
   temperature: number;
+  loudness?: number;
+  pitch?: number;
 }
 
 export interface TtsStream {
@@ -327,7 +329,31 @@ export function createSarvam(apiKey: string) {
     });
   }
 
-  return { ttsStream, transcribe, chatJson, translate };
+  /** Script conversion (e.g. a Latin listener name into Devanagari) via Sarvam Transliterate. */
+  async function transliterate(text: string, source: string, target: string, timeoutMs = 3000): Promise<string> {
+    const payload = JSON.stringify({ input: text.slice(0, 200), source_language_code: source, target_language_code: target });
+    const signal = AbortSignal.timeout(timeoutMs);
+    return withRetry(1, async () => {
+      let res: Response;
+      try {
+        res = await fetch(`${API}/transliterate`, {
+          method: 'POST',
+          headers: { ...auth, 'Content-Type': 'application/json' },
+          body: payload,
+          signal,
+        });
+      } catch (err) {
+        throw networkError('transliterate', err);
+      }
+      if (!res.ok) throw await upstreamError('transliterate', res);
+      const data = (await res.json()) as { transliterated_text?: string };
+      const out = data.transliterated_text?.trim();
+      if (!out) throw new SarvamError('empty transliteration', 502, 'empty_output');
+      return out;
+    });
+  }
+
+  return { ttsStream, transcribe, chatJson, translate, transliterate };
 }
 
 export type Sarvam = ReturnType<typeof createSarvam>;
