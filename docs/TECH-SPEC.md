@@ -323,6 +323,16 @@ It is followed by a **cast sheet** listing each allowed role with its grammatica
 ### 8.5 Fallbacks (`worker/fallbacks.ts`)
 Each station has 3 template RJ filler lines, for example "आप सुन रहे हैं तरंग FM… बने रहिए हमारे साथ!". They're used when a segment fails twice. News failure means news is skipped.
 
+### 8.6 What live testing changed (implemented in `worker/`)
+- **No limits inside the response schema.** With `maxLength`, `maxItems`, nested objects or nullable types in the `json_schema`, `sarvam-105b` sometimes looped on whitespace until it hit `max_tokens` (5 of 12 Kahani runs). The schema now only names fields, roles and types, and limits are enforced in post-processing. Result: 14/14 clean runs.
+- **Reasoning is off for every call** (`reasoning_effort: null`). With `"low"` the model spent the whole token budget reasoning and returned empty content, even at 6,000 tokens.
+- **Lower temperatures for coherence:** `rj_link` 0.7, `ad_break` 0.8, `kahani` 0.7, `news` 0.3.
+- **Listener names use a `{name}` placeholder** that the server fills in, because the model misspelled names when transliterating them (Harsh → हरश).
+- **STT `keyterms` dropped.** With them, a silent clip came back as a keyterm ("सनी").
+- **Brand-safe subtitles:** the Indic brand name is swapped to Latin "Tarang" before translation, because Translate rendered "तरंग FM" as "Waaree FM".
+- **Measured latency:** `station_id` about 50 ms, `rj_link` 2.6–4.3 s, `news` 2.1–4.0 s, `ad_break` 2.4–2.7 s, `kahani` 3.7–5.0 s, TTS TTFB 190–390 ms, call-in 1.7–2.5 s.
+- **Known gaps:** Tamil and Bangla Kahani and ads are less coherent than Hindi. Some English subtitles are clumsy. On `*.workers.dev` the Cache API does nothing, so news is cached per isolate in memory.
+
 ## 9. Show scheduler (`src/radio`)
 
 - **Clock:** `['station_id','rj_link','news','ad_break','kahani','rj_link','ad_break','kahani']`, looping from index 1 after the first pass.
