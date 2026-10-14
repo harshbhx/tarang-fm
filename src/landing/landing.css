@@ -1639,6 +1639,109 @@
   margin-top: 4px;
 }
 
+/* Studio phone line */
+
+.lp-hero-phone {
+  margin-top: 22px;
+}
+
+.lp-phone {
+  display: inline-flex;
+  max-width: 44ch;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px 12px 12px;
+  border: 1px solid var(--lp-line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, var(--lp-panel-2), var(--lp-panel));
+  color: var(--lp-fg);
+  text-decoration: none;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+
+.lp-phone-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 35%, #2a2826, #161514);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px var(--lp-line-2);
+  color: var(--lp-amber-hi);
+}
+
+.lp-phone-text {
+  display: grid;
+  gap: 2px;
+}
+
+.lp-phone-title {
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.lp-studio-number {
+  font-family: var(--lp-font-mono);
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--lp-amber-hi);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-phone-sub {
+  font-size: var(--lp-fs-sm);
+  line-height: 1.5;
+  color: var(--lp-fg-2);
+  text-wrap: pretty;
+}
+
+.lp-studio {
+  display: grid;
+  gap: 8px;
+  margin-top: 28px;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--lp-line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--lp-panel-2), var(--lp-panel));
+}
+
+.lp-studio .lp-h3 {
+  font-size: var(--lp-fs-md);
+}
+
+.lp-studio p {
+  font-size: var(--lp-fs-sm);
+  color: var(--lp-fg-2);
+  text-wrap: pretty;
+}
+
+.lp-studio-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-top: 8px;
+}
+
+.lp-studio-btn {
+  white-space: normal;
+}
+
+.lp-studio-btn svg {
+  flex-shrink: 0;
+  color: var(--lp-amber-hi);
+}
+
+@media (hover: hover) {
+  .lp-phone:hover {
+    border-color: rgb(255 240 220 / 0.24);
+    background: linear-gradient(180deg, #1b1a19, var(--lp-panel));
+  }
+}
+
 .lp-exchange {
   display: grid;
   gap: 12px;

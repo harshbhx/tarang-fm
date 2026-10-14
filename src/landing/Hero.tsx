@@ -5,7 +5,7 @@ import type { StationId } from '../../shared/types';
 import { STATION_COUNT_WORD, VOICE_COUNT, stationIdVoice } from './data';
 import RadioSet, { HERO_SAMPLE_PREFIX } from './RadioSet';
 import { TextSwap } from './TextSwap';
-import { PlayGlyph, TuneButton } from './ui';
+import { PlayGlyph, StudioCall, TuneButton } from './ui';
 import type { VoicePlayer } from './useVoicePlayer';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -76,6 +76,9 @@ export default function Hero({ onTuneIn, player }: { onTuneIn: (id: StationId) =
         <m.p className="lp-trust" {...rise(0.22)}>
           No install, no login. Starts on Hindi 91.1.
         </m.p>
+        <m.div className="lp-hero-phone" {...rise(0.28)}>
+          <StudioCall />
+        </m.div>
       </div>
       <m.div
         className="lp-hero-visual"

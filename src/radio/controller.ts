@@ -2,7 +2,17 @@
 import { CALL_MAX_SECONDS, LISTENER_NAME_MAX, PAUSE_AFTER_MS } from '../../shared/constants';
 import type { SegmentRequest } from '../../shared/schemas';
 import { getStation, STATION_BY_ID } from '../../shared/stations';
-import type { CallResponse, Line, Segment, Source, Station, StationId, Weather } from '../../shared/types';
+import type {
+  CallResponse,
+  Line,
+  PhoneCall,
+  PhoneRecentResponse,
+  Segment,
+  Source,
+  Station,
+  StationId,
+  Weather,
+} from '../../shared/types';
 import type { AudioEngine, Recorder } from '../audio/types';
 import * as defaultApi from './api';
 import { readAhead } from './api';
@@ -23,6 +33,8 @@ export interface RadioApi {
   getSegment: typeof defaultApi.getSegment;
   ttsFetch: typeof defaultApi.ttsFetch;
   postCall: typeof defaultApi.postCall;
+  /** Optional: without it the studio phone line is not polled */
+  getPhoneRecent?: typeof defaultApi.getPhoneRecent;
 }
 
 export interface RadioTimings {
@@ -41,6 +53,8 @@ export interface RadioTimings {
   stopFadeMs: number;
   callStopFadeMs: number;
   staticMs: number;
+  /** How often the studio phone line is polled while tuned in */
+  phonePollMs: number;
 }
 
 export const DEFAULT_TIMINGS: RadioTimings = {
@@ -53,6 +67,7 @@ export const DEFAULT_TIMINGS: RadioTimings = {
   stopFadeMs: 150,
   callStopFadeMs: 200,
   staticMs: 600,
+  phonePollMs: 45_000,
 };
 
 export interface RadioControllerOptions {
@@ -75,6 +90,13 @@ interface PendingSegment {
   controller: AbortController;
 }
 
+interface PhonePoll {
+  abort: AbortController;
+  timer: ReturnType<typeof setTimeout> | null;
+  /** Settles once the first poll of this run has finished (ok or not) */
+  first: Promise<void>;
+}
+
 interface PendingTts {
   key: string;
   promise: Promise<Response>;
@@ -89,7 +111,19 @@ const CALL_STATUSES: ReadonlySet<RadioStatus> = new Set<RadioStatus>([
 ]);
 const MAX_HISTORY = 6;
 const MAX_RECENT_CALLS = 3;
+/** Studio-line dedications read in one RJ link */
+const MAX_PHONE_CALLS_PER_LINK = 2;
+/** SegmentRequest.recentCalls limit */
+const MAX_REQUEST_CALLS = 5;
 const RECENT_CALL_CHARS = 300;
+/** While tuned in (a web call-in included), the studio phone line is polled. */
+const PHONE_STATUSES: ReadonlySet<RadioStatus> = new Set<RadioStatus>([
+  'tuning',
+  'playing',
+  'call_recording',
+  'call_thinking',
+  'call_on_air',
+]);
 const NOW_PLAYING_CHARS = 120;
 const MISSES_BEFORE_BACKOFF = 3;
 
@@ -180,6 +214,26 @@ function cleanHeadlines(list: Source[] | undefined): Source[] {
   return out;
 }
 
+function cleanPhone(res: PhoneRecentResponse | null | undefined): RadioState['phone'] | null {
+  if (!res || typeof res !== 'object') return null;
+  const calls: PhoneCall[] = [];
+  for (const c of Array.isArray(res.calls) ? res.calls : []) {
+    if (!c || typeof c.id !== 'string' || !c.id) continue;
+    if (typeof c.message !== 'string' || !c.message.trim()) continue;
+    if (typeof c.at !== 'string' || Number.isNaN(Date.parse(c.at))) continue;
+    calls.push(c);
+    if (calls.length === 6) break;
+  }
+  return { number: typeof res.number === 'string' ? res.number : '', calls };
+}
+
+/** 'Phone call from Priya in Vadodara: …', the form the RJ link reads out on air. */
+export function phoneCallLine(call: PhoneCall): string {
+  const name = call.name?.trim() || 'a listener';
+  const city = call.city?.trim();
+  return `Phone call from ${name}${city ? ` in ${city}` : ''}: ${call.message.trim()}`.slice(0, RECENT_CALL_CHARS);
+}
+
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof Error && err.name === 'NotAllowedError') return 'Microphone permission was denied.';
   if (err instanceof Error && err.name === 'NotFoundError') return 'No microphone found.';
@@ -213,6 +267,9 @@ export class RadioController implements RadioActions {
   private weather: Weather | undefined;
   private recentCalls: string[] = [];
   private localSegments = 0;
+  private phonePoll: PhonePoll | null = null;
+  /** Studio-line calls already given to an RJ link this session (each is read on air once) */
+  private readonly phoneRead = new Set<string>();
 
   private callResume: 'playing' | 'paused' = 'playing';
   private recStart: Promise<void> | null = null;
@@ -241,7 +298,9 @@ export class RadioController implements RadioActions {
   getSnapshot = (): RadioState => this.state;
 
   private set(patch: Partial<RadioState>): void {
+    const status = this.state.status;
     this.state = { ...this.state, ...patch };
+    if (this.state.status !== status) this.syncPhonePoll();
     for (const listener of [...this.subscribers]) listener();
   }
 
@@ -747,14 +806,22 @@ export class RadioController implements RadioActions {
         this.localSegments += 1;
         return stationIdSegment(getStation(station), this.localSegments);
       }
-      const req = await this.segmentRequest(entry, station);
+      const { req, phoneIds } = await this.segmentRequest(entry, station);
+      // A dedication that never makes it on air (failed, aborted or template segment) stays unread
+      const release = () => phoneIds.forEach((id) => this.phoneRead.delete(id));
       for (let attemptNo = 0; ; attemptNo++) {
-        if (signal.aborted) return null;
+        if (signal.aborted) {
+          release();
+          return null;
+        }
         try {
-          return await this.api.getSegment(req, signal);
+          const segment = await this.api.getSegment(req, signal);
+          if (segment.fallback) release();
+          return segment;
         } catch (err) {
           if (signal.aborted || attemptNo >= 1) {
             if (!signal.aborted) console.warn(`Segment ${entry.type} failed`, err);
+            release();
             return null;
           }
           await delay(this.timings.segmentRetryMs);
@@ -765,9 +832,11 @@ export class RadioController implements RadioActions {
     }
   }
 
-  private async segmentRequest(entry: ClockEntry, station: StationId): Promise<SegmentRequest> {
+  private async segmentRequest(entry: ClockEntry, station: StationId): Promise<{ req: SegmentRequest; phoneIds: string[] }> {
     const context = this.context ?? this.fetchContext(station);
-    await Promise.race([context, delay(this.timings.contextWaitMs)]);
+    // The first RJ link also waits for the first phone-line poll, so a waiting dedication makes it in
+    const phone = entry.type === 'rj_link' ? this.phonePoll?.first : undefined;
+    await Promise.race([Promise.all([context, phone]), delay(this.timings.contextWaitMs)]);
     const req: SegmentRequest = {
       station,
       type: entry.type,
@@ -777,8 +846,74 @@ export class RadioController implements RadioActions {
     if (entry.type === 'news') req.headlines = this.headlines;
     if (entry.type === 'rj_link' && this.weather) req.weather = this.weather;
     if (entry.type === 'kahani' && entry.theme) req.theme = entry.theme;
-    if (this.recentCalls.length) req.recentCalls = this.recentCalls.slice(-MAX_RECENT_CALLS);
-    return req;
+    const phoneCalls = entry.type === 'rj_link' ? this.takePhoneCalls() : [];
+    const recent = [...phoneCalls.map(phoneCallLine), ...this.recentCalls.slice(-MAX_RECENT_CALLS)];
+    if (recent.length) req.recentCalls = recent.slice(0, MAX_REQUEST_CALLS);
+    return { req, phoneIds: phoneCalls.map((c) => c.id) };
+  }
+
+  /** Up to two unread studio-line calls, newest first, marked read so each is dedicated on air once. */
+  private takePhoneCalls(): PhoneCall[] {
+    const calls = (this.state.phone?.calls ?? [])
+      .filter((c) => !this.phoneRead.has(c.id))
+      .slice(0, MAX_PHONE_CALLS_PER_LINK);
+    for (const c of calls) this.phoneRead.add(c.id);
+    return calls;
+  }
+
+  // ---- studio phone line -------------------------------------------------
+
+  /** Exactly one poller runs while tuned in; pause, idle and error stop it. */
+  private syncPhonePoll(): void {
+    const on = PHONE_STATUSES.has(this.state.status);
+    if (on && !this.phonePoll) this.startPhonePoll();
+    else if (!on && this.phonePoll) this.stopPhonePoll();
+  }
+
+  private startPhonePoll(): void {
+    if (!this.api.getPhoneRecent) return;
+    let settleFirst = noop;
+    const poll: PhonePoll = {
+      abort: new AbortController(),
+      timer: null,
+      first: new Promise<void>((resolve) => {
+        settleFirst = resolve;
+      }),
+    };
+    this.phonePoll = poll;
+    const tick = async (): Promise<void> => {
+      poll.timer = null;
+      try {
+        const res = await this.api.getPhoneRecent?.(poll.abort.signal);
+        if (this.phonePoll === poll) this.applyPhone(res);
+      } catch {
+        /* keep the last list; the next poll tries again */
+      }
+      settleFirst();
+      if (this.phonePoll !== poll) return;
+      poll.timer = setTimeout(() => void tick(), this.timings.phonePollMs);
+    };
+    void tick();
+  }
+
+  private stopPhonePoll(): void {
+    const poll = this.phonePoll;
+    if (!poll) return;
+    this.phonePoll = null;
+    if (poll.timer !== null) clearTimeout(poll.timer);
+    poll.abort.abort();
+  }
+
+  private applyPhone(res: PhoneRecentResponse | undefined): void {
+    const phone = cleanPhone(res);
+    if (!phone) return;
+    const prev = this.state.phone;
+    const same =
+      !!prev &&
+      prev.number === phone.number &&
+      prev.calls.length === phone.calls.length &&
+      prev.calls.every((c, i) => c.id === phone.calls[i].id && c.message === phone.calls[i].message);
+    if (!same) this.set({ phone });
   }
 
   // ---- call-in -----------------------------------------------------------

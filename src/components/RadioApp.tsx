@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { LazyMotion, MotionConfig, domAnimation } from 'motion/react';
-import { LISTENER_NAME_MAX } from '../../shared/constants';
+import { LISTENER_NAME_MAX, STUDIO_NUMBER, STUDIO_NUMBER_DISPLAY } from '../../shared/constants';
 import { STATIONS, getStation } from '../../shared/stations';
 import type { Station, StationId } from '../../shared/types';
 import type { RadioActions, RadioState } from '../radio/state';
@@ -13,6 +13,7 @@ import Footer from './Footer';
 import ProgrammeStrip from './ProgrammeStrip';
 import RadioDevice from './RadioDevice';
 import Sources from './Sources';
+import { StudioDockKey, StudioLinePanel } from './StudioLine';
 import Visualizer from './Visualizer';
 import { VoicesOnAir } from './Voices';
 import { SEGMENT_NAMES, boardLabel, castVoices, voiceName } from './format';
@@ -228,6 +229,10 @@ function TunePanel({
             You&rsquo;re offline. Connect to the internet to tune in.
           </p>
         )}
+        <p className="tune-studio">
+          Or call the studio from any phone:{' '}
+          <a href={`tel:${STUDIO_NUMBER}`}>{STUDIO_NUMBER_DISPLAY}</a>. RJ Sunny puts you on air.
+        </p>
       </form>
     </section>
   );
@@ -338,6 +343,7 @@ function Show({
         {segment?.type === 'news' && segment.sources?.length && !tuning ? (
           <Sources sources={segment.sources} lang={station.language} />
         ) : null}
+        <StudioLinePanel phone={state.phone} className="below-wide" />
       </div>
     </>
   );
@@ -402,6 +408,7 @@ function Dock({
             onCancel={() => actions.cancelCall()}
           />
         </div>
+        <StudioDockKey phone={state.phone} />
       </div>
     </section>
   );

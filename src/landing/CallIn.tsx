@@ -1,6 +1,6 @@
 import { CALL_EXAMPLE } from './data';
 import CallChain from './CallChain';
-import { PlayGlyph, SectionHead, SpeakerId, type Vars } from './ui';
+import { PlayGlyph, SectionHead, SpeakerId, STUDIO_LANGUAGES, StudioCall, type Vars } from './ui';
 import type { VoicePlayer } from './useVoicePlayer';
 
 const REPLY_ID = 'call-reply';
@@ -24,6 +24,17 @@ export default function CallIn({ player }: { player: VoicePlayer }) {
             Hold the button, speak in your language, let go. The RJ answers you on air in about two seconds.
           </SectionHead>
           <CallChain />
+          <div className="lp-studio">
+            <h3 className="lp-h3">Or call the studio from any phone</h3>
+            <p>
+              A real phone line. RJ Sunny picks up and chats with you in {STUDIO_LANGUAGES}. Leave a dedication or
+              ask for a story or the headlines, and the RJ reads your message on the live show.
+            </p>
+            <div className="lp-studio-row">
+              <StudioCall variant="button" />
+              <SpeakerId id="Sarvam Voice Agents" />
+            </div>
+          </div>
         </div>
 
         <div className="lp-exchange" style={{ '--st': station.accent } as Vars}>

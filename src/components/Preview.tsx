@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { STUDIO_NUMBER } from '../../shared/constants';
 import { getStation } from '../../shared/stations';
-import type { Role, SegmentType, Source, StationId } from '../../shared/types';
+import type { PhoneCall, Role, SegmentType, Source, StationId } from '../../shared/types';
 import { INITIAL_STATE, type Caption, type RadioActions, type RadioState } from '../radio/state';
 import RadioApp from './RadioApp';
 
@@ -18,6 +19,17 @@ interface ScriptLine {
 }
 
 const listener = { name: 'Priya', city: 'Pune' };
+
+const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+
+/** Studio-line calls as /api/phone/recent returns them (numbers masked), newest first. */
+function mockPhoneCalls(): PhoneCall[] {
+  return [
+    { id: 'mock-3', at: minutesAgo(2), name: 'Priya', city: 'Vadodara', maskedNumber: '+91 ••••• 4148', type: 'dedication', message: 'मम्मी को जन्मदिन की ढेर सारी शुभकामनाएँ!' },
+    { id: 'mock-2', at: minutesAgo(14), name: 'Karthik', city: 'Chennai', maskedNumber: '+91 ••••• 9032', type: 'story_request', message: 'கடற்கரையில் ஒரு மர்மக் கதை சொல்லுங்க!', theme: 'a mystery on the beach' },
+    { id: 'mock-1', at: minutesAgo(95), city: 'Kolkata', maskedNumber: '+91 ••••• 2271', type: 'chat', message: 'সবাইকে শুভ সন্ধ্যা, গানটা দারুণ ছিল!' },
+  ];
+}
 
 const taSources: Source[] = [
   { title: 'சென்னையில் இன்று இரவு கனமழைக்கு வாய்ப்பு', url: 'https://news.google.com/?mock=1', source: 'Sample source' },
@@ -92,6 +104,7 @@ function liveState(stationId: LiveId, index: number): RadioState {
     caption: current.caption,
     ttfaMs: current.ttfa,
     upNext,
+    phone: { number: STUDIO_NUMBER, calls: mockPhoneCalls() },
   };
 }
 
@@ -105,6 +118,7 @@ type MockKey =
   | 'tuning'
   | LiveId
   | 'paused'
+  | 'linesopen'
   | 'weak'
   | 'recording'
   | 'thinking'
@@ -122,6 +136,7 @@ const MOCK_LABELS: { key: MockKey; label: string }[] = [
   { key: 'bn', label: 'Bangla ad' },
   { key: 'gu', label: 'Gujarati ad' },
   { key: 'paused', label: 'Paused' },
+  { key: 'linesopen', label: 'No phone calls' },
   { key: 'weak', label: 'Weak signal' },
   { key: 'recording', label: 'Call recording' },
   { key: 'thinking', label: 'Call ringing' },
@@ -132,7 +147,7 @@ const MOCK_LABELS: { key: MockKey; label: string }[] = [
 ];
 
 /** States in which the fake analyser "speaks" */
-const SPEAKING_KEYS: MockKey[] = [...LIVE_IDS, 'weak', 'onair', 'callerror', 'offline'];
+const SPEAKING_KEYS: MockKey[] = [...LIVE_IDS, 'linesopen', 'weak', 'onair', 'callerror', 'offline'];
 
 function buildState(key: MockKey, station: LiveId, index: number): RadioState {
   const live = liveState(station, index);
@@ -143,6 +158,8 @@ function buildState(key: MockKey, station: LiveId, index: number): RadioState {
       return { ...INITIAL_STATE, status: 'tuning', stationId: station, listener };
     case 'paused':
       return { ...live, status: 'paused' };
+    case 'linesopen':
+      return { ...live, phone: { number: STUDIO_NUMBER, calls: [] } };
     case 'weak':
       return { ...live, error: 'Weak signal. Retrying…' };
     case 'offline':

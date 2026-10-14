@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CallMeta, SegmentRequest } from '../../shared/schemas';
 import { getStation } from '../../shared/stations';
-import type { CallResponse, Line, Segment, StationId } from '../../shared/types';
+import type { CallResponse, Line, PhoneCall, PhoneRecentResponse, Segment, StationId } from '../../shared/types';
 import type { AudioEngine, PlayResult, Recorder } from '../audio/types';
-import { RadioController, type RadioApi } from './controller';
+import { RadioController, phoneCallLine, type RadioApi } from './controller';
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const abortError = () => new DOMException('Aborted', 'AbortError');
@@ -131,8 +131,21 @@ function harness() {
     reply: rjLine('hi', 'reply-text'),
   };
   let n = 0;
+  const phone = { calls: [] as PhoneCall[], polls: 0, inFlight: 0, maxInFlight: 0 };
 
   const api: RadioApi = {
+    getPhoneRecent: async (signal?: AbortSignal): Promise<PhoneRecentResponse> => {
+      phone.polls += 1;
+      phone.inFlight += 1;
+      phone.maxInFlight = Math.max(phone.maxInFlight, phone.inFlight);
+      try {
+        await delay(1);
+        if (signal?.aborted) throw abortError();
+        return { number: '+917965854148', calls: [...phone.calls] };
+      } finally {
+        phone.inFlight -= 1;
+      }
+    },
     getContext: async () => ({ city: 'Jammu', headlines: [{ title: 'Headline', url: 'https://example.com/1' }] }),
     getSegment: async (req: SegmentRequest, signal?: AbortSignal): Promise<Segment> => {
       requests.push(req);
@@ -179,10 +192,12 @@ function harness() {
       minCallMs: 10,
       callLingerMs: 30,
       staticMs: 1,
+      phonePollMs: 20,
     },
   });
   return {
     c,
+    phone,
     engine,
     recorder,
     requests,
@@ -535,5 +550,101 @@ describe('RadioController settings', () => {
     expect(calls).toBe(1);
     expect(h.c.getSnapshot()).not.toBe(before);
     expect(before.showSubtitles).toBe(true);
+  });
+});
+
+function phoneCall(id: string, patch: Partial<PhoneCall> = {}): PhoneCall {
+  return {
+    id,
+    at: new Date().toISOString(),
+    name: 'Priya',
+    city: 'Vadodara',
+    maskedNumber: '+91 ••••• 4148',
+    type: 'dedication',
+    message: 'मम्मी को जन्मदिन की ढेर सारी शुभकामनाएँ!',
+    ...patch,
+  };
+}
+
+const rjLinks = (h: ReturnType<typeof harness>) => h.requests.filter((r) => r.type === 'rj_link');
+
+describe('RadioController studio phone line', () => {
+  it('formats a call for the RJ link without the number', () => {
+    expect(phoneCallLine(phoneCall('a'))).toBe('Phone call from Priya in Vadodara: मम्मी को जन्मदिन की ढेर सारी शुभकामनाएँ!');
+    expect(phoneCallLine(phoneCall('b', { name: undefined, city: undefined, message: 'Hello' }))).toBe(
+      'Phone call from a listener: Hello',
+    );
+    expect(phoneCallLine(phoneCall('c', { message: 'x'.repeat(400) })).length).toBe(300);
+  });
+
+  it('polls only while tuned in, with a single poller across station switches', async () => {
+    const h = setup();
+    h.phone.calls = [phoneCall('call-1')];
+    expect(h.phone.polls).toBe(0);
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.c.getSnapshot().phone?.calls.map((c) => c.id)).toEqual(['call-1']));
+    expect(h.c.getSnapshot().phone?.number).toBe('+917965854148');
+
+    await waitFor(() => expect(h.phone.polls).toBeGreaterThanOrEqual(3));
+    h.c.setStation('ta');
+    h.c.setStation('bn');
+    const before = h.phone.polls;
+    await delay(150);
+    // ~20 ms apart: at most ~7 polls in 150 ms (two pollers would make ~14), and polling never stops
+    expect(h.phone.polls - before).toBeGreaterThanOrEqual(1);
+    expect(h.phone.polls - before).toBeLessThanOrEqual(9);
+    expect(h.phone.maxInFlight).toBe(1);
+
+    h.c.pause();
+    await waitFor(() => expect(h.c.getSnapshot().status).toBe('paused'));
+    const paused = h.phone.polls;
+    await delay(80);
+    expect(h.phone.polls).toBe(paused);
+    expect(h.c.getSnapshot().phone?.calls).toHaveLength(1);
+
+    h.c.resume();
+    await waitFor(() => expect(h.phone.polls).toBeGreaterThan(paused));
+    expect(h.phone.maxInFlight).toBe(1);
+  });
+
+  it('reads each phone dedication in one RJ link only, alongside web call-ins', async () => {
+    const h = setup();
+    h.phone.calls = [
+      phoneCall('call-3', { name: 'Arjun', city: 'Pune', message: 'Play something for my team' }),
+      phoneCall('call-2', { name: undefined, city: 'Surat', message: 'Hello Sunny' }),
+      phoneCall('call-1'),
+    ];
+    await h.c.tuneIn();
+    await waitFor(() => expect(rjLinks(h).length).toBeGreaterThanOrEqual(2));
+
+    const [first, second] = rjLinks(h);
+    expect(first.recentCalls).toEqual([
+      'Phone call from Arjun in Pune: Play something for my team',
+      'Phone call from a listener in Surat: Hello Sunny',
+    ]);
+    expect(second.recentCalls).toEqual(['Phone call from Priya in Vadodara: मम्मी को जन्मदिन की ढेर सारी शुभकामनाएँ!']);
+    expect(h.requests.filter((r) => r.type !== 'rj_link').every((r) => !r.recentCalls)).toBe(true);
+
+    // A new call arrives between polls: the next RJ link reads it, and nothing is read twice
+    h.phone.calls = [phoneCall('call-4', { name: 'Meena', city: 'Indore', message: 'Hi!' }), ...h.phone.calls];
+    await waitFor(() => expect(rjLinks(h).length).toBeGreaterThanOrEqual(4));
+    const later = rjLinks(h).slice(2).map((r) => r.recentCalls ?? []);
+    expect(later[0]).toEqual(['Phone call from Meena in Indore: Hi!']);
+    expect(later[1]).toEqual([]);
+  });
+
+  it('keeps a dedication unread when its RJ link fails', async () => {
+    const h = setup();
+    h.phone.calls = [phoneCall('call-1')];
+    h.failSegment.add('rj_link');
+    await h.c.tuneIn();
+    // The first RJ link (and its retry) failed, so the show skipped to the news
+    await waitFor(() => expect(h.engine.played).toContain('hi:news:0'));
+    expect(h.engine.played).not.toContain('hi:rj_link:0');
+    h.failSegment.delete('rj_link');
+    await waitFor(() => expect(h.engine.played).toContain('hi:rj_link:0'));
+    const lines = rjLinks(h).map((r) => r.recentCalls?.[0]);
+    expect(lines.length).toBeGreaterThanOrEqual(3);
+    expect(lines.every((l) => l?.startsWith('Phone call from Priya'))).toBe(true);
   });
 });

@@ -1,6 +1,15 @@
 /** Typed client for the Worker API (docs/TECH-SPEC.md §5). */
 import type { CallMeta, SegmentRequest, TtsRequest } from '../../shared/schemas';
-import type { ApiError, CallResponse, ContextResponse, Line, Segment, StationId } from '../../shared/types';
+import { STUDIO_NUMBER } from '../../shared/constants';
+import type {
+  ApiError,
+  CallResponse,
+  ContextResponse,
+  Line,
+  PhoneRecentResponse,
+  Segment,
+  StationId,
+} from '../../shared/types';
 
 export class ApiRequestError extends Error {
   readonly code: string;
@@ -58,6 +67,15 @@ export async function getSegment(req: SegmentRequest, signal?: AbortSignal): Pro
     throw new ApiRequestError('Malformed segment response', 'bad_response', 200);
   }
   return segment;
+}
+
+/** Recent calls to the studio phone line (numbers arrive masked). */
+export async function getPhoneRecent(signal?: AbortSignal): Promise<PhoneRecentResponse> {
+  const res = await json<Partial<PhoneRecentResponse> | null>('/api/phone/recent', { signal });
+  return {
+    number: typeof res?.number === 'string' && res.number ? res.number : STUDIO_NUMBER,
+    calls: Array.isArray(res?.calls) ? res.calls : [],
+  };
 }
 
 /** Starts a streamed TTS request. The body is raw PCM (or WAV) for AudioEngine.playStream. */

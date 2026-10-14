@@ -1,5 +1,5 @@
 /** Radio UI state contract (docs/TECH-SPEC.md §9). Produced by src/radio, rendered by src/components. */
-import type { Role, SegmentType, Source, StationId } from '../../shared/types';
+import type { PhoneCall, Role, SegmentType, Source, StationId } from '../../shared/types';
 
 export type RadioStatus =
   | 'idle'
@@ -54,6 +54,8 @@ export interface RadioState {
   ttfaMs?: number;
   upNext?: SegmentType;
   error?: string;
+  /** The studio phone line: its number and recent on-air calls, newest first (polled while tuned in) */
+  phone?: { number: string; calls: PhoneCall[] };
 }
 
 export interface RadioActions {

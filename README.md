@@ -29,6 +29,14 @@ Every segment of a real radio station has its own vocal style: the newsreader, t
 
 **Stations:** Hindi (91.1), Tamil (98.3) and Bangla (102.7), each cast with native v4 voices: 16 distinct personas across the dial. Captions show the native script with an English subtitle underneath, so anyone can follow any station.
 
+## Call the studio
+
+**📞 +91 79658 54148** is a real phone line into the show. Call it from any phone, no app or internet needed.
+
+- **RJ Sunny picks up** and chats with you in Hindi, Marathi, Gujarati, Tamil, Bangla or English. Leave a dedication, ask for a story or ask what's in the news (the RJ reads you live headlines).
+- **Your message goes on air.** When you hang up, the next RJ link on the web show reads your dedication out by first name and city ("and we just got a call on the studio line from Priya in Vadodara…"). The radio also lists recent calls under **From the studio line**.
+- **How it works:** the line runs on [Sarvam Voice Agents](https://docs.sarvam.ai) with the Bulbul v4 Sunny voice. When a call ends, Sarvam posts a call-end webhook to the Worker (`/api/phone/call-end`, token-protected), which keeps the on-air message in Cloudflare KV with the caller's number masked (`+91 ••••• 4148`). Listeners' radios poll `/api/phone/recent` and hand each new call to the RJ exactly once.
+
 ## How it uses Sarvam
 
 | Model / API | Job in Tarang FM |
@@ -37,6 +45,7 @@ Every segment of a real radio station has its own vocal style: the newsreader, t
 | **Sarvam-105B**, structured outputs (`json_schema`) | Writes every script (RJ links, news, ads, dramas) in the station's language with a per-role cast sheet, and understands call-ins (intent + on-air reply) |
 | **Saaras v4** speech-to-text | Transcribes callers (`codemix` for Hinglish, `transcribe` for Tamil and Bangla) |
 | **Sarvam Translate** (`mayura:v1`) | English subtitles under every caption |
+| **Sarvam Voice Agents** | The studio phone line: RJ Sunny (Bulbul v4) answers calls on +91 79658 54148, with a headlines tool and a call-end webhook |
 
 ## Architecture
 
