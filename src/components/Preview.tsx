@@ -25,7 +25,9 @@ const taSources: Source[] = [
   { title: 'கோவையில் புதிய தொழில்நுட்பப் பூங்கா திறப்பு', url: 'https://news.google.com/?mock=3', source: 'Sample source' },
 ];
 
-const SCRIPTS: Record<'hi' | 'ta' | 'bn', ScriptLine[]> = {
+type LiveId = 'hi' | 'mr' | 'ta' | 'bn' | 'gu';
+
+const SCRIPTS: Record<LiveId, ScriptLine[]> = {
   hi: [
     { type: 'station_id', title: 'Tarang FM 91.1', ttfa: 262, caption: line('hi', 'station_id', 'आप सुन रहे हैं तरंग FM 91.1… दिल से सुनिए, दिल की बात!', "You're listening to Tarang FM 91.1… listen with your heart!") },
     { type: 'rj_link', title: 'शाम की बातें', ttfa: 298, caption: line('hi', 'rj', 'नमस्ते प्रिया! पुणे की इस भीगी शाम में, आपके लिए एक हल्की-सी डरावनी कहानी।', 'Hello Priya! On this rainy Pune evening, a slightly spooky story just for you.') },
@@ -51,9 +53,22 @@ const SCRIPTS: Record<'hi' | 'ta' | 'bn', ScriptLine[]> = {
     { type: 'kahani', title: 'নদীর ধারের বাড়ি', ttfa: 290, caption: line('bn', 'narrator', 'সেই রাতে নদীর ধারের পুরনো বাড়ি থেকে হঠাৎ রেডিওর আওয়াজ ভেসে এল।', 'That night, the sound of a radio suddenly drifted from the old house by the river.') },
     { type: 'kahani', title: 'নদীর ধারের বাড়ি', ttfa: 302, caption: line('bn', 'char_a', 'দরজা খুলো না… আজ রাতে আর কেউও শুনছে।', "Don't open the door… someone else is listening tonight.") },
   ],
+  mr: [
+    { type: 'station_id', title: 'Tarang FM 94.3', ttfa: 258, caption: line('mr', 'station_id', getStation('mr').stationIdText, getStation('mr').stationIdEn) },
+    { type: 'rj_link', title: 'संध्याकाळच्या गप्पा', ttfa: 287, caption: line('mr', 'rj', 'नमस्कार प्रिया! पुण्याच्या या पावसाळी संध्याकाळी, तुमच्यासाठी एक छोटीशी गोष्ट।', 'Hello Priya! On this rainy Pune evening, a little story just for you.') },
+    { type: 'kahani', title: 'वाड्यातला रेडिओ', ttfa: 266, caption: line('mr', 'narrator', 'त्या रात्री जुन्या वाड्यातून अचानक रेडिओचा आवाज येऊ लागला।', 'That night, the sound of a radio suddenly came from the old mansion.') },
+  ],
+  gu: [
+    { type: 'station_id', title: 'Tarang FM 106.1', ttfa: 249, caption: line('gu', 'station_id', getStation('gu').stationIdText, getStation('gu').stationIdEn) },
+    { type: 'ad_break', title: 'સપનાંવાળું ગાદલું', ttfa: 236, caption: line('gu', 'ad_announcer', 'આવી ગયું નવું ‘સપનાંવાળું ગાદલું’! સૂતાંની સાથે જ ઊંઘ, મીટિંગમાં પણ!', "Here's the new 'Dream Mattress'! Asleep the moment you lie down, even in meetings!") },
+    { type: 'ad_break', title: 'સપનાંવાળું ગાદલું', ttfa: 259, caption: line('gu', 'ad_customer', 'સાચે? તો બોસને કહીશ, ગાદલાએ સુવડાવી દીધી!', "Really? Then I'll tell my boss the mattress put me to sleep!") },
+  ],
 };
 
-function liveState(stationId: 'hi' | 'ta' | 'bn', index: number): RadioState {
+const LIVE_IDS = Object.keys(SCRIPTS) as LiveId[];
+const isLiveId = (id: string): id is LiveId => (LIVE_IDS as string[]).includes(id);
+
+function liveState(stationId: LiveId, index: number): RadioState {
   const script = SCRIPTS[stationId];
   const at = (i: number) => script[((i % script.length) + script.length) % script.length];
   const current = at(index);
@@ -85,36 +100,53 @@ const callTranscriptEn = "Hi Sunny! It's Priya, calling from Pune. It's my mom's
 const callReply = 'अरे वाह प्रिया! पुणे से ढेर सारा प्यार। मम्मी जी, जन्मदिन बहुत-बहुत मुबारक हो, अगली कहानी आपके नाम!';
 const callReplyEn = 'Wow, Priya! Lots of love from Pune. Happy birthday, Mom, the next story is for you!';
 
-type MockKey = 'idle' | 'tuning' | 'hi' | 'ta' | 'bn' | 'paused' | 'recording' | 'thinking' | 'onair' | 'error';
+type MockKey =
+  | 'idle'
+  | 'tuning'
+  | LiveId
+  | 'paused'
+  | 'weak'
+  | 'recording'
+  | 'thinking'
+  | 'onair'
+  | 'callerror'
+  | 'offline'
+  | 'error';
 
 const MOCK_LABELS: { key: MockKey; label: string }[] = [
   { key: 'idle', label: 'Idle' },
   { key: 'tuning', label: 'Tuning' },
-  { key: 'hi', label: 'Hindi show' },
+  { key: 'hi', label: 'Hindi Kahani' },
+  { key: 'mr', label: 'Marathi RJ' },
   { key: 'ta', label: 'Tamil news' },
   { key: 'bn', label: 'Bangla ad' },
+  { key: 'gu', label: 'Gujarati ad' },
   { key: 'paused', label: 'Paused' },
+  { key: 'weak', label: 'Weak signal' },
   { key: 'recording', label: 'Call recording' },
-  { key: 'thinking', label: 'Call thinking' },
+  { key: 'thinking', label: 'Call ringing' },
   { key: 'onair', label: 'Call on air' },
-  { key: 'error', label: 'Error' },
+  { key: 'callerror', label: 'Mic blocked' },
+  { key: 'offline', label: 'Offline' },
+  { key: 'error', label: 'Signal lost' },
 ];
 
-const LIVE_KEYS: MockKey[] = ['hi', 'ta', 'bn'];
+/** States in which the fake analyser "speaks" */
+const SPEAKING_KEYS: MockKey[] = [...LIVE_IDS, 'weak', 'onair', 'callerror', 'offline'];
 
-function buildState(key: MockKey, station: 'hi' | 'ta' | 'bn', index: number): RadioState {
+function buildState(key: MockKey, station: LiveId, index: number): RadioState {
   const live = liveState(station, index);
   switch (key) {
     case 'idle':
       return { ...INITIAL_STATE, stationId: station };
     case 'tuning':
       return { ...INITIAL_STATE, status: 'tuning', stationId: station, listener };
-    case 'hi':
-    case 'ta':
-    case 'bn':
-      return live;
     case 'paused':
       return { ...live, status: 'paused' };
+    case 'weak':
+      return { ...live, error: 'Weak signal. Retrying…' };
+    case 'offline':
+      return live;
     case 'recording':
       return { ...liveState('hi', 5), status: 'call_recording', call: {} };
     case 'thinking':
@@ -127,8 +159,12 @@ function buildState(key: MockKey, station: 'hi' | 'ta' | 'bn', index: number): R
         caption: line('hi', 'rj', callReply, callReplyEn),
         ttfaMs: 356,
       };
+    case 'callerror':
+      return { ...live, call: { error: 'Could not open the microphone.' } };
     case 'error':
       return { ...live, status: 'error', error: 'Could not load the next segment (network error).' };
+    default:
+      return live;
   }
 }
 
@@ -154,7 +190,7 @@ function fakeAnalyser(isSpeaking: () => boolean): AnalyserNode {
 /** Design review harness: RadioApp driven by mock states and a fake analyser, no audio or network. */
 export default function Preview() {
   const [key, setKey] = useState<MockKey>('hi');
-  const [station, setStation] = useState<'hi' | 'ta' | 'bn'>('hi');
+  const [station, setStation] = useState<LiveId>('hi');
   const [index, setIndex] = useState(3);
   const [autoplay, setAutoplay] = useState(true);
   const [showSubtitles, setShowSubtitles] = useState(true);
@@ -168,7 +204,7 @@ export default function Preview() {
   });
 
   useEffect(() => {
-    if (!autoplay || !LIVE_KEYS.includes(key)) return;
+    if (!autoplay || !(isLiveId(key) || key === 'weak' || key === 'offline')) return;
     const timer = window.setInterval(() => setIndex((i) => i + 1), 4200);
     return () => window.clearInterval(timer);
   }, [autoplay, key]);
@@ -181,7 +217,7 @@ export default function Preview() {
     const later = (ms: number, fn: () => void) => {
       timers.current.push(window.setTimeout(fn, ms));
     };
-    const goLive = (id: 'hi' | 'ta' | 'bn') => {
+    const goLive = (id: LiveId) => {
       setStation(id);
       setKey('tuning');
       later(1600, () => {
@@ -194,7 +230,7 @@ export default function Preview() {
       pause: () => setKey('paused'),
       resume: () => setKey(stationRef.current),
       setStation: (id) => {
-        const next = id === 'ta' || id === 'bn' ? id : 'hi';
+        const next: LiveId = isLiveId(id) ? id : 'hi';
         if (keyRef.current === 'idle') setStation(next);
         else goLive(next);
       },
@@ -215,14 +251,14 @@ export default function Preview() {
   }, []);
 
   const analyser = useMemo(
-    () => fakeAnalyser(() => LIVE_KEYS.includes(keyRef.current) || keyRef.current === 'onair'),
+    () => fakeAnalyser(() => SPEAKING_KEYS.includes(keyRef.current)),
     [],
   );
   const reviewActions = useMemo<RadioActions>(() => ({ ...actions, getAnalyser: () => analyser }), [actions, analyser]);
 
   return (
     <>
-      <nav aria-label="Preview states" className="border-line border-b bg-black">
+      <nav aria-label="Preview states" className="border-line relative z-50 border-b bg-black">
         <div className="mx-auto flex max-w-5xl items-center gap-2 overflow-x-auto px-4 py-2 sm:px-6">
           <span className="text-fg-3 shrink-0 pr-1 font-mono text-xs">UI preview</span>
           {MOCK_LABELS.map((mock) => (
@@ -232,7 +268,7 @@ export default function Preview() {
               className="pill"
               aria-pressed={mock.key === key}
               onClick={() => {
-                if (mock.key === 'hi' || mock.key === 'ta' || mock.key === 'bn') setStation(mock.key);
+                if (isLiveId(mock.key)) setStation(mock.key);
                 setKey(mock.key);
               }}
             >
@@ -244,7 +280,7 @@ export default function Preview() {
           </button>
         </div>
       </nav>
-      <RadioApp state={state} actions={reviewActions} />
+      <RadioApp state={state} actions={reviewActions} previewOffline={key === 'offline'} />
     </>
   );
 }
