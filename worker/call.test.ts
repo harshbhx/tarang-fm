@@ -16,7 +16,7 @@ function fakeSarvam(transcript: string) {
   let translations = 0;
   const sarvam = {
     transcribe: async () => ({ transcript, languageCode: 'hi-IN' }),
-    transliterate: async (t: string) => (t === 'Priya' ? 'प्रिया' : t),
+    transliterate: async (t: string) => t.replace(/Priya/g, 'प्रिया'),
     chatJson: async () => ({
       intent: 'story_request',
       lines: [{ text: 'अरे वाह {name}! आपकी भूतिया कहानी अभी आ रही है।', delivery: 'excited' }],

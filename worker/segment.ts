@@ -87,7 +87,10 @@ export async function nativeListenerName(sarvam: Sarvam, name: string | undefine
   const hit = nameCache.get(key);
   if (hit) return hit;
   try {
-    const out = await sarvam.transliterate(who, 'en-IN', language);
+    // A bare name loses its final vowel ("Priya" → "प्रिय", "Rahul" → "राहु"); inside a sentence it comes out right.
+    const words = who.split(/\s+/).length;
+    const tail = (await sarvam.transliterate(`My name is ${who}`, 'en-IN', language)).split(/\s+/).slice(-words);
+    const out = tail.length === words && tail.every(Boolean) ? tail.join(' ') : await sarvam.transliterate(who, 'en-IN', language);
     if (nameCache.size < 500) nameCache.set(key, out);
     return out;
   } catch {

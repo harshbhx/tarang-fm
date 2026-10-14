@@ -69,7 +69,7 @@ describe('studio calls in an RJ link', () => {
         return { title: 'शाम की बात', mood: 'light', summary_en: 'RJ link', lines: [{ role: 'rj', text: 'नमस्ते दोस्तों!' }, { role: 'rj', text: 'आगे सुनिए खबरें।' }] };
       },
       translate: async (t: string) => `EN ${t}`,
-      transliterate: async (t: string) => (t === 'Priya' ? 'प्रिया' : t === 'Vadodara' ? 'वडोदरा' : t),
+      transliterate: async (t: string) => t.replace(/Priya/g, 'प्रिया').replace(/Vadodara/g, 'वडोदरा'),
     } as unknown as Sarvam;
     const req: SegmentRequest = {
       station: 'hi',
