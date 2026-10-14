@@ -263,6 +263,23 @@ flowchart LR
   Q -->|passes| OUT["10–14 line radio play"]
 ```
 
+Each brief also picks **how the story opens** (cold open, one image, a question, an overheard scene, a note read aloud, or the ending first) and **how it lands** (a character's last line, a callback, a quiet image, a button joke, an open door). The title is woven in, never announced, and the RJ's hand-over into the story uses a different style each time. `castStory()` then casts it from the station's `storyPool` of verified voices, with a suspense narrator for ghost stories and night mysteries.
+
+### Show memory: nothing repeats across listeners
+
+```mermaid
+flowchart LR
+  REQ["/api/segment<br/>kahani or ad"] --> READ["memory.recentStories / recentAds<br/>KV show:{station}:*, cached 60 s"]
+  READ --> PLAN["planSegment()<br/>brief avoids recent places, hooks,<br/>twists, openings, ad categories, formats"]
+  PLAN --> LLM["Sarvam-105B<br/>prompt lists what already aired"]
+  LLM --> Q{"title already aired?"}
+  Q -->|yes| LLM
+  Q -->|no| SEG["Segment"]
+  SEG --> WRITE["memory.remember…()<br/>waitUntil, keeps last 40 / 30"]
+```
+
+The memory lives in the `PHONE` KV namespace under `show:` keys, one rolling list per station and kind, expiring after 30 days of silence. Reads time out after 400 ms and failures are ignored, so a slow KV never delays the show. Template fallbacks are never remembered.
+
 Ads draw a category and one of 8 formats (infomercial, breaking-news parody, helpline call, movie trailer, balcony gossip, cricket commentary, sad-violin, jingle), and RJ links can use one of several on-air devices (a listener poll, a mock traffic report for the kitchen…), so no two breaks share a shape.
 
 ## 7. How a line gets acted
