@@ -1,0 +1,57 @@
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.pem
+*.key
+
+# --- Node ---
+node_modules/
+dist/
+build/
+.next/
+out/
+.vercel/
+.netlify/
+.wrangler/
+.turbo/
+.cache/
+.parcel-cache/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tsbuildinfo
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- Generated audio / scratch ---
+*.wav
+*.mp3
+!public/**/*.wav
+!public/**/*.mp3
+tmp/
+scratch/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.log
