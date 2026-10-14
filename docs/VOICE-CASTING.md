@@ -150,6 +150,18 @@ Station ID: "तुम्ही ऐकत आहात तरंग FM 94.3!" ·
 Station ID: "તમે સાંભળી રહ્યા છો તરંગ FM 106.1… દિલથી સાંભળો, દિલની વાત!" · STT `transcribe` · feed `hl=gu` (BBC Gujarati first)
 Roster has 3 voices: `bhavik_gu_conversation` (M) does the station ID, ads and char_a; `pooja_gu_conversational` (F) does the RJ, ad customer and char_b; `pooja_gu_customer` (F) does news, narrator and the kid.
 
+## Story pools
+
+Every Kahani is cast fresh from its station's `storyPool` (`shared/stations.ts`): a narrator (a suspense voice for ghost stories and night mysteries), two characters of any gender mix, and a kid, with no voice playing two parts. All pool voices are in the `/api/tts` allowlist.
+
+| Station | Narrators | Suspense narrators | Men | Women | Kids |
+|---|---|---|---|---|---|
+| Hindi | `shubh_hi_stories_dramatic`, `shubh_hi_stories_mixed`, `sanchita_hi_romantic`, `ritu_hi_social_lively` | `ratan_hi_latenight_warm`, `shubh_hi_stories_dramatic`, `mukul_hi_suspense` | `mukul_hi_suspense`, `anand_hi_news`, `sunny_hi_reels`, `mukul_hi_ads`, `ratan_hi_latenight_warm` | `sanchita_hi_romantic`, `ritu_hi_ads_informal`, `simran_hi_social_excited`, `ritu_hi_social_lively`, `ishita_hi_ads` | `chhavi_hi_kids`, `kunal_hi_kids` |
+| Marathi | `rupali_mr_stories`, `neha_mr_narration`, `soham_mr_narration` | `mukul_mr_stories`, `soham_mr_narration` | `mukul_mr_stories`, `soham_mr_narration`, `nilesh_mr_conversation` | `ishita_mr_conversational`, `ritu_mr_insurance`, `neha_mr_narration`, `rupali_mr_stories` | `mrunal_mr_narration` |
+| Tamil | `vijay_ta_narration`, `gokul_ta_narration` | `aravind_ta_suspense`, `vijay_ta_narration` | all four Tamil voices | (none live) | `aravind_ta_ads` |
+| Bangla | `roopa_bn_conversational`, `arnab_bn_conversation` | `bimal_bn_suspense` | `bimal_bn_suspense`, `arnab_bn_conversation` | `roopa_bn_conversational` | `roopa_bn_conversational` |
+| Gujarati | `pooja_gu_customer`, `bhavik_gu_conversation` | (none) | `bhavik_gu_conversation` | `pooja_gu_conversational`, `pooja_gu_customer` | `pooja_gu_customer` |
+
 ## If time
 
 ### Tarang Bombay (Hinglish/English) · `en` · `en-IN`

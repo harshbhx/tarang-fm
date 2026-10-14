@@ -73,3 +73,50 @@ test('landing page signature pieces: radio waves, the dial band and readable hea
   await noHorizontalScroll(page);
   expect(errors).toEqual([]);
 });
+
+test('on air, the radio and the live caption fit one screen above the controls', async ({ page }) => {
+  const errors = trackErrors(page);
+  await page.goto('/?preview=ui');
+  const caption = page.locator('.caption-current').first();
+  await expect(caption).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  // The preview's own toolbar sits above the radio; measure against it like the real page would
+  const { captionBottom, dockTop, toolbar } = await page.evaluate(() => {
+    const bar = document.querySelector('.radio')?.getBoundingClientRect().top ?? 0;
+    const text = document.querySelector('.caption-current .caption-text') ?? document.querySelector('.caption-current');
+    return {
+      captionBottom: text!.getBoundingClientRect().bottom,
+      dockTop: document.querySelector('.dock')!.getBoundingClientRect().top,
+      toolbar: Math.max(0, bar),
+    };
+  });
+  expect(captionBottom - toolbar).toBeLessThanOrEqual(dockTop + 2);
+  await noHorizontalScroll(page);
+  expect(errors).toEqual([]);
+});
+
+test('full screen shows only the radio and the caption, and F toggles it', async ({ page }) => {
+  await page.goto('/?preview=ui');
+  const radio = page.locator('.radio');
+  await page.getByRole('button', { name: 'Full screen' }).click();
+  await expect(radio).toHaveAttribute('data-immersive', 'true');
+  await expect(page.locator('.below')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Exit full screen' })).toBeVisible();
+  await page.locator('body').press('f');
+  await expect(radio).toHaveAttribute('data-immersive', 'false');
+  await expect(page.locator('.below')).toBeVisible();
+});
+
+test('the app can be installed: manifest and icons are served', async ({ request, page }) => {
+  await page.goto('/listen');
+  const href = await page.locator('link[rel="manifest"]').getAttribute('href');
+  expect(href).toBe('/manifest.webmanifest');
+  const manifest = await (await request.get(href!)).json();
+  expect(manifest.start_url).toBe('/listen');
+  expect(manifest.display).toBe('standalone');
+  for (const icon of manifest.icons as { src: string; sizes: string }[]) {
+    const res = await request.get(icon.src);
+    expect(res.status(), icon.src).toBe(200);
+    expect(res.headers()['content-type']).toContain('image/png');
+  }
+});

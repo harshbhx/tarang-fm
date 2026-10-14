@@ -62,6 +62,23 @@ const checks = [
     },
   },
   {
+    name: 'studio line call table answers',
+    run: async () => {
+      const recent = await get('/api/phone/recent');
+      expect(recent.status === 200, `GET /api/phone/recent returned ${recent.status}`);
+      expect(Array.isArray((await recent.json())?.calls), 'GET /api/phone/recent has no calls list');
+      // Reaches the StudioLine Durable Object: an unclaimed call can never be marked aired
+      const res = await fetch(`${origin}/api/phone/aired`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ station: 'hi', holder: 'smoke-test-holder', ids: ['smoke-test-no-such-call'] }),
+      });
+      expect(res.status === 200, `POST /api/phone/aired returned ${res.status}`);
+      const body = await res.json();
+      expect(Array.isArray(body?.aired) && body.aired.length === 0, 'POST /api/phone/aired marked a call it should not have');
+    },
+  },
+  {
     name: 'unknown API routes are JSON 404s',
     run: async () => {
       const res = await get('/api/nope');

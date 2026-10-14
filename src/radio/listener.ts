@@ -68,3 +68,29 @@ export function saveListenerName(name: string | undefined): void {
     /* storage blocked or full: the name just won't persist */
   }
 }
+
+const HOLDER_KEY = 'tarang.phoneHolder';
+const HOLDER_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+
+/**
+ * This tab's id on the studio line: the calls its RJ links read are claimed in this name. Kept for the
+ * tab's lifetime (reloads included), so a rejoin can still air a call its last link had already written.
+ */
+export function loadPhoneHolder(): string {
+  try {
+    const saved = globalThis.sessionStorage?.getItem(HOLDER_KEY);
+    if (saved && HOLDER_PATTERN.test(saved)) return saved;
+  } catch {
+    /* storage blocked: a fresh id per page load */
+  }
+  const id =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+  try {
+    globalThis.sessionStorage?.setItem(HOLDER_KEY, id);
+  } catch {
+    /* fine: the id just won't survive a reload */
+  }
+  return id;
+}

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { SegmentType } from '../../shared/types';
 import NumberTicker from './NumberTicker';
 import SplitFlapText from './SplitFlapText';
@@ -19,6 +20,8 @@ interface ProgrammeStripProps {
   ttfaMs?: number;
   /** Show clock keys: remount (reset the timer) per station */
   clockKey: string;
+  /** Small toggles at the end of the strip (subtitles) */
+  tools?: ReactNode;
 }
 
 /** A radio schedule line: NOW (split-flap) · NEXT · LATER, on-air timer and time to first audio. */
@@ -31,6 +34,7 @@ export default function ProgrammeStrip({
   upNext,
   ttfaMs,
   clockKey,
+  tools,
 }: ProgrammeStripProps) {
   const later = laterOnClock(segment, upNext);
   return (
@@ -77,6 +81,7 @@ export default function ProgrammeStrip({
             <span className="sr-only">to first audio</span>
           </p>
         ) : null}
+        {tools ? <div className="prog-tools">{tools}</div> : null}
       </div>
     </section>
   );

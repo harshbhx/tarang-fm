@@ -3,15 +3,17 @@ import { createMiddleware } from 'hono/factory';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { z } from 'zod';
 import { CALL_MAX_BYTES, STUDIO_NUMBER, TTS_SAMPLE_RATE } from '../shared/constants';
-import { CallMetaSchema, SegmentRequestSchema, StationIdSchema, TtsRequestSchema } from '../shared/schemas';
+import { CallMetaSchema, PhoneAiredSchema, SegmentRequestSchema, StationIdSchema, TtsRequestSchema } from '../shared/schemas';
 import { CAST_SPEAKERS, STATION_BY_ID } from '../shared/stations';
-import type { CallResponse, Station } from '../shared/types';
+import type { CallResponse, PhoneCall, PhoneRecentResponse, Station } from '../shared/types';
 import { audioFile, handleCall, startCall, type CallSubtitles } from './call';
 import { getContext, getHeadlines, localNewsCity } from './context';
-import { phoneHeadlines, recentCalls, saveCall, toPhoneCall, tokenMatches } from './phone';
+import { phoneHeadlines, toPhoneCall, tokenMatches } from './phone';
+import { studioLine } from './studio';
 import { createSarvam, SarvamError } from './sarvam';
 import { capStream, maxPcmBytes } from './show';
 import type { LiveStation } from './live/station';
+import { kvShowMemory } from './memory';
 import { buildSegment } from './segment';
 import { Timings } from './timing';
 
@@ -136,11 +138,26 @@ app.post('/segment', rateLimit((e) => e.RL_SEGMENT), requireKey, async (c) => {
   const station = stationFor(parsed.data.station);
   if (!station) return apiError(c, 400, 'unknown_station', 'That station is not on the dial yet.');
 
+  // Studio calls are read once, ever: this RJ link gets only the calls nobody else has aired or is reading
+  const holder = parsed.data.holder;
+  let claimed: string[] = [];
+  if (parsed.data.dedications?.length) {
+    const wanted = parsed.data.dedications.map((d) => d.id);
+    if (parsed.data.type === 'rj_link' && holder) claimed = await studioLine(c.env).claim(wanted, holder).catch(() => []);
+    parsed.data.dedications = parsed.data.dedications.filter((d) => claimed.includes(d.id));
+  }
+
   const sarvam = createSarvam(c.env.SARVAM_API_KEY);
   const origin = new URL(c.req.url).origin;
   const segment = await buildSegment(sarvam, station, parsed.data, c.var.timings, {
     fetchHeadlines: () => getHeadlines(station, origin, waitUntil(c), localNewsCity(parsed.data.listener.city, edgeCountry(c.req.raw))),
+    // What this station already aired, for every listener, so stories and ads don't repeat
+    memory: kvShowMemory(c.env.PHONE, waitUntil(c)),
   });
+  // Calls the script left out go straight back in the queue
+  const read = new Set(segment.fallback ? [] : (segment.dedicated ?? []));
+  const unread = claimed.filter((id) => !read.has(id));
+  if (holder && unread.length) waitUntil(c)?.(studioLine(c.env).release(unread, holder).catch(() => {}));
   return c.json(segment, 200, { 'Cache-Control': 'no-store' });
 });
 
@@ -251,14 +268,27 @@ app.post('/phone/call-end', async (c) => {
   const body = await readJson(c);
   if (!body.ok) return apiError(c, 400, 'invalid_json', 'Request body must be JSON.');
   const call = toPhoneCall(body.value);
-  if (call) await saveCall(c.env.PHONE, call);
+  if (call) await studioLine(c.env).save(call);
   return c.json({ ok: true, stored: Boolean(call) }, 200);
 });
 
-/** Recent studio calls for the web show (numbers masked). */
+/** Recent studio calls for the web show (numbers masked), each with when it was read on air. */
 app.get('/phone/recent', async (c) => {
-  const recent = await recentCalls(c.env.PHONE).catch(() => ({ number: STUDIO_NUMBER, calls: [] }));
-  return c.json(recent, 200, { 'Cache-Control': 'no-store' });
+  const calls = await studioLine(c.env)
+    .recent()
+    .catch(() => [] as PhoneCall[]);
+  return c.json({ number: STUDIO_NUMBER, calls } satisfies PhoneRecentResponse, 200, { 'Cache-Control': 'no-store' });
+});
+
+/** An RJ link has started reading these calls: they are marked as aired for every listener. */
+app.post('/phone/aired', rateLimit((e) => e.RL_SEGMENT), async (c) => {
+  const body = await readJson(c);
+  if (!body.ok) return apiError(c, 400, 'invalid_json', 'Request body must be JSON.');
+  const parsed = PhoneAiredSchema.safeParse(body.value);
+  if (!parsed.success) return apiError(c, 400, 'invalid_request', issues(parsed.error));
+  const { ids, holder, station } = parsed.data;
+  const aired = await studioLine(c.env).markAired(ids, holder, station);
+  return c.json({ aired }, 200, { 'Cache-Control': 'no-store' });
 });
 
 // ---- Listen together (one shared show per station, see shared/live.ts) ----------------------------
@@ -326,3 +356,6 @@ app.onError((err, c) => {
 
 export { LiveStation } from './live/station';
 export default app;
+
+/** Durable Object classes must be exported by the Worker's entry module. */
+export { StudioLine } from './studio';

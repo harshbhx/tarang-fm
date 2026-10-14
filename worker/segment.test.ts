@@ -4,7 +4,7 @@ import { STATION_BY_ID } from '../shared/stations';
 import type { Station } from '../shared/types';
 import { studioCallsBlock } from './prompts';
 import type { Sarvam } from './sarvam';
-import { buildSegment, callersRead, fillName, withStudioCalls } from './segment';
+import { buildSegment, callersRead, countNameTokens, fillName, limitNameTokens, withStudioCalls } from './segment';
 import { Timings } from './timing';
 
 describe('fillName', () => {
@@ -84,5 +84,49 @@ describe('studio calls in an RJ link', () => {
     expect(segment.dedicated).toEqual(['call-1']);
     expect(segment.lines.map((l) => l.text).join(' ')).toContain('वडोदरा से प्रिया का कॉल आया');
     expect(segment.lines[segment.lines.length - 1].text).toBe('आगे सुनिए खबरें।');
+  });
+});
+
+describe('listener name, used sparingly', () => {
+  it('keeps the first allowed name and cleanly drops the rest', () => {
+    expect(limitNameTokens(['नमस्ते {name}, स्वागत है!', 'और हाँ {name}, आगे कहानी है।'], 1)).toEqual([
+      'नमस्ते {name}, स्वागत है!',
+      'और हाँ, आगे कहानी है।',
+    ]);
+    expect(limitNameTokens(['{name}, ये कहानी आपके लिए।'], 0)).toEqual(['ये कहानी आपके लिए।']);
+    expect(countNameTokens(['वाह {nickname}!', 'थैंक यू {name}'])).toBe(2);
+    expect(limitNameTokens(['वाह {nickname}! थैंक यू {name}'], 1)).toEqual(['वाह {nickname}! थैंक यू']);
+  });
+
+  it('never lets a story say the listener\'s name, even after the retry', async () => {
+    let chats = 0;
+    const sarvam = {
+      chatJson: async () => {
+        chats += 1;
+        return {
+          title: 'टिफ़िन का राज़',
+          mood: 'light',
+          summary_en: 'A tiffin mystery on a Mumbai local',
+          lines: [
+            { role: 'narrator', text: 'ये कहानी {name} के लिए, मुंबई लोकल की।' },
+            { role: 'char_a', text: 'मेहर, ये टिफ़िन फिर मेरी डेस्क पर कैसे?' },
+            { role: 'char_b', text: 'कबीर, मुझे क्या पता, मैं तो अभी आई हूँ।' },
+            { role: 'char_kid', text: 'दीदी, इसमें आलू पराठे हैं!' },
+            { role: 'char_a', text: 'और ये पर्ची? लिखा है, कल फिर मिलेंगे।' },
+            { role: 'char_b', text: 'हैंडराइटिंग तो पापा जैसी है, {name}!' },
+            { role: 'char_kid', text: 'पापा तो कल से गाँव गए हैं।' },
+            { role: 'narrator', text: 'और टिफ़िन अगले दिन फिर आया।' },
+          ],
+        };
+      },
+      translate: async (t: string) => `EN ${t}`,
+      transliterate: async (t: string) => (t === 'Priya' ? 'प्रिया' : t),
+    } as unknown as Sarvam;
+    const req: SegmentRequest = { station: 'hi', type: 'kahani', listener: { name: 'Priya', localTime: '21:30', daypart: 'night' } };
+    const segment = await buildSegment(sarvam, hindi, req, new Timings());
+    expect(chats).toBe(2); // the name triggered the retry
+    const text = segment.lines.map((l) => l.text).join(' ');
+    expect(text).not.toContain('प्रिया');
+    expect(text).not.toContain('{name}');
   });
 });

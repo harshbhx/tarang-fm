@@ -4,9 +4,11 @@ import { PAUSE_AFTER_MS } from '../shared/constants';
 import { LlmSegmentSchema, type Dedication, type SegmentRequest } from '../shared/schemas';
 import type { Delivery, Line, Mood, Role, Segment, SegmentType, Source, Station, TtsLanguage, Voice } from '../shared/types';
 import { randomFiller, someoneFor, studioCallLine } from './fallbacks';
-import { callerPlaceholder, MAX_LINES, NEWS_HEADLINES, rjOnAir, SEGMENT_PLAN, SEGMENT_ROLES, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
+import { callerPlaceholder, MAX_LINES, NEWS_HEADLINES, rjOnAir, storyPlan, type AdPlan, type SegmentPlans, type StoryPlan, SEGMENT_PLAN, SEGMENT_ROLES, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
 import type { Sarvam } from './sarvam';
 import { gapAfter, isDelivery, timePhrase, voiceFor } from './show';
+import { normalizeTitle, type ShowMemory } from './memory';
+import { adBrief } from './story';
 import { cleanSubtitle } from './subtitle';
 import { cleanText, processLines, type RawLine } from './text';
 import type { Timings } from './timing';
@@ -188,6 +190,87 @@ export function fillName(text: string, name?: string): string {
     .replace(/\s+([,!?।])/gu, '$1');
 }
 
+const NAME_TOKEN = /\{\s*(name|nickname)\s*\}/giu;
+const KEPT = '\u0000KEEP\u0000';
+
+/** How many {name}/{nickname} placeholders the texts hold. */
+export function countNameTokens(texts: string[]): number {
+  return texts.reduce((n, t) => n + (t.match(NAME_TOKEN)?.length ?? 0), 0);
+}
+
+/**
+ * Real RJs use a listener's name sparingly: keeps the first `allowed` name placeholders across the texts and
+ * removes the rest (with the same tidy-up as an unknown name), so a script can never say it twice.
+ */
+export function limitNameTokens(texts: string[], allowed: number): string[] {
+  let kept = 0;
+  return texts.map((text) => {
+    const marked = text.replace(NAME_TOKEN, (token) => (kept++ < allowed ? `${KEPT}${token.replace(/[{}\s]/g, '')}${KEPT}` : '{name}'));
+    return fillName(marked, undefined)
+      .replace(new RegExp(`${KEPT}(name|nickname)${KEPT}`, 'g'), '{$1}')
+      .replace(/^[\s,]+/u, '')
+      .replace(/\s{2,}/gu, ' ')
+      .trim();
+  });
+}
+
+/** How many recent stories' ingredients (place, hook, twist) a new brief avoids. */
+const AVOID_STORIES = 24;
+/** How many recent ads' categories, and formats, a new ad avoids. */
+const AVOID_AD_CATEGORIES = 14;
+const AVOID_AD_FORMATS = 3;
+
+/** Plans the story or ad from the show memory; everything else needs no plan. */
+export async function planSegment(station: Station, type: SegmentType, req: SegmentRequest, memory?: ShowMemory): Promise<SegmentPlans> {
+  if (type === 'kahani') {
+    const records = memory ? await memory.recentStories(station.id).catch(() => []) : [];
+    const recent = records.slice(-AVOID_STORIES);
+    const plan = storyPlan(station, req.listener.daypart, {
+      settings: recent.map((r) => r.setting),
+      hooks: recent.map((r) => r.hook),
+      twists: recent.map((r) => r.twist),
+      openings: records.slice(-3).map((r) => r.opening),
+    });
+    plan.aired = records.slice(-10).map((r) => `${r.title}${r.summary ? `: ${r.summary}` : ''}`);
+    plan.airedTitles = new Set(records.map((r) => normalizeTitle(r.title)));
+    return { story: plan };
+  }
+  if (type === 'ad_break') {
+    const records = memory ? await memory.recentAds(station.id).catch(() => []) : [];
+    const brief = adBrief(Math.random, {
+      categories: records.slice(-AVOID_AD_CATEGORIES).map((r) => r.category),
+      formats: records.slice(-AVOID_AD_FORMATS).map((r) => r.format),
+    });
+    const ad: AdPlan = {
+      ...brief,
+      aired: records.slice(-8).map((r) => `${r.title}${r.summary ? `: ${r.summary}` : ''}`),
+      airedTitles: new Set(records.map((r) => normalizeTitle(r.title))),
+    };
+    return { ad };
+  }
+  return {};
+}
+
+/** Records a finished story or ad in the show memory (template fallbacks are not remembered). */
+function remember(memory: ShowMemory | undefined, station: Station, type: SegmentType, segment: Segment, plans: SegmentPlans): void {
+  if (!memory || segment.fallback) return;
+  const at = new Date().toISOString();
+  if (type === 'kahani' && plans.story) {
+    const { brief } = plans.story;
+    memory.rememberStory(station.id, {
+      at,
+      title: segment.title,
+      summary: segment.summary,
+      setting: brief.setting,
+      hook: brief.hook,
+      twist: brief.twist,
+      opening: brief.opening.id,
+    });
+  } else if (type === 'ad_break' && plans.ad) {
+    memory.rememberAd(station.id, { at, title: segment.title, summary: segment.summary, category: plans.ad.category, format: plans.ad.format.id });
+  }
+}
+
 /** Keeps the opening lines and the closing line (tease, tagline or sign-off) when the model overruns. */
 export function capLines<T>(lines: T[], max: number): T[] {
   if (lines.length <= max || max < 2) return lines;
@@ -255,6 +338,7 @@ async function writeScript(
   headlines: Source[],
   timings: Timings,
   listenerName: string | undefined,
+  plans: SegmentPlans = {},
 ): Promise<Script> {
   const deadline = Date.now() + SEGMENT_BUDGET_MS;
   const plan = SEGMENT_PLAN[type];
@@ -272,7 +356,7 @@ async function writeScript(
     if (remaining < MIN_ATTEMPT_MS) break;
     try {
       const raw = await timings.measure('llm', () =>
-        sarvam.chatJson(segmentMessages(station, type, req, headlines), schema, LenientSegmentSchema, {
+        sarvam.chatJson(segmentMessages(station, type, req, headlines, plans), schema, LenientSegmentSchema, {
           name: `tarang_${type}`,
           // The pack's retry: one more try at a slightly lower temperature.
           temperature: Math.max(0.1, plan.temperature - attempt * 0.1),
@@ -282,6 +366,13 @@ async function writeScript(
         }),
       );
       const problems = validateScript(station, type, raw.lines, { greet, listenerName: req.listener.name, headlinesText, timePhrase: time });
+      // The name belongs only in an RJ greeting, once.
+      const namesAllowed = type === 'rj_link' && greet && req.listener.name ? 1 : 0;
+      const names = countNameTokens(raw.lines.map((l) => l.text));
+      if (names > namesAllowed) problems.push(`listener name used ${names}× (allowed ${namesAllowed})`);
+      // A story or ad whose title already aired on this station is rewritten
+      const airedTitles = type === 'kahani' ? plans.story?.airedTitles : type === 'ad_break' ? plans.ad?.airedTitles : undefined;
+      if (airedTitles?.has(normalizeTitle(raw.title))) problems.push(`title already aired: ${raw.title}`);
       const read = callersRead(raw.lines);
       calls.forEach((_c, i) => {
         if (!read.has(i + 1)) problems.push(`studio call ${i + 1} not read (no ${callerPlaceholder(i + 1)})`);
@@ -290,6 +381,8 @@ async function writeScript(
       // After the retry, drop any line that still copies a prompt example (the Kahani may echo its own scene line).
       let scriptLines = type === 'kahani' ? raw.lines : raw.lines.filter((l) => !copiesExample(l.text));
       if (type === 'news') scriptLines = dropOrphanKicker(dropInventedNumbers(scriptLines, headlinesText, `${time} ${station.frequency}`));
+      const limited = limitNameTokens(scriptLines.map((l) => l.text), namesAllowed);
+      scriptLines = scriptLines.map((l, i) => ({ ...l, text: limited[i] }));
       const named = withStudioCalls(station, scriptLines as RawLine[], calls, callers).map((l) => ({ ...l, text: fillName(l.text, listenerName) }));
       const lines = processLines(capLines(named, MAX_LINES[type] + calls.length), roles, type, station.language);
       const min = type === 'news' ? Math.min(MIN_LINES.news, headlines.length + 1) : MIN_LINES[type];
@@ -310,7 +403,7 @@ export async function buildSegment(
   station: Station,
   req: SegmentRequest,
   timings: Timings,
-  opts: { fetchHeadlines?: () => Promise<Source[]> } = {},
+  opts: { fetchHeadlines?: () => Promise<Source[]>; storyPlan?: StoryPlan; memory?: ShowMemory } = {},
 ): Promise<Segment> {
   const type = req.type;
 
@@ -338,9 +431,14 @@ export async function buildSegment(
   }
 
   const listenerName = await timings.measure('name', () => nativeListenerName(sarvam, req.listener.name, station.language));
+  // A Kahani gets a fresh premise and its own cast, and an ad its own shape, before a word is written,
+  // steering clear of what this station already aired (show memory)
+  const plans = await timings.measure('memory', () => planSegment(station, type, req, opts.memory));
+  if (opts.storyPlan) plans.story = opts.storyPlan;
+  const story = plans.story;
   let script: Script;
   try {
-    script = await writeScript(sarvam, station, type, req, headlines, timings, listenerName);
+    script = await writeScript(sarvam, station, type, req, headlines, timings, listenerName, plans);
   } catch {
     return withSubtitles(sarvam, fallbackSegment(station, type), station.language, timings, true);
   }
@@ -349,7 +447,7 @@ export async function buildSegment(
   const lines = script.lines.map((l) =>
     toLine(station, l.role, l.text, type, {
       delivery: isDelivery(l.delivery) ? l.delivery : 'normal',
-      voice: l.role === 'rj' ? rjVoice : undefined,
+      voice: l.role === 'rj' ? rjVoice : story ? story.cast[l.role as keyof StoryPlan['cast']] : undefined,
     }),
   );
   const segment: Segment = {
@@ -362,6 +460,7 @@ export async function buildSegment(
   if (script.summary) segment.summary = script.summary.slice(0, 200);
   if (script.mood) segment.mood = script.mood;
   if (script.dedicated?.length) segment.dedicated = script.dedicated;
+  remember(opts.memory, station, type, segment, plans);
   if (type === 'news') segment.sources = headlines;
   return withSubtitles(sarvam, segment, station.language, timings);
 }

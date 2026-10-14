@@ -1,13 +1,7 @@
-/** The studio phone line: Sarvam Voice Agents answers calls, and the web show reads them on air. */
+/** The studio phone line: Sarvam Voice Agents answers calls, and the web show reads them on air (calls are kept in worker/calls.ts). */
 import { z } from 'zod';
-import { STUDIO_NUMBER } from '../shared/constants';
-import type { PhoneCall, PhoneRecentResponse, PhoneRequestType, Station } from '../shared/types';
+import type { PhoneCall, PhoneRequestType, Station } from '../shared/types';
 import { getHeadlines, isGrim } from './context';
-
-const RECENT_KEY = 'phone:recent';
-const RECENT_MAX = 20;
-/** Calls older than this are not read on air any more. */
-const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const REQUEST_TYPES = ['dedication', 'story_request', 'news_request', 'chat', 'other'] as const;
 
@@ -58,22 +52,6 @@ export function toPhoneCall(payload: unknown): PhoneCall | null {
     message,
     theme: type === 'story_request' ? text(vars.story_theme, 120) : undefined,
   };
-}
-
-async function readRecent(kv: KVNamespace): Promise<PhoneCall[]> {
-  const calls = await kv.get<PhoneCall[]>(RECENT_KEY, 'json').catch(() => null);
-  return Array.isArray(calls) ? calls : [];
-}
-
-/** Stores a call at the front of the recent list (duplicates from webhook retries are replaced). */
-export async function saveCall(kv: KVNamespace, call: PhoneCall): Promise<void> {
-  const calls = (await readRecent(kv)).filter((c) => c.id !== call.id);
-  await kv.put(RECENT_KEY, JSON.stringify([call, ...calls].slice(0, RECENT_MAX)));
-}
-
-export async function recentCalls(kv: KVNamespace, now = Date.now()): Promise<PhoneRecentResponse> {
-  const calls = (await readRecent(kv)).filter((c) => now - Date.parse(c.at) < RECENT_WINDOW_MS).slice(0, 6);
-  return { number: STUDIO_NUMBER, calls };
 }
 
 /** Constant-time comparison for the webhook token. */

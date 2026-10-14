@@ -26,10 +26,10 @@ import type { Dedication, SegmentRequest } from '../../shared/schemas';
 import { rjVoiceAt, STATION_BY_ID } from '../../shared/stations';
 import type { Line, ListenerContext, Mood, PhoneCall, Segment, SegmentType, Station, StationId } from '../../shared/types';
 import { getHeadlines, getWeather, localNewsCity } from '../context';
-import { recentCalls } from '../phone';
 import { createSarvam, type Sarvam } from '../sarvam';
 import { buildSegment, nativeListenerName, toLine } from '../segment';
 import { capStream, maxPcmBytes } from '../show';
+import { studioLine } from '../studio';
 import { Timings } from '../timing';
 import {
   appendLine,
@@ -65,7 +65,6 @@ const AUDIO_CHUNK_BYTES = 1 << 20;
 const SHOW_LOG_MAX = 4;
 const STORY_LOG_MAX = 8;
 const SUMMARY_CHARS = 200;
-const READ_CALLS_MAX = 60;
 const PHONE_CALLS_PER_LINK = 2;
 const WELCOME_NAMES_MAX = 4;
 const MESSAGE_MAX_CHARS = 512;
@@ -119,8 +118,8 @@ interface StationState {
   storyLog: string[];
   /** A studio caller's story request for the next Kahani */
   storyTheme?: string;
-  /** Studio phone calls already read on this station */
-  readCalls: string[];
+  /** Studio calls this show's RJ links will read: claimed in the shared call table, marked aired when the link starts */
+  pendingCalls?: PendingCalls[];
   /** IST date and the segments written on it (guardrail) */
   day?: string;
   segmentsToday: number;
@@ -131,6 +130,15 @@ interface StationState {
   emptySince?: number;
   /** Stored audio by line id: chunk count, and when the line left the timeline */
   audio: Record<string, { chunks: number; endedAt?: number }>;
+}
+
+/** Studio calls held for one written RJ link. */
+interface PendingCalls {
+  segmentId: string;
+  ids: string[];
+  holder: string;
+  /** When the link's first line was placed on the timeline */
+  startAt?: number;
 }
 
 /** Per-socket data, kept with the socket across hibernation. */
@@ -164,7 +172,7 @@ function freshState(): StationState {
     lastCatchphrase: false,
     aired: [],
     storyLog: [],
-    readCalls: [],
+    pendingCalls: [],
     segmentsToday: 0,
     pendingWelcomes: [],
     audio: {},
@@ -484,6 +492,7 @@ export class LiveStation extends DurableObject<Env> {
         this.s.emptySince = undefined;
       }
       await this.retire(now);
+      await this.airCalls(now);
       if (listeners.length) {
         this.produce(now);
         const due = this.welcomeDueAt();
@@ -549,6 +558,8 @@ export class LiveStation extends DurableObject<Env> {
   }
 
   private async sleep(now: number, note?: string): Promise<void> {
+    await this.airCalls(now);
+    this.releasePendingCalls();
     const keys = Object.entries(this.s.audio).flatMap(([id, a]) => audioKeys(id, a.chunks));
     Object.assign(this.s, {
       state: 'sleeping',
@@ -687,16 +698,19 @@ export class LiveStation extends DurableObject<Env> {
       this.s.links += 1;
       this.s.lastCatchphrase = producer.useCatchphrase;
       req.producer = producer;
+      const studio = studioLine(this.env);
       const [weather, recent] = await Promise.all([
         getWeather(local?.latitude, local?.longitude),
-        recentCalls(this.env.PHONE).catch(() => undefined),
+        studio.recent().catch((): PhoneCall[] => []),
       ]);
       if (weather) req.weather = weather;
-      // Up to two unread studio calls, oldest first (the list is newest first)
-      calls = (recent?.calls ?? [])
-        .filter((c) => !this.s.readCalls.includes(c.id))
-        .slice(-PHONE_CALLS_PER_LINK)
-        .reverse();
+      // Up to two studio calls nobody has read yet, oldest first (the list is newest first). Claiming them in the
+      // shared call table means no other show, live or personal, reads them meanwhile.
+      const wanted = recent.filter((c) => !c.airedAt).slice(-PHONE_CALLS_PER_LINK).reverse();
+      if (wanted.length) {
+        const granted = new Set(await studio.claim(wanted.map((c) => c.id), this.callHolder()).catch((): string[] => []));
+        calls = wanted.filter((c) => granted.has(c.id));
+      }
       if (calls.length) req.dedications = calls.map(toDedication);
     }
     const showLog = this.s.aired
@@ -727,8 +741,11 @@ export class LiveStation extends DurableObject<Env> {
 
     const read = new Set(segment.fallback ? [] : (segment.dedicated ?? []));
     const readCalls = calls.filter((c) => read.has(c.id));
+    // Calls the script left out go straight back to the queue
+    const unread = calls.filter((c) => !read.has(c.id)).map((c) => c.id);
+    if (unread.length) void studioLine(this.env).release(unread, this.callHolder()).catch(() => {});
     if (!readCalls.length) return;
-    this.s.readCalls = [...this.s.readCalls, ...readCalls.map((c) => c.id)].slice(-READ_CALLS_MAX);
+    this.s.pendingCalls = [...(this.s.pendingCalls ?? []), { segmentId: segment.id, ids: readCalls.map((c) => c.id), holder: this.callHolder() }];
     const theme = readCalls.find((c) => c.type === 'story_request' && c.theme?.trim())?.theme;
     if (theme) this.s.storyTheme = theme.trim().slice(0, 120);
   }
@@ -795,7 +812,32 @@ export class LiveStation extends DurableObject<Env> {
       { id, segmentId: segment.id, type: segment.type, title: segment.title, line, durationMs: pcmDurationMs(pcm.byteLength) },
       now,
     );
+    const pending = this.s.pendingCalls?.find((p) => p.segmentId === segment.id && p.startAt === undefined);
+    if (pending) pending.startAt = this.s.lines.find((l) => l.id === id)?.startAt;
     await this.published(now);
+  }
+
+  /** Who holds this show's claims in the shared call table. */
+  private callHolder(): string {
+    return `live:${this.s.station ?? 'hi'}:${this.s.showId ?? 'idle'}`;
+  }
+
+  /** Marks studio calls aired once the RJ link that reads them has started playing: read once, ever, everywhere. */
+  private async airCalls(now: number): Promise<void> {
+    const pending = this.s.pendingCalls ?? [];
+    const due = pending.filter((p) => p.startAt !== undefined && p.startAt <= now);
+    if (!due.length) return;
+    this.s.pendingCalls = pending.filter((p) => !due.includes(p));
+    const studio = studioLine(this.env);
+    for (const p of due) await studio.markAired(p.ids, p.holder, this.s.station ?? 'hi').catch(() => []);
+  }
+
+  /** Hands back calls a stopped show had claimed but never aired. */
+  private releasePendingCalls(): void {
+    const pending = this.s.pendingCalls ?? [];
+    this.s.pendingCalls = [];
+    const studio = studioLine(this.env);
+    for (const p of pending) void studio.release(p.ids, p.holder).catch(() => {});
   }
 
   /** After a line lands on the timeline: on air, saved, and the new timeline sent to everyone. */

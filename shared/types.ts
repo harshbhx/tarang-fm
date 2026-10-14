@@ -36,6 +36,16 @@ export interface Voice {
   gender: GrammaticalGender;
 }
 
+/** Voices a story can draw on, by the part they suit. */
+export interface StoryPool {
+  narrators: Voice[];
+  /** Narrators for ghost stories, mysteries and night-time suspense */
+  spookyNarrators?: Voice[];
+  men: Voice[];
+  women: Voice[];
+  kids: Voice[];
+}
+
 export interface Station {
   id: StationId;
   name: string;
@@ -56,6 +66,8 @@ export interface Station {
   cast: Record<Role, Voice>;
   /** Daypart shows with their own RJ (local hours, [from, to)); the cast rj is used outside them */
   shows?: Show[];
+  /** Extra verified voices a Kahani can be cast from, so stories don't always sound the same */
+  storyPool?: StoryPool;
 }
 
 export interface Show {
@@ -183,6 +195,8 @@ export interface PhoneCall {
   /** Short on-air message in the caller's language */
   message: string;
   theme?: string;
+  /** When an RJ first read it on air (any listener); a call is read once, ever */
+  airedAt?: string;
 }
 
 export interface PhoneRecentResponse {
