@@ -4,7 +4,7 @@
 
 Every voice is [Sarvam **Bulbul v4 Flash**](https://docs.sarvam.ai/api/api-guides-tutorials/text-to-speech/best-practice-guide-for-bulbul-v-4-flash). Each line on screen shows exactly which of its personas is speaking.
 
-**▶ Live:** https://tarang-fm.creharsh.workers.dev (the landing page, with a playable gallery of all 16 voices) · **Straight to the radio:** https://tarang-fm.creharsh.workers.dev/listen · Works on any phone or laptop, with no install or login.
+**▶ Live:** https://tarang-fm.creharsh.workers.dev (the landing page, with a playable voice gallery for all five stations) · **Straight to the radio:** https://tarang-fm.creharsh.workers.dev/listen · Works on any phone or laptop, with no install or login.
 
 > 🎬 Demo video: _coming with the submission_
 
@@ -21,13 +21,22 @@ Every segment of a real radio station has its own vocal style: the newsreader, t
 | Segment | What happens | Voices (Hindi station) |
 |---|---|---|
 | 📻 Station ID | Spoken jingle over a synthesized sting | `ishita_hi_ads` |
-| 🎙️ RJ link | Greets you by name and city, mentions your local weather and the time of day, teases what's next | `sunny_hi_reels` |
-| 📰 News | Opens with real stories **from your own city**, then national headlines, in your language and rephrased for radio (sources shown) | `simran_hi_news_breaking` |
+| 🎙️ RJ link | Greets you by name and city, mentions your local weather and the time of day, teases what's next | `sunny_hi_reels`, `ritu_hi_social_lively`, `ratan_hi_latenight_warm` (by time of day) |
+| 📰 News | Opens with real stories **from your own city**, then national headlines, in your language and rephrased for radio (sources shown) | `simran_hi_news` |
 | 📢 Ad break | A fictional, absurd desi product. Announcer plus customer | `mukul_hi_ads`, `ritu_hi_ads_informal` |
 | 👻 Kahani Corner | A 60–90 s radio drama with narrator, characters and a twist | `shubh_hi_stories_dramatic`, `mukul_hi_suspense`, `sanchita_hi_romantic`, `chhavi_hi_kids` |
 | ☎️ Call-in | Push to talk. The RJ replies live, and a story request changes the next Kahani | the station's RJ |
 
-**Stations:** Hindi (91.1), Tamil (98.3) and Bangla (102.7), each cast with native v4 voices: 16 distinct personas across the dial. Captions show the native script with an English subtitle underneath, so anyone can follow any station.
+**Stations:** Hindi (91.1), Marathi (94.3), Tamil (98.3), Bangla (102.7) and Gujarati (106.1), each cast with native v4 voices: 29 distinct personas across the dial. Captions show the native script with an English subtitle underneath, so anyone can follow any station.
+
+## How the show is written
+
+- **RJs with a character.** Each station's RJ has a character sheet (age, background, how they joke), a catchphrase and a set of running bits (`worker/show.ts`). The catchphrase only comes out when the mood is light. After heavy news there are no jokes, just one calm line.
+- **Daypart shows on Hindi 91.1.** सुबह की चाय (6 to 11, RJ Sunny), दोपहर की गपशप (11 to 16, RJ Ritu), घर वापसी (16 to 21, RJ Sunny) and रात की बात (21 to 6, RJ Ratan), each with its own voice and character sheet (`shared/stations.ts`).
+- **Every line is acted.** The script gives each line a delivery (`normal`, `warm`, `excited`, `fast`, `hushed`, `shout`, `dramatic`, `sad`). Bulbul has no SSML, so each delivery maps to `pace`, `loudness` and `temperature` on top of the voice's base settings (`DELIVERY_PARAMS`).
+- **Natural pauses.** The gap after each line depends on its delivery and segment: steady in the news, tighter in ads, longer in the Kahani, with a little random variation so it never sounds metronomic.
+- **Local flavour.** For known cities the RJ gets a local pack (`LOCAL_PACKS`): the city's own greeting, landmarks, food and vibe, such as "केम छो बड़ौदा" and Sursagar lake for Vadodara.
+- **Script checks.** A validator (`worker/validate.ts`) rejects romanized Hindi, stock filler phrases, lines copied from the prompt's examples, overlong lines and any number in the news that isn't in the real headlines. A failed script is retried once at a lower temperature (`worker/segment.ts`). After that, news lines that still carry an invented number are dropped.
 
 ## Call the studio
 
@@ -41,9 +50,9 @@ Every segment of a real radio station has its own vocal style: the newsreader, t
 
 | Model / API | Job in Tarang FM |
 |---|---|
-| **Bulbul v4 Flash**, HTTP streaming (`linear16`, 24 kHz) | Every spoken line. Raw PCM is streamed straight into Web Audio, so speech starts in a few hundred ms. Delivery is shaped by persona choice, `pace` and `temperature` |
+| **Bulbul v4 Flash**, HTTP streaming (`linear16`, 24 kHz) | Every spoken line. Raw PCM is streamed straight into Web Audio, so speech starts in a few hundred ms. Delivery is shaped by persona choice, `pace`, `loudness` and `temperature` |
 | **Sarvam-105B**, structured outputs (`json_schema`) | Writes every script (RJ links, news, ads, dramas) in the station's language with a per-role cast sheet, and understands call-ins (intent + on-air reply) |
-| **Saaras v4** speech-to-text | Transcribes callers (`codemix` for Hinglish, `transcribe` for Tamil and Bangla) |
+| **Saaras v4** speech-to-text | Transcribes callers (`codemix` for Hinglish, `transcribe` for Marathi, Tamil, Bangla and Gujarati) |
 | **Sarvam Translate** (`mayura:v1`) | English subtitles under every caption |
 | **Sarvam Voice Agents** | The studio phone line: RJ Sunny (Bulbul v4) answers calls on +91 79658 54148, with a headlines tool and a call-end webhook |
 
@@ -74,6 +83,13 @@ flowchart LR
 - **The API key never reaches the browser.** All Sarvam calls go through the Worker, with per-IP rate limits (Cloudflare rate-limiting bindings).
 - **Music without copyright issues.** The drone and stings are synthesized live in Web Audio, and the bed ducks automatically under speech.
 - **Local by default:** the listener's city, timezone and coordinates come from Cloudflare's edge (`request.cf`), with no location prompt. City news comes from Bing News search, national news from BBC's service in the station language (Google News as a fallback), and the weather from Open-Meteo. Grim crime stories are filtered out.
+
+## Safety
+
+- **Grim news stays off air.** Headlines about murder, sexual violence or suicide are filtered out before the news is written.
+- **A fixed safety net on call-ins.** A deterministic check (`worker/care.ts`) runs on every caller's words, in all five station languages and English. If a caller sounds distressed, the RJ always gives a warm, fixed reply in the station's language with the Tele-MANAS helpline (14416, free, 24×7), whatever the model decided.
+- **Prompt injection gets deflected.** Callers who try to make the RJ break character, ignore its rules or say something unsafe get one cheerful "that's for off-air" line, and their words are never repeated on air.
+- **The key stays on the server.** All Sarvam calls go through the Worker. `/api/tts` only accepts voices from the station casts, inputs are validated, and the routes that call Sarvam are rate-limited per IP.
 
 ## Run it locally
 
