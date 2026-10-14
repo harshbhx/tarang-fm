@@ -55,3 +55,8 @@ desktop.ini
 !.vscode/extensions.json
 *.swp
 *.log
+
+# --- Playwright ---
+test-results/
+playwright-report/
+blob-report/

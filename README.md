@@ -1,12 +1,23 @@
 # तरंग Tarang FM
 
+[![CI/CD](https://github.com/harshbhx/tarang-fm/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/harshbhx/tarang-fm/actions/workflows/ci-cd.yml)
+
 **An AI radio station in your language.** Open the link, press **Tune in**, and a live show starts playing: a jingle, an RJ who greets you by name, today's headlines, a ridiculous ad break and a short radio drama with a full voice cast. **Hold "Call RJ"**, say something in your language, and the RJ answers you on air.
 
 Every voice is [Sarvam **Bulbul v4 Flash**](https://docs.sarvam.ai/api/api-guides-tutorials/text-to-speech/best-practice-guide-for-bulbul-v-4-flash). Each line on screen shows exactly which of its personas is speaking.
 
 **▶ Live:** https://tarang-fm.dualmindlab.tech (the landing page, with a playable voice gallery for all five stations) · **Straight to the radio:** https://tarang-fm.dualmindlab.tech/listen · Works on any phone or laptop, with no install or login.
 
-> 🎬 Demo video: _coming with the submission_
+> 🎬 Demo video: _recording in progress; the shot list is in [docs/BUILD-PLAN.md §6](./docs/BUILD-PLAN.md#6-demo-video-7590-s-shot-list)_
+
+<p align="center">
+  <img src="docs/images/landing.jpg" alt="The Tarang FM landing page: an amber-dial radio tuned to Tamil 98.3, with Tune in and Call the studio" width="66%" />
+  <img src="docs/images/radio-phone.jpg" alt="The radio on a phone: Hindi 91.1 playing a Kahani, with the speaker's Bulbul voice ID and an English subtitle under the Hindi caption" width="24%" />
+</p>
+<p align="center">
+  <img src="docs/images/studio-line.jpg" alt="The studio line panel: how to call, and three recent calls marked On air now, Up next and Read on air" width="90%" />
+</p>
+<p align="center"><sub>Screens from the app's UI preview mode, with sample captions and calls.</sub></p>
 
 Built for the **Sarvam Bulbul Build Challenge**: "Build something that speaks".
 
@@ -159,6 +170,9 @@ npm run dev            # http://localhost:5173
 | `npm run deploy` | Build and deploy to Cloudflare (set the secrets below first) |
 | `npm run spike` | Live checks of the Sarvam APIs this app relies on |
 | `npm run audition` | Synthesizes every cast voice and measures its pitch. Open `tmp/audition/index.html` to listen |
+| `npm run test:e2e` | Browser tests (desktop + phone) against the production build |
+| `npm run smoke -- <url>` | Smoke-tests a running app; add `--allow-missing-key` for local dev |
+| `npm run check:diagrams` | Renders every Mermaid diagram in the docs (needs `@mermaid-js/mermaid-cli`) |
 
 **Secrets for a deploy** (`npx wrangler secret put <NAME>`):
 
@@ -170,6 +184,41 @@ npm run dev            # http://localhost:5173
 The phone line also uses the `PHONE` KV namespace declared in `wrangler.jsonc`. Create your own with `npx wrangler kv namespace create PHONE` and put its id there.
 
 **Debug views:** `/?debug=audio` (audio engine test page) and `/?preview=ui` (every UI state with mock data).
+
+## CI/CD
+
+Every push and pull request runs the full pipeline in [`.github/workflows/ci-cd.yml`](./.github/workflows/ci-cd.yml). A push to `main` that passes all of it goes live.
+
+```mermaid
+flowchart LR
+  P["push / PR"] --> C["Typecheck · unit tests<br/>production build"]
+  P --> E["Browser tests<br/>desktop + phone<br/>+ local smoke test"]
+  P --> D["Docs diagrams<br/>all render"]
+  P --> A["Dependency audit"]
+  C & E & D & A --> G{"main?"}
+  G -->|no| X["✓ checks on the PR"]
+  G -->|yes| DEP["Deploy to Cloudflare"]
+  DEP --> S{"Smoke test<br/>production"}
+  S -->|pass| L["🟢 live"]
+  S -->|fail| R["↩ automatic rollback"]
+```
+
+| Job | What it proves |
+|---|---|
+| Typecheck, unit tests, build | Types across app, Worker and shared code; 135+ unit tests (JUnit report kept as an artifact); the bundle builds, with sizes in the run summary |
+| Browser tests | The built app plus Worker serves every page and API route correctly; Playwright checks the landing page, the radio and the studio panel at desktop and phone sizes, with no page errors or sideways scrolling |
+| Docs diagrams | Every Mermaid diagram in the README and `docs/` renders |
+| Dependency audit | No high-severity advisories in shipped dependencies |
+| Deploy | `wrangler deploy` with the commit in the version message, then a smoke test of production (pages, health, key present, voice allowlist, JSON errors). A failed smoke test rolls back to the previous version |
+
+**To turn on deploys**, add two repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | A Cloudflare API token with the "Edit Cloudflare Workers" template |
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID |
+
+Without them the deploy job is skipped with a warning and everything else still runs. Optionally set a `PRODUCTION_URL` repository variable if the site moves. Dependabot opens weekly PRs for npm packages and GitHub Actions.
 
 ## API
 

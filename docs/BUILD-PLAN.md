@@ -116,15 +116,22 @@ Before every commit: run `git status` and confirm no ignored or local-only files
 - [ ] API key is not exposed (check network tab and bundle). Rate limits are active
 - [ ] README complete. Repo public. No AI-tool files in git history
 
-## 6. Demo video (60–90 s) shot list
+## 6. Demo video (75–90 s) shot list
 
-1. (0–5 s) Phone, open the link, tap **Tune in**. The jingle hits.
-2. (5–20 s) The RJ greets "Harsh from Jammu". Captions show the `sunny_hi_reels` chip.
-3. (20–35 s) News in the breaking-news voice. Cut to the ad break (two voices, a laugh).
-4. (35–55 s) Kahani: narrator, then suspense character, then kid. The speaker chips change on each line.
-5. (55–70 s) Hold **Call RJ**: "एक भूतिया कहानी सुनाओ!" The RJ answers live, then the Kahani changes theme.
-6. (70–85 s) Turn the dial to Tamil, then Bangla. Native voices, new jingle.
-7. (85–90 s) End card: "Tarang FM · Powered by Sarvam Bulbul v4 Flash" plus the URL.
+Record on a phone with screen recording **and device audio** on (iOS: Control Centre → Screen Recording; Android: Screen recorder → "Media sounds"). Do one warm-up run first so the news and first segments are cached.
+
+**Before recording:** type your name on the tune-in screen. Have a second phone ready to dial the studio line.
+
+1. (0–5 s) Open the link, tap **Tune in now**. The jingle plays over the sting.
+2. (5–18 s) The RJ greets you by name and city and mentions the weather. Point at the `sunny_hi_reels` speaker chip and the English subtitle.
+3. (18–30 s) News: your city first, then national. Scroll to the sources card. Let one ad play (two voices, a new ad format every break).
+4. (30–48 s) **The phone line:** on the second phone, call +91 79 6585 4148 and leave a dedication. Back on the radio, the studio panel shows the call as *In the queue*, then *Up next*, then *On air now* while the RJ reads it by name.
+5. (48–62 s) Kahani: narrator, then two characters, then the kid. The speaker chip changes on every line. Let the twist land.
+6. (62–75 s) Hold **Call RJ** and say "एक भूतिया ट्रेन की कहानी सुनाओ!" The RJ answers within a couple of seconds, and the next Kahani is announced on your theme.
+7. (75–85 s) Turn the dial to Tamil, then Gujarati: static, a new jingle, native voices.
+8. (85–90 s) End card: "Tarang FM · every voice is Sarvam Bulbul v4 Flash" plus the URL.
+
+**After recording:** upload the video by dragging it into a GitHub issue or PR comment, copy the `https://github.com/user-attachments/…` link it gives you, and paste that link on its own line under **Demo** in the README. GitHub then shows a player there. Use the same file for the X/LinkedIn post.
 
 ## 7. Submission checklist (deadline 15 Oct 2026, 8 PM IST; aim to finish 2 hours early)
 
