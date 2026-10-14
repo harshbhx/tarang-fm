@@ -238,7 +238,7 @@ async function writeScript(
       const min = type === 'news' ? Math.min(MIN_LINES.news, headlines.length + 1) : MIN_LINES[type];
       if (lines.length < min) throw new Error(`only ${lines.length} usable lines for ${type}`);
       const mood: Mood | undefined = raw.mood === 'heavy' ? 'heavy' : raw.mood === 'light' ? 'light' : undefined;
-      return { title: raw.title, lines, summary: raw.summary_en?.trim() || undefined, mood };
+      return { title: raw.title, lines, summary: raw.summary_en?.replace(/\{name\}/g, 'the listener').trim() || undefined, mood };
     } catch (err) {
       lastError = err;
       console.error(`[segment] ${station.id}/${type} attempt ${attempt + 1} failed: ${String(err)}`);

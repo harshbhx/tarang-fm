@@ -13,7 +13,7 @@ const memory = new Map<string, { at: number; headlines: Source[] }>();
 
 /** Grim stories (murder, sexual violence, suicide, bodies) make poor light radio; skip them in every station language. */
 const GRIM =
-  /murder|rape|suicide|dead body|beheaded|lynch|हत्या|हत्याकांड|मर्डर|बलात्कार|रेप|आत्महत्या|लाश|शव|कत्ल|கொலை|தற்கொலை|பாலியல்|பிறப்புறுப்பு|சடலம்|খুন|হত্যা|ধর্ষণ|আত্মহত্যা|মৃতদেহ|खून|હત્યા|ખૂન|બળાત્કાર|આત્મહત્યા|લાશ|મૃતદેહ/i;
+  /murder|rape|suicide|dead body|beheaded|lynch|\bstab(bed|bing|s)?\b|sexual|molest|चाकू|यौन|छेड़छाड़|दुष्कर्म|मौत के घाट|विनयभंग|लैंगिक|भोसक|கத்திக்குத்து|ছুরি|যৌন|છરી|જાતીય|हत्या|हत्याकांड|मर्डर|बलात्कार|रेप|आत्महत्या|लाश|शव|कत्ल|கொலை|தற்கொலை|பாலியல்|பிறப்புறுப்பு|சடலம்|খুন|হত্যা|ধর্ষণ|আত্মহত্যা|মৃতদেহ|खून|હત્યા|ખૂન|બળાત્કાર|આત્મહત્યા|લાશ|મૃતદેહ/i;
 
 export function isGrim(title: string): boolean {
   return GRIM.test(title);
