@@ -7,12 +7,15 @@
 import { DurableObject } from 'cloudflare:workers';
 import { SHOW_CLOCK, TTS_SAMPLE_RATE } from '../../shared/constants';
 import {
+  LIVE_AUTO_OFF_MS,
   LIVE_BUFFER_AHEAD_MS,
   LIVE_IDLE_SLEEP_MS,
   LIVE_MAX_LISTENERS,
+  LIVE_OFF_AIR_NOTE,
   LIVE_WELCOME_BATCH_MS,
   LIVE_WELCOME_MIN_GAP_MS,
   type LiveClientMessage,
+  type LiveControlResponse,
   type LiveLine,
   type LiveListener,
   type LiveServerMessage,
@@ -99,6 +102,10 @@ interface StationState {
   /** Origin of the site (news cache keys) */
   origin?: string;
   state: LiveState;
+  /** Switched on by the studio; an off station never wakes, whoever joins */
+  enabled?: boolean;
+  /** When a started station switches itself off */
+  enabledUntil?: number;
   /** Random id of the show since the station last woke; work from an earlier show is dropped */
   showId?: string;
   note?: string;
@@ -229,7 +236,7 @@ export class LiveStation extends DurableObject<Env> {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const match = /^\/api\/live\/([a-z]{2})\/(ws|now|audio\/([A-Za-z0-9-]{1,64}))$/.exec(url.pathname);
+    const match = /^\/api\/live\/([a-z]{2})\/(ws|now|control|audio\/([A-Za-z0-9-]{1,64}))$/.exec(url.pathname);
     const station = match ? STATION_BY_ID[match[1] as StationId] : undefined;
     if (!match || !station) return notFound(`No route for ${request.method} ${url.pathname}.`);
     if (this.s.station !== station.id || this.s.origin !== url.origin) {
@@ -239,7 +246,64 @@ export class LiveStation extends DurableObject<Env> {
     }
     if (match[2] === 'ws') return this.upgrade(request);
     if (match[2] === 'now') return json(this.snapshot(Date.now()));
+    if (match[2] === 'control') {
+      try {
+        return await this.control(request);
+      } catch (err) {
+        console.error(`[live] control failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+        return json({ error: { code: 'internal_error', message: 'Control failed.' } }, 500);
+      }
+    }
     return this.audio(match[3]);
+  }
+
+  /** Studio switch (the Worker checks the admin key before forwarding). Start lets the show wake; stop puts it to sleep. */
+  private async control(request: Request): Promise<Response> {
+    if (request.method !== 'POST') return json({ error: { code: 'method_not_allowed', message: 'POST only.' } }, 405);
+    let action: unknown;
+    try {
+      action = ((await request.json()) as { action?: unknown } | null)?.action;
+    } catch {
+      action = undefined;
+    }
+    const now = Date.now();
+    if (action === 'start') {
+      this.s.enabled = true;
+      this.s.enabledUntil = now + LIVE_AUTO_OFF_MS;
+      if (this.s.state === 'sleeping') {
+        this.s.note = undefined;
+        const waiting = this.listeners();
+        // Nobody here yet: the idle window starts now
+        if (!waiting.length) this.s.emptySince = now;
+        if (waiting.length) {
+          this.wake(now);
+          // Everyone who was waiting gets one live hello
+          if (this.s.state !== 'sleeping') for (const l of waiting) this.s.pendingWelcomes.push({ id: l.id, at: now });
+        }
+      }
+      this.broadcast({ type: 'status', now, state: this.s.state, enabled: true, enabledUntil: this.s.enabledUntil, ...(this.s.note ? { note: this.s.note } : {}) });
+      await this.save();
+      this.produce(now);
+      await this.schedule(now);
+    } else if (action === 'stop') {
+      this.s.enabled = false;
+      this.s.enabledUntil = undefined;
+      await this.sleep(now, LIVE_OFF_AIR_NOTE);
+    } else {
+      return json({ error: { code: 'invalid_request', message: 'action must be "start" or "stop".' } }, 400);
+    }
+    const reply: LiveControlResponse = {
+      station: this.s.station ?? 'hi',
+      enabled: this.isEnabled(now),
+      state: this.s.state,
+      listeners: this.listeners().length,
+    };
+    if (reply.enabled && this.s.enabledUntil) reply.enabledUntil = this.s.enabledUntil;
+    return json(reply);
+  }
+
+  private isEnabled(now: number): boolean {
+    return Boolean(this.s.enabled) && (this.s.enabledUntil ?? 0) > now;
   }
 
   private upgrade(request: Request): Response {
@@ -348,8 +412,11 @@ export class LiveStation extends DurableObject<Env> {
     if (attachment.city) listener.city = attachment.city;
 
     this.s.emptySince = undefined;
-    // Waking tells everyone already here; the newcomer hears the state in its snapshot
-    if (this.s.state === 'sleeping') this.wake(now);
+    // Waking tells everyone already here; the newcomer hears the state in its snapshot. An off station only waits.
+    if (this.s.state === 'sleeping') {
+      if (this.isEnabled(now)) this.wake(now);
+      else this.s.note ??= LIVE_OFF_AIR_NOTE;
+    }
     if (this.s.state !== 'sleeping') this.s.pendingWelcomes.push({ id: listener.id, at: now });
 
     // 'joined' is the socket's first message: it only counts as a listener (and gets broadcasts) from here on
@@ -384,12 +451,33 @@ export class LiveStation extends DurableObject<Env> {
   async alarm(): Promise<void> {
     const now = Date.now();
     try {
-      if (this.s.state === 'sleeping') return;
+      if (this.s.state === 'sleeping') {
+        // Started but nobody came (or the auto-off time passed): switch off
+        const idle = !this.listeners().length && now - (this.s.emptySince ?? now) >= LIVE_IDLE_SLEEP_MS;
+        if (this.s.enabled && (!this.isEnabled(now) || idle)) {
+          this.s.enabled = false;
+          this.s.enabledUntil = undefined;
+          this.s.note = LIVE_OFF_AIR_NOTE;
+          await this.save();
+          this.broadcast({ type: 'status', now, state: 'sleeping', note: LIVE_OFF_AIR_NOTE, enabled: false });
+        }
+        return;
+      }
+      if (!this.isEnabled(now)) {
+        // Auto-off (or switched off elsewhere): stop spending on this show
+        this.s.enabled = false;
+        this.s.enabledUntil = undefined;
+        await this.sleep(now, LIVE_OFF_AIR_NOTE);
+        return;
+      }
       const listeners = this.listeners();
       if (!listeners.length) {
         this.s.emptySince ??= now;
         if (now - this.s.emptySince >= LIVE_IDLE_SLEEP_MS) {
-          await this.sleep(now);
+          // Nobody listening for the idle window: switch the station off, not just to sleep
+          this.s.enabled = false;
+          this.s.enabledUntil = undefined;
+          await this.sleep(now, LIVE_OFF_AIR_NOTE);
           return;
         }
       } else {
@@ -412,7 +500,13 @@ export class LiveStation extends DurableObject<Env> {
   /** One alarm, multiplexed: the next producer tick or the welcome due time while listeners are here, else the sleep time. */
   private async schedule(now: number): Promise<void> {
     if (this.s.state === 'sleeping') {
-      await this.ctx.storage.deleteAlarm();
+      // A started station waiting for its first listener still needs its switch-off time
+      if (this.s.enabled && this.s.enabledUntil && !this.listeners().length) {
+        const idleAt = (this.s.emptySince ?? now) + LIVE_IDLE_SLEEP_MS;
+        await this.ctx.storage.setAlarm(Math.max(now + 50, Math.min(idleAt, this.s.enabledUntil)));
+      } else {
+        await this.ctx.storage.deleteAlarm();
+      }
       return;
     }
     let at: number;
@@ -423,6 +517,7 @@ export class LiveStation extends DurableObject<Env> {
       const due = this.welcomeDueAt();
       if (due !== undefined) at = Math.min(at, Math.max(now + 50, due));
     }
+    if (this.s.enabledUntil) at = Math.min(at, Math.max(now + 50, this.s.enabledUntil));
     await this.ctx.storage.setAlarm(at);
   }
 
@@ -450,7 +545,7 @@ export class LiveStation extends DurableObject<Env> {
       emptySince: undefined,
     } satisfies Partial<StationState>);
     this.work = undefined;
-    this.broadcast({ type: 'status', now, state: 'warming_up' });
+    this.broadcast({ type: 'status', now, state: 'warming_up', enabled: true, ...(this.s.enabledUntil ? { enabledUntil: this.s.enabledUntil } : {}) });
   }
 
   private async sleep(now: number, note?: string): Promise<void> {
@@ -469,7 +564,7 @@ export class LiveStation extends DurableObject<Env> {
     await this.ctx.storage.deleteAlarm();
     for (let i = 0; i < keys.length; i += 128) await this.ctx.storage.delete(keys.slice(i, i + 128));
     await this.save();
-    this.broadcast({ type: 'status', now, state: 'sleeping', ...(note ? { note } : {}) });
+    this.broadcast({ type: 'status', now, state: 'sleeping', enabled: this.isEnabled(now), ...(note ? { note } : {}) });
     this.broadcast({ type: 'timeline', now, lines: [] });
   }
 
@@ -787,9 +882,13 @@ export class LiveStation extends DurableObject<Env> {
   }
 
   private snapshot(now: number): LiveSnapshot {
+    const enabled = this.isEnabled(now);
     return {
       station: this.s.station ?? 'hi',
       state: this.s.state,
+      enabled,
+      ...(enabled && this.s.enabledUntil ? { enabledUntil: this.s.enabledUntil } : {}),
+      ...(this.s.note ? { note: this.s.note } : {}),
       now,
       listeners: this.listeners(),
       lines: upcomingLines(this.s.lines, now),

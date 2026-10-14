@@ -299,6 +299,17 @@ app.get('/live/:station/audio/:lineId', async (c) => {
   return out;
 });
 
+/** Studio switch: start or stop a station's shared show (owner only, bearer admin key). */
+app.post('/live/:station/control', async (c) => {
+  const stub = liveStation(c);
+  if (!stub) return apiError(c, 404, 'unknown_station', 'That station is not on the dial yet.');
+  const auth = c.req.header('authorization') ?? '';
+  const given = auth.startsWith('Bearer ') ? auth.slice(7).trim() : undefined;
+  if (!tokenMatches(given, c.env.LIVE_ADMIN_TOKEN)) return apiError(c, 401, 'unauthorized', 'Wrong admin key.');
+  const res = await stub.fetch(c.req.raw);
+  return new Response(res.body, res);
+});
+
 app.get('/live/:station/now', async (c) => {
   const stub = liveStation(c);
   if (!stub) return apiError(c, 404, 'unknown_station', 'That station is not on the dial yet.');
