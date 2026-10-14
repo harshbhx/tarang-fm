@@ -4,7 +4,7 @@
 
 Every voice is [Sarvam **Bulbul v4 Flash**](https://docs.sarvam.ai/api/api-guides-tutorials/text-to-speech/best-practice-guide-for-bulbul-v-4-flash). Each line on screen shows exactly which of its personas is speaking.
 
-**▶ Live:** https://tarang-fm.creharsh.workers.dev (the landing page, with a playable voice gallery for all five stations) · **Straight to the radio:** https://tarang-fm.creharsh.workers.dev/listen · Works on any phone or laptop, with no install or login.
+**▶ Live:** https://tarang-fm.dualmindlab.tech (the landing page, with a playable voice gallery for all five stations) · **Straight to the radio:** https://tarang-fm.dualmindlab.tech/listen · Works on any phone or laptop, with no install or login.
 
 > 🎬 Demo video: _coming with the submission_
 
