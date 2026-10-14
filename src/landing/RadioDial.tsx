@@ -114,10 +114,9 @@ export default function RadioDial({ onTuneIn }: { onTuneIn: (id: StationId) => v
             key={s.id}
             className="lp-mark"
             data-on={onAir && station?.id === s.id}
-            lang={s.language}
             style={{ left: `${pos(Number(s.frequency))}%`, '--st': s.accent } as Vars}
           >
-            {s.nativeName.split(' ')[1] ?? s.nativeName}
+            {s.languageName}
           </span>
         ))}
         <span className="lp-glass-unit lp-glass-unit--l">FM</span>
@@ -135,8 +134,8 @@ export default function RadioDial({ onTuneIn }: { onTuneIn: (id: StationId) => v
           <small>MHz</small>
         </span>
         <span className="lp-readout-text">
-          <span className="lp-readout-name" lang={station?.language}>
-            {station ? station.nativeName : 'Warming up'}
+          <span className="lp-readout-name">
+            {station ? `Tarang ${station.languageName}` : 'Warming up'}
           </span>
           <span className="lp-readout-tag">{station ? TAGLINE_EN[station.id] : 'Finding a station'}</span>
         </span>
