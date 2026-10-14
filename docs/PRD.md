@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Product** | Tarang FM (working name): an AI-run Indian radio station in the browser |
+| **Product** | **Tarang FM** (तरंग, "wave"): an AI-run Indian radio station in the browser |
 | **Version** | PRD v1.1 (scoped to a 4–5 hour build) |
 | **Date** | 14 October 2026 |
 | **Owner** | Harsh Bhanushali |
@@ -164,7 +164,7 @@ Open link → Tuner screen (station dial, optional name, "Tune in")
 | # | Question | Resolve in |
 |---|---|---|
 | Q1 | Account rate-limit tier (Starter: TTS 60 req/min, chat-105B 40 req/min)? | Spike |
-| Q2 | Final product name: Tarang FM or another? | Before README |
+| Q2 | ~~Product name~~ Resolved: **Tarang FM**. Repo `harshbhx/tarang-fm`, Worker `tarang-fm` | Done |
 | Q3 | Do `pitch`/`loudness` work on v4-flash? Does HTTP streaming accept `linear16`? | Spike |
 | Q4 | Perceived voice type of each cast voice | Spike (audition) |
 | Q5 | Does Google News RSS work from Cloudflare for `hi`, `ta`, `bn`? | Spike |
