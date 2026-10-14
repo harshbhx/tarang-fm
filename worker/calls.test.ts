@@ -109,6 +109,22 @@ describe('studio call table', () => {
     expect(row.airedAt).toBeTruthy();
   });
 
+  it('counts calls from before the table went live as read, once', () => {
+    const t = new CallTable(sqlite());
+    t.save(call('before', 10), T0);
+    t.save(call('after', 0), T0);
+    const cutoff = new Date(T0 - 60_000).toISOString();
+    expect(t.retireOnce(cutoff, T0)).toBe(1);
+    const byId = Object.fromEntries(t.recent(T0).map((c) => [c.id, c.airedAt]));
+    expect(byId.before).toBe(call('before', 10).at);
+    expect(byId.after).toBeUndefined();
+    expect(t.claim(['before', 'after'], ME, T0)).toEqual(['after']);
+    // Runs once: a call saved later with an old timestamp is left alone
+    t.save(call('late', 20), T0);
+    expect(t.retireOnce(cutoff, T0)).toBe(0);
+    expect(t.recent(T0).find((c) => c.id === 'late')?.airedAt).toBeUndefined();
+  });
+
   it('imports the old list once, so the switch loses no calls', () => {
     const sql = sqlite();
     const t = new CallTable(sql);

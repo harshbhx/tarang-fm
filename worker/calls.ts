@@ -164,6 +164,21 @@ export class CallTable {
       .map((r) => r.id);
   }
 
+  /**
+   * One-time: calls made before `cutoff` (when this table went live) count as read. The old per-radio queue
+   * already read them, but kept that in each browser, so the table can't know; this stops them airing again.
+   */
+  retireOnce(cutoff: string, now = Date.now()): number {
+    const done = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'retired'").toArray();
+    if (done.length) return 0;
+    const before = this.sql
+      .exec<{ n: number }>('SELECT COUNT(*) AS n FROM calls WHERE aired_at IS NULL AND at < ?', cutoff)
+      .toArray()[0].n;
+    this.sql.exec("UPDATE calls SET aired_at = at, aired_station = 'legacy' WHERE aired_at IS NULL AND at < ?", cutoff);
+    this.sql.exec("INSERT INTO meta (key, value) VALUES ('retired', ?)", new Date(now).toISOString());
+    return before;
+  }
+
   /** One-time import of the calls the old KV list held, so moving to this table loses nothing. */
   importOnce(calls: PhoneCall[], now = Date.now()): number {
     const done = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'imported'").toArray();

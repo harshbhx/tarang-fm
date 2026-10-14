@@ -9,6 +9,8 @@ import { CallTable } from './calls';
 
 /** The old KV list the table imports once (worker/phone.ts kept calls there before). */
 const LEGACY_KEY = 'phone:recent';
+/** When the shared table went live; calls before it were already read by the old per-radio queue. */
+const TABLE_LIVE_AT = '2026-10-14T21:44:00.000Z';
 
 export class StudioLine extends DurableObject<Env> {
   private readonly table: CallTable;
@@ -19,6 +21,7 @@ export class StudioLine extends DurableObject<Env> {
     void ctx.blockConcurrencyWhile(async () => {
       const legacy = await env.PHONE?.get<PhoneCall[]>(LEGACY_KEY, 'json').catch(() => null);
       this.table.importOnce(Array.isArray(legacy) ? legacy : []);
+      this.table.retireOnce(TABLE_LIVE_AT);
     });
   }
 
