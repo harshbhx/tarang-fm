@@ -103,6 +103,7 @@ Open link → Tuner screen (station dial, optional name, "Tune in")
 | M12 | **Fallbacks.** LLM failure → retry once → template RJ filler and skip the segment. TTS failure → show the caption and continue |
 | M13 | **Mobile-first**, responsive from 360 px, keyboard accessible. Works in current Chrome, Edge, Firefox and Safari (iOS 16.4+) |
 | M14 | **Deployed** on Cloudflare with a public URL. README with demo GIF/video and setup steps |
+| M15 | **English subtitles**: each caption shows an English translation (Sarvam Translate), toggleable, so judges and non-native listeners can follow every station |
 
 ### 6.2 If time (in this order; start one only when every MVP item is done and deployed)
 | # | Item | Why it matters |
@@ -114,8 +115,11 @@ Open link → Tuner screen (station dial, optional name, "Tune in")
 | T5 | ⚡ TTFA (time to first audio) overlay per line | Shows how fast V4 Flash is |
 | T6 | Hinglish/English station (`enhi` + `en` voices), then Telugu, Kannada, Punjabi, Gujarati | All 9 V4 languages |
 | T7 | Dedications: the RJ reads the caller's dedication with a shayari | Radio charm |
-| T8 | Share-a-clip link (replays a cached segment) | Helps the social post spread |
-| T9 | Live broadcast mode: one shared timeline per station (Durable Object), call-ins heard by everyone tuned in, listener count | Big wow, but high risk. Only if everything else is done |
+| T8 | Share-a-clip link (replays a cached segment from R2) | Helps the social post spread |
+| T9 | Instant news: a Cron Trigger pre-builds each station's bulletin into KV every 30 min | Faster start, uses Cloudflare well |
+| T10 | Faster call-in replies over the Bulbul WebSocket (stream LLM sentences into TTS) | Lower latency |
+| T11 | Dedication wall (D1) + live stats panel (Analytics Engine: listens, call-ins, TTFA) | Social proof, shows performance |
+| T12 | Live broadcast mode: one shared timeline per station (Durable Object), call-ins heard by everyone tuned in, listener count | Big wow, but high risk. Only if everything else is done |
 
 ## 7. Content rules
 
@@ -165,6 +169,6 @@ Open link → Tuner screen (station dial, optional name, "Tune in")
 |---|---|---|
 | Q1 | Account rate-limit tier (Starter: TTS 60 req/min, chat-105B 40 req/min)? | Spike |
 | Q2 | ~~Product name~~ Resolved: **Tarang FM**. Repo `harshbhx/tarang-fm`, Worker `tarang-fm` | Done |
-| Q3 | Do `pitch`/`loudness` work on v4-flash? Does HTTP streaming accept `linear16`? | Spike |
-| Q4 | Perceived voice type of each cast voice | Spike (audition) |
-| Q5 | Does Google News RSS work from Cloudflare for `hi`, `ta`, `bn`? | Spike |
+| Q3 | ~~pitch/loudness, linear16~~ Resolved by spike: both accepted, `linear16` streams raw PCM | Done |
+| Q4 | ~~Voice types~~ Resolved by pitch audition (VOICE-CASTING.md) | Done |
+| Q5 | ~~News RSS~~ Works from Node for hi/ta/bn (26 items each). Re-check from the deployed Worker | Integration |

@@ -120,6 +120,7 @@ export interface Line {
   role: Role;
   speaker: string;
   text: string;                 // ≤ 220 chars, already cleaned
+  en?: string;                  // English subtitle (Sarvam Translate); absent if translation failed or station is English
   pace: number;
   temperature: number;
   pauseAfterMs: number;         // silence after this line
@@ -154,6 +155,7 @@ export type CallIntent = 'chat' | 'dedication' | 'story_request' | 'news_request
 
 export interface CallResponse {
   transcript: string;
+  transcriptEn?: string;        // English subtitle of what the caller said
   language?: string;            // detected BCP-47
   intent: CallIntent;
   theme?: string;               // for story_request
@@ -182,6 +184,7 @@ All routes are JSON unless noted. Errors use `{ error: { code: string, message: 
   2. maps role → cast voice (speaker, pace, temperature)
   3. cleans the text (§8.4)
   4. splits lines over 220 chars at sentence boundaries
+- After validation, every line's `en` subtitle is filled by `translate()` in parallel (Sarvam Translate `mayura:v1`, `modern-colloquial`, target `en-IN`). A failed translation leaves `en` undefined and never fails the segment.
 - On LLM failure it retries once, then returns a template segment with `fallback: true`.
 - Response: `Segment`.
 - Timeout: 20 s (the client requests the next segment a full segment ahead, so this isn't on the critical path).
@@ -194,8 +197,12 @@ All routes are JSON unless noted. Errors use `{ error: { code: string, message: 
 - Streams to `POST https://api.sarvam.ai/text-to-speech/stream` with:
   `{ model: "bulbul:v4-flash", language_code: <station language>, speaker, text, pace, temperature, speech_sample_rate: 24000, output_audio_codec: "linear16", enable_preprocessing: true }`
 - The upstream body is piped straight to the client (no buffering).
-- Response headers: `Content-Type: audio/pcm;rate=24000;bits=16;channels=1` and `X-Audio-Format: pcm|wav`.
-- **If `linear16` is rejected on HTTP stream** (checked in the spike), fall back to `wav`. The client PCM reader must handle both: if the stream starts with `RIFF`, parse the header up to the `data` chunk.
+- Response headers: `Content-Type: audio/pcm;rate=24000;bits=16;channels=1` and `X-Audio-Format: pcm`.
+- **Spike-verified:**
+  - `linear16` returns `content-type: audio/pcm` with raw headerless 16-bit LE mono PCM at 24 kHz, streamed in about 30+ chunks.
+  - `wav` returns a 44-byte RIFF header with size fields `0xFFFFFFFF`, followed by PCM.
+  - Warm TTFB is about 190–340 ms.
+  - The client reader still handles both: if the stream starts with `RIFF`, skip to the `data` chunk payload.
 
 ### `POST /api/call` (multipart/form-data)
 - Fields:
@@ -206,7 +213,8 @@ All routes are JSON unless noted. Errors use `{ error: { code: string, message: 
 - Pipeline:
   1. **STT:** `POST https://api.sarvam.ai/speech-to-text` (multipart) with `model=saaras:v4`, `language_code=<station language>`, and `mode=<station.sttMode>`. An empty transcript gets a "line not clear" reply.
   2. **LLM:** `POST https://api.sarvam.ai/v1/chat/completions` with `model: "sarvam-105b"` and `reasoning_effort: null`, `max_tokens: 400`, `temperature: 0.7`, json_schema `{ intent, reply, theme }`. Timeout 8 s, then a template reply.
-  3. Return `CallResponse`. The client then calls `/api/tts` with `reply` (two round trips, which keeps the API simple).
+  3. Translate the transcript and reply to English (in parallel, best-effort) for `transcriptEn` and `reply.en`.
+  4. Return `CallResponse`. The client then calls `/api/tts` with `reply` (two round trips, which keeps the API simple).
 - Caller audio is never stored.
 
 ### Rate limits (Workers rate-limiting binding, per IP)
@@ -226,7 +234,8 @@ All routes are JSON unless noted. Errors use `{ error: { code: string, message: 
 |---|---|---|
 | `ttsStream(body)` | `POST /text-to-speech/stream` | Returns the upstream `Response`. Retries 429/5xx up to 2 times **before** the first byte (backoff 300 ms × 2ⁿ, jittered) |
 | `transcribe(blob, opts)` | `POST /speech-to-text` | multipart `file`, `model`, `language_code`, `mode`. Returns `{ transcript, language_code }` |
-| `chatJson(messages, schema, opts)` | `POST /v1/chat/completions` | `response_format: { type: "json_schema", json_schema: { name, schema, strict: true } }`. If the model wraps JSON in prose or fences, extract the first `{…}` block and validate with zod |
+| `chatJson(messages, schema, opts)` | `POST /v1/chat/completions` | `response_format: { type: "json_schema", json_schema: { name, schema, strict: true } }`. If the model wraps JSON in prose or fences, extract the first `{…}` block and validate with zod. Spike: `sarvam-105b` with `reasoning_effort: null` returned valid JSON in 1.3 s with 0 reasoning tokens |
+| `translate(text, source, target='en-IN')` | `POST /translate` | `{ input, source_language_code, target_language_code, model: "mayura:v1", mode: "modern-colloquial" }` → `translated_text`. Input ≤ 1,000 chars. Best-effort with a 4 s timeout |
 
 - Auth header on every call: `api-subscription-key: ${env.SARVAM_API_KEY}`.
 - Log the `request_id` from error bodies.
@@ -344,16 +353,40 @@ Each station has 3 template RJ filler lines, for example "आप सुन र�
 ## 11. Testing and verification
 
 - **Unit tests (Vitest):** `cleanText` + line splitting, zod schemas, PCM chunk converter (odd-byte carry-over, WAV header skip), scheduler clock progression.
-- **Spike (`scripts/spike.ts`, Node, before feature work)** answers:
-  - `linear16` vs `wav` on HTTP stream and the actual byte format
-  - whether `temperature` changes delivery, and whether `pitch`/`loudness` are accepted on v4-flash
-  - TTFB for 3 voices
-  - `json_schema` round trip on `sarvam-105b`
-  - Saaras on a webm sample
-  - Google News RSS from a Worker
+- **Spike (`npm run spike`), run 14 Oct 2026. Results:**
+  - **TTS:** `linear16` streams raw PCM (`audio/pcm`). `wav` streams a RIFF header with `0xFFFFFFFF` sizes. Warm TTFB is 190–340 ms; a cold first call is about 530 ms, and one `en-IN` outlier hit 2.8 s.
+  - **Params:** `temperature`, `pitch` and `loudness` are all accepted on v4-flash. A Hindi persona with `ta-IN` text works.
+  - **Speaker IDs:** some docs IDs are stale (`vetri_ta_*` → `aravind_ta_*`, `bappa_bn_*` → `arnab_bn_*`). An invalid speaker returns 400 listing all 224 live IDs. The live list is saved locally, and `npm run audition` verifies the cast.
+  - **Chat:** `json_schema` on `sarvam-105b` with `reasoning_effort: null` gives valid JSON in 1.3 s with 0 reasoning tokens.
+  - **STT:** Saaras v4 (`codemix` and `transcribe`) takes about 400 ms for an 8 s clip and is accurate. `codemix` keeps "FM" in Latin script.
+  - **News:** Google News RSS returns 26 items each for `hl=hi`, `ta` and `bn`. Titles end with " - Source".
+- **Voice audition (`npm run audition`):** median-F0 classification of every cast voice. Results are in VOICE-CASTING.md.
 - **Manual QA matrix before submission:** Chrome desktop, Android Chrome, iOS Safari. For each: tune in, switch stations, call in (Hindi and Tamil), 10 minutes of continuous play with no dead air.
 
-## 12. Commands (to be filled in once the scaffold exists)
+## 12. Platform features used
+
+Each feature has a job. Nothing is added just to tick a box.
+
+| Platform | Feature | Used for | Tier |
+|---|---|---|---|
+| Sarvam | **Bulbul v4 Flash** HTTP streaming (`linear16`) | Every spoken line, with 14+ personas cast by style | MVP |
+| Sarvam | **Sarvam-105B** structured outputs (`json_schema`) | Radio scripts (RJ, news, ads, Kahani) and call-in understanding | MVP |
+| Sarvam | **Saaras v4** STT (`codemix` / `transcribe`) | Call-in transcription | MVP |
+| Sarvam | **Translate** (`mayura:v1`, modern-colloquial) | English subtitles under native captions, so non-native listeners and judges can follow | MVP |
+| Sarvam | Bulbul **WebSocket** streaming | Call-in reply: stream LLM sentences into TTS for faster first audio | If time |
+| Sarvam | **Transliterate** | "Read along" romanized captions | If time |
+| Cloudflare | **Workers + static assets** (Vite plugin) | UI + API in one deploy | MVP |
+| Cloudflare | **Rate-limiting binding** | Per-IP protection for `/api/segment`, `/api/tts`, `/api/call` | MVP |
+| Cloudflare | **Cache API** | News RSS (30 min) and weather (15 min) | MVP |
+| Cloudflare | `request.cf` geolocation | Listener city, region and timezone for personalization, with no permission prompt | MVP |
+| Cloudflare | Workers Logs / observability | Timings and errors per request (`Server-Timing`) | MVP |
+| Cloudflare | **Cron Triggers + KV** | Pre-build each station's news bulletin script every 30 min, so news starts instantly | If time |
+| Cloudflare | **R2** | Audio cache for share-a-clip and instant replays | If time |
+| Cloudflare | **D1** | "Dedication wall": recent on-air dedications per station | If time |
+| Cloudflare | **Analytics Engine** | Listen and call-in counts and TTFA percentiles for a live stats panel | If time |
+| Cloudflare | **Durable Objects** (WebSocket hibernation) | Live broadcast mode: one shared timeline per station, call-ins heard by everyone | If time (last) |
+
+## 13. Commands (to be filled in once the scaffold exists)
 ```
 npm run dev       # Vite + Worker locally (needs .dev.vars with SARVAM_API_KEY)
 npm run build     # production build
