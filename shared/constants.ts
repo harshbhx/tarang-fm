@@ -38,7 +38,7 @@ export const PAUSE_AFTER_MS: Record<SegmentType, number> = {
 
 /** The studio call-in line (Sarvam Voice Agents inbound number). */
 export const STUDIO_NUMBER = '+917965854148';
-export const STUDIO_NUMBER_DISPLAY = '+91 79658 54148';
+export const STUDIO_NUMBER_DISPLAY = '+91 79 6585 4148';
 
 /** How a line is acted. Bulbul has no SSML, so delivery maps to pace / pitch / loudness / gap (worker/show.ts). */
 export const DELIVERIES = ['normal', 'warm', 'excited', 'fast', 'hushed', 'shout', 'dramatic', 'sad'] as const;
