@@ -47,6 +47,8 @@ export interface Station {
   sttMode: 'codemix' | 'transcribe';
   /** Fixed jingle line in native script */
   stationIdText: string;
+  /** English version of the jingle line (subtitle) */
+  stationIdEn: string;
   cast: Record<Role, Voice>;
 }
 

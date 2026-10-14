@@ -145,7 +145,9 @@ export function stationIdSegment(station: Station, n: number): Segment {
     temperature: voice.temperature,
     pauseAfterMs: PAUSE_AFTER_MS.station_id,
   };
-  if (station.language !== 'en-IN') line.en = `You're listening to Tarang FM ${station.frequency}!`;
+  if (station.language !== 'en-IN') {
+    line.en = station.stationIdEn;
+  }
   return {
     id: `local-${station.id}-station-id-${n}`,
     station: station.id,

@@ -374,7 +374,6 @@ Each feature has a job. Nothing is added just to tick a box.
 | Sarvam | **Saaras v4** STT (`codemix` / `transcribe`) | Call-in transcription | MVP |
 | Sarvam | **Translate** (`mayura:v1`, modern-colloquial) | English subtitles under native captions, so non-native listeners and judges can follow | MVP |
 | Sarvam | Bulbul **WebSocket** streaming | Call-in reply: stream LLM sentences into TTS for faster first audio | If time |
-| Sarvam | **Transliterate** | "Read along" romanized captions | If time |
 | Cloudflare | **Workers + static assets** (Vite plugin) | UI + API in one deploy | MVP |
 | Cloudflare | **Rate-limiting binding** | Per-IP protection for `/api/segment`, `/api/tts`, `/api/call` | MVP |
 | Cloudflare | **Cache API** | News RSS (30 min) and weather (15 min) | MVP |

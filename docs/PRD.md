@@ -103,7 +103,7 @@ Open link → Tuner screen (station dial, optional name, "Tune in")
 | M12 | **Fallbacks.** LLM failure → retry once → template RJ filler and skip the segment. TTS failure → show the caption and continue |
 | M13 | **Mobile-first**, responsive from 360 px, keyboard accessible. Works in current Chrome, Edge, Firefox and Safari (iOS 16.4+) |
 | M14 | **Deployed** on Cloudflare with a public URL. README with demo GIF/video and setup steps |
-| M15 | **English subtitles**: each caption shows an English translation (Sarvam Translate), toggleable, so judges and non-native listeners can follow every station |
+| M15 | **Readable by everyone**: each caption shows the spoken line in its native script with an English subtitle (Sarvam Translate) underneath. All UI copy (buttons, labels, states) is in English or light Hinglish, never Hindi-only |
 
 ### 6.2 If time (in this order; start one only when every MVP item is done and deployed)
 | # | Item | Why it matters |
