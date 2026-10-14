@@ -17,7 +17,7 @@ function hexToRgb(hex: string): Rgb {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-const WARM: Rgb = [255, 150, 70];
+const WARM: Rgb = [255, 170, 90];
 const FPS = 24;
 const IDLE_GLOW = 0.6;
 
@@ -98,7 +98,7 @@ export default function AmbientBackground({ accent, active }: AmbientBackgroundP
       const level = reduced ? 0 : Number.parseFloat(host?.style.getPropertyValue('--level') || '0') || 0;
 
       ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = '#050403';
+      ctx.fillStyle = '#060505';
       ctx.fillRect(0, 0, width, height);
       ctx.globalCompositeOperation = 'lighter';
       const t = time;
@@ -110,11 +110,11 @@ export default function AmbientBackground({ accent, active }: AmbientBackgroundP
       const cy = box ? ((box.top + box.height * 0.55) / vh) * height : height * 0.25;
       const size = box ? (Math.max(box.width, box.height) / vw) * width : width * 0.6;
       const breathe = 0.5 + 0.5 * Math.sin(t * 0.55);
-      const core = (0.15 + 0.06 * breathe + level * 0.1) * glow;
-      blob(cx + size * 0.04 * Math.sin(t * 0.21), cy, size * 0.95, color, core, 1.25, 1);
-      blob(cx, cy + (box ? (box.height / vh) * height * 0.55 : height * 0.15), size * 0.9, color, core * 0.75, 1.7, 0.55);
-      blob(cx - size * 0.35 + size * 0.1 * Math.sin(t * 0.13 + 1), cy + size * 0.2, size * 0.7, WARM, 0.06 * glow);
-      blob(width * (0.8 + 0.08 * Math.sin(t * 0.09 + 2)), height * (0.7 + 0.1 * Math.sin(t * 0.08 + 1)), width * 0.5, color, 0.05 * glow);
+      const core = (0.075 + 0.03 * breathe + level * 0.08) * glow;
+      blob(cx + size * 0.04 * Math.sin(t * 0.21), cy, size * 0.8, color, core, 1.2, 0.85);
+      blob(cx, cy + (box ? (box.height / vh) * height * 0.55 : height * 0.15), size * 0.75, color, core * 0.6, 1.6, 0.45);
+      blob(cx - size * 0.3 + size * 0.1 * Math.sin(t * 0.13 + 1), cy + size * 0.15, size * 0.55, WARM, 0.045 * glow);
+      blob(width * (0.82 + 0.06 * Math.sin(t * 0.09 + 2)), height * (0.75 + 0.08 * Math.sin(t * 0.08 + 1)), width * 0.4, color, 0.022 * glow);
       ctx.globalCompositeOperation = 'source-over';
 
       if ((live && !reduced) || settling) raf = requestAnimationFrame(draw);

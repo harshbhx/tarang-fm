@@ -32,6 +32,23 @@ export function MicIcon(props: IconProps) {
   );
 }
 
+export function PhoneIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M5.2 3.5h3.1l1.6 4.2-2.1 1.3a11.5 11.5 0 0 0 7.2 7.2l1.3-2.1 4.2 1.6v3.1a2 2 0 0 1-2.2 2A17.5 17.5 0 0 1 3.2 5.7a2 2 0 0 1 2-2.2Z" />
+    </Svg>
+  );
+}
+
+export function WifiOffIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3 3l18 18M8.5 16.4a5 5 0 0 1 7 0M5 12.9a10 10 0 0 1 4.2-2.4M19 12.9a10 10 0 0 0-2.6-1.8M2 9.3a15 15 0 0 1 4.4-2.7M22 9.3A15 15 0 0 0 11 5.1" />
+      <circle cx="12" cy="19.5" r="0.9" fill="currentColor" />
+    </Svg>
+  );
+}
+
 export function PauseIcon(props: IconProps) {
   return (
     <Svg strokeWidth={3} {...props}>

@@ -23,8 +23,9 @@ export type AudioFrameListener = (data: Uint8Array | null, now: number) => void;
 /**
  * The single analyser loop. While `active`, reads the master analyser each frame
  * (fftSize 256, byte frequency data), writes the smoothed voice-band level to `--level`
- * on `target` (never React state) and hands the frame to subscribers such as the
- * visualizer. Stops while the tab is hidden; ~10 fps and no level pulse under reduced motion.
+ * and two VU-ballistic channels (`--vu-l` low band, `--vu-r` presence band) on `target`
+ * (never React state), and hands the frame to subscribers such as the visualizer.
+ * Stops while the tab is hidden; ~10 fps and no level pulse under reduced motion.
  */
 export function useAudioPulse(
   getAnalyser: () => AnalyserNode | null,
@@ -49,8 +50,13 @@ export function useAudioPulse(
   useEffect(() => {
     const el = target.current;
     if (!el) return;
-    if (!active) {
+    const rest = () => {
       el.style.setProperty('--level', '0');
+      el.style.setProperty('--vu-l', '0');
+      el.style.setProperty('--vu-r', '0');
+    };
+    if (!active) {
+      rest();
       listeners.current.forEach((listener) => listener(null, performance.now()));
       return;
     }
@@ -59,7 +65,20 @@ export function useAudioPulse(
     let lastTick = 0;
     let level = 0;
     let shown = -1;
+    let vuL = 0;
+    let vuR = 0;
+    let shownL = -1;
+    let shownR = -1;
     const minGap = reduced ? 100 : 0;
+    /** Average of bins [from, to) as 0..1 */
+    const band = (from: number, to: number) => {
+      let sum = 0;
+      for (let i = from; i < to; i++) sum += data[i];
+      return sum / Math.max(1, to - from) / 255;
+    };
+    /** VU ballistics: quick rise, slow fall */
+    const ballistic = (current: number, target: number) =>
+      current + (target - current) * (target > current ? 0.32 : 0.07);
 
     const tick = (now: number) => {
       raf = 0;
@@ -74,19 +93,32 @@ export function useAudioPulse(
         if (data.length !== analyser.frequencyBinCount) data = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteFrequencyData(data);
         frame = data;
-        const from = Math.floor(data.length * 0.05);
-        const to = Math.max(from + 1, Math.floor(data.length * 0.4));
-        let sum = 0;
-        for (let i = from; i < to; i++) sum += data[i];
-        const next = Math.min(1, (sum / (to - from) / 255) * 1.6);
+        const n = data.length;
+        const from = Math.floor(n * 0.05);
+        const to = Math.max(from + 1, Math.floor(n * 0.4));
+        const next = Math.min(1, band(from, to) * 1.6);
         level += (next - level) * (next > level ? 0.5 : 0.12);
+        vuL = ballistic(vuL, Math.min(1, band(1, Math.max(2, Math.floor(n * 0.12))) * 1.35));
+        vuR = ballistic(vuR, Math.min(1, band(Math.floor(n * 0.12), Math.floor(n * 0.45)) * 2));
       } else {
         level *= 0.9;
+        vuL *= 0.92;
+        vuR *= 0.92;
       }
       const rounded = reduced ? 0 : Math.round(level * 100) / 100;
       if (rounded !== shown) {
         shown = rounded;
         el.style.setProperty('--level', String(rounded));
+      }
+      const l = reduced ? 0 : Math.round(vuL * 100) / 100;
+      const r = reduced ? 0 : Math.round(vuR * 100) / 100;
+      if (l !== shownL) {
+        shownL = l;
+        el.style.setProperty('--vu-l', String(l));
+      }
+      if (r !== shownR) {
+        shownR = r;
+        el.style.setProperty('--vu-r', String(r));
       }
       listeners.current.forEach((listener) => listener(frame, now));
     };
@@ -99,7 +131,7 @@ export function useAudioPulse(
     return () => {
       cancelAnimationFrame(raf);
       document.removeEventListener('visibilitychange', onVisibility);
-      el.style.setProperty('--level', '0');
+      rest();
     };
   }, [active, reduced, target]);
 
@@ -212,11 +244,70 @@ export function useKeepInView(ref: RefObject<HTMLElement | null>, key: string, r
       const rect = el.getBoundingClientRect();
       const viewport = window.innerHeight;
       if (rect.bottom < 0 || rect.top > viewport) return;
-      const dock = Number.parseFloat(getComputedStyle(el).getPropertyValue('--dock-h')) || 0;
+      const styles = getComputedStyle(el);
+      const dock = Number.parseFloat(styles.getPropertyValue('--dock-h')) || 0;
+      const bar = Number.parseFloat(styles.getPropertyValue('--bar-h')) || 0;
       const overflow = rect.bottom - (viewport - dock - 16);
-      const delta = Math.min(overflow, rect.top - 16);
+      const delta = Math.min(overflow, rect.top - 16 - bar);
       if (overflow > 0 && delta > 0) window.scrollBy({ top: delta, behavior: reduced ? 'auto' : 'smooth' });
     });
     return () => cancelAnimationFrame(id);
   }, [ref, key, reduced]);
+}
+
+/**
+ * False once `ref` has scrolled out of view (above the top edge, less `topOffset` px).
+ * Drives the sticky compact dial bar.
+ */
+export function useOutOfView(
+  ref: RefObject<HTMLElement | null>,
+  enabled: boolean,
+  topOffset = 0,
+  /** Watch this descendant of `ref` instead (e.g. the dial glass) */
+  selector?: string,
+): boolean {
+  const [out, setOut] = useState(false);
+  useEffect(() => {
+    const el = selector ? (ref.current?.querySelector<HTMLElement>(selector) ?? ref.current) : ref.current;
+    if (!enabled || !el || typeof IntersectionObserver === 'undefined') {
+      setOut(false);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setOut(!entry.isIntersecting && entry.boundingClientRect.top < 0),
+      { rootMargin: `-${topOffset}px 0px 0px 0px`, threshold: 0 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref, enabled, topOffset, selector]);
+  return enabled && out;
+}
+
+function subscribeOnline(onChange: () => void): () => void {
+  window.addEventListener('online', onChange);
+  window.addEventListener('offline', onChange);
+  return () => {
+    window.removeEventListener('online', onChange);
+    window.removeEventListener('offline', onChange);
+  };
+}
+
+/** Browser connectivity (navigator.onLine), live. */
+export function useOnline(): boolean {
+  return useSyncExternalStore(
+    subscribeOnline,
+    () => navigator.onLine,
+    () => true,
+  );
+}
+
+/** Seconds since mount, ticking once a second (re-renders only the caller). */
+export function useElapsedSeconds(): number {
+  const [start] = useState(() => Date.now());
+  const [now, setNow] = useState(start);
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return Math.max(0, Math.floor((now - start) / 1000));
 }

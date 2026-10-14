@@ -1,65 +1,96 @@
 @import "tailwindcss";
 
 /*
- * Tarang FM design tokens: "a beautiful radio glowing in a dark room".
- * Shared with other surfaces (e.g. src/landing); prefer these variables over raw values.
+ * Tarang FM design tokens: "a premium night radio, a crafted object in a dark studio".
+ * Shared with other surfaces (e.g. src/landing): prefer these variables over raw values.
+ * Names are stable; values may be tuned.
  */
 :root {
-  /* Room */
-  --tfm-room: #0a0807;
+  /* Studio */
+  --tfm-room: #070605;
   --tfm-room-deep: #000000;
-  /* Radio body: graphite / smoked metal */
-  --tfm-body: #17130f;
-  --tfm-body-hi: #241e19;
-  --tfm-body-edge: rgb(255 236 214 / 0.08);
-  /* Backlit glass scale */
-  --tfm-glass-hi: #fbedcd;
-  --tfm-glass: #edd4a3;
-  --tfm-glass-lo: #d7b277;
-  --tfm-ink: #2b1a10;
+  /* Radio body: graphite, brushed metal */
+  --tfm-body: #121315;
+  --tfm-body-hi: #222327;
+  --tfm-body-lo: #0b0c0d;
+  --tfm-body-edge: rgb(255 255 255 / 0.07);
+  --tfm-metal-hi: #d9dbe0;
+  --tfm-metal: #8d9097;
+  --tfm-metal-lo: #3a3c41;
+  --tfm-well: #050506;
+  /* Backlit amber glass (dial, VU faces) */
+  --tfm-glass-hi: #fff0cf;
+  --tfm-glass: #f7d48f;
+  --tfm-glass-lo: #e0a24f;
+  --tfm-glass-off: #141312;
+  --tfm-ink: #22160a;
+  --tfm-print-off: rgb(230 214 190 / 0.34);
   --tfm-trim: #c9a46c;
-  --tfm-lamp: #ff4b36;
-  /* Text and lines on the dark room */
-  --tfm-fg: #f7f3ee;
-  --tfm-fg-2: #a8a29e;
-  --tfm-fg-3: #8a837d;
-  --tfm-line: #2a2420;
-  --tfm-surface: #12100e;
+  --tfm-lamp: #ff3b2f;
+  --tfm-vu-red: #d2311f;
+  --tfm-led-amber: #ffb347;
+  /* Text and lines on the studio */
+  --tfm-fg: #f4f2ee;
+  --tfm-fg-2: #aba8a3;
+  --tfm-fg-3: #8c8984;
+  --tfm-line: #24252a;
+  --tfm-surface: #0f1012;
   /* Station accents (also in shared/stations.ts) */
   --tfm-accent-hi: #ff6b2c;
+  --tfm-accent-mr: #ec4899;
   --tfm-accent-ta: #3b82f6;
   --tfm-accent-bn: #22c55e;
+  --tfm-accent-gu: #a855f7;
   /* Radii */
-  --tfm-radius-body: 24px;
+  --tfm-radius-body: 28px;
   --tfm-radius-card: 20px;
   --tfm-radius-glass: 14px;
   --tfm-radius-key: 12px;
   --tfm-radius-chip: 8px;
   /* Type */
+  --tfm-font-display: 'Bricolage Grotesque', 'Geist', ui-sans-serif, system-ui, sans-serif;
   --tfm-font-ui: 'Geist', ui-sans-serif, system-ui, sans-serif;
   --tfm-font-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
-  --tfm-font-dial: 'Anek Latin', 'Geist', ui-sans-serif, sans-serif;
-  --tfm-font-hi: 'Geist', 'Anek Devanagari', ui-sans-serif, sans-serif;
-  --tfm-font-ta: 'Geist', 'Anek Tamil', ui-sans-serif, sans-serif;
-  --tfm-font-bn: 'Geist', 'Anek Bangla', ui-sans-serif, sans-serif;
+  --tfm-font-dial: 'Bricolage Grotesque', 'Geist', ui-sans-serif, sans-serif;
+  --tfm-font-hi: 'Geist', 'Anek Devanagari', 'Noto Sans Devanagari', 'Nirmala UI', sans-serif;
+  --tfm-font-mr: 'Geist', 'Anek Devanagari', 'Noto Sans Devanagari', 'Nirmala UI', sans-serif;
+  --tfm-font-ta: 'Geist', 'Anek Tamil', 'Noto Sans Tamil', 'Nirmala UI', sans-serif;
+  --tfm-font-bn: 'Geist', 'Anek Bangla', 'Noto Sans Bengali', 'Nirmala UI', sans-serif;
+  --tfm-font-gu: 'Geist', 'Anek Gujarati', 'Noto Sans Gujarati', 'Nirmala UI', sans-serif;
+  /* Motion */
+  --tfm-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --tfm-ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
+  --tfm-dur-needle: 1100ms;
 }
 
-/* Registered so a station change glides the needle and cross-fades the accent. */
+/* A real spring (overshoot, settle) where linear() easing is supported. */
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --tfm-ease-spring: linear(
+      0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%, 0.938 16.7%, 1.017 19.4%, 1.067, 1.099 24.3%,
+      1.108 26%, 1.104, 1.088 30.6%, 1.026 38.2%, 1.008 42.1%, 0.996 46.4%, 0.991 53.7%, 0.998 64.8%,
+      1.001 77.4%, 1
+    );
+  }
+}
+
+/* Registered so a station change springs the needle and knob, and cross-fades the accent. */
 @property --accent {
   syntax: '<color>';
   inherits: true;
   initial-value: #ff6b2c;
 }
 
-@property --needle-x {
-  syntax: '<percentage>';
+@property --tune {
+  syntax: '<number>';
   inherits: true;
-  initial-value: 18.6%;
+  initial-value: 18;
 }
 
 @theme inline {
   --font-sans: var(--tfm-font-ui);
   --font-mono: var(--tfm-font-mono);
+  --font-display: var(--tfm-font-display);
   --color-fg: var(--tfm-fg);
   --color-fg-2: var(--tfm-fg-2);
   --color-fg-3: var(--tfm-fg-3);
@@ -87,8 +118,14 @@
     -webkit-tap-highlight-color: transparent;
   }
 
+  /* Indic scripts: the script face, never letter-spaced */
   :lang(hi) {
     font-family: var(--tfm-font-hi);
+    letter-spacing: 0;
+  }
+
+  :lang(mr) {
+    font-family: var(--tfm-font-mr);
     letter-spacing: 0;
   }
 
@@ -99,6 +136,11 @@
 
   :lang(bn) {
     font-family: var(--tfm-font-bn);
+    letter-spacing: 0;
+  }
+
+  :lang(gu) {
+    font-family: var(--tfm-font-gu);
     letter-spacing: 0;
   }
 
@@ -114,6 +156,7 @@
 
 @layer components {
   .radio {
+    --bar-h: 76px;
     position: relative;
     isolation: isolate;
     min-height: 100dvh;
@@ -122,7 +165,33 @@
     transition: --accent 700ms ease;
   }
 
-  /* Room: slow drifting accent glow (canvas) under very fine grain */
+  .shell {
+    margin-inline: auto;
+    width: 100%;
+    max-width: 1180px;
+    padding: max(12px, env(safe-area-inset-top)) 12px 0;
+  }
+
+  @media (min-width: 640px) {
+    .shell {
+      padding-inline: 24px;
+      padding-top: 20px;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .shell {
+      padding-inline: 40px;
+      padding-top: 28px;
+    }
+  }
+
+  /* Reserve room for the fixed dock so the last caption line is never hidden */
+  .with-dock {
+    padding-bottom: calc(var(--dock-h, 96px) + 32px);
+  }
+
+  /* ---------- Studio: drifting accent light (canvas) under fine grain and a vignette ---------- */
   .ambient {
     position: fixed;
     inset: 0;
@@ -136,103 +205,277 @@
     display: block;
   }
 
+  .ambient::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: radial-gradient(130% 90% at 50% 20%, transparent 40%, rgb(0 0 0 / 0.75) 100%);
+  }
+
   .ambient::after {
     content: '';
     position: absolute;
     inset: 0;
-    opacity: 0.06;
+    z-index: 2;
+    opacity: 0.07;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
 
-  /* ---------- Radio device ---------- */
-  .radio-body {
-    position: relative;
-    padding: 14px;
-    border-radius: var(--tfm-radius-body);
-    background: linear-gradient(180deg, var(--tfm-body-hi) 0%, var(--tfm-body) 100%);
-    box-shadow:
-      inset 0 1px 0 rgb(255 240 222 / 0.1),
-      inset 0 -1px 0 rgb(0 0 0 / 0.6),
-      0 0 0 1px var(--tfm-body-edge),
-      0 40px 80px -30px rgb(0 0 0 / 0.95),
-      0 0 120px -30px color-mix(in oklab, var(--accent) calc((0.3 + var(--level, 0) * 0.5) * 60%), transparent);
+  /* ---------- Display type ---------- */
+  .display-lg,
+  .display-md,
+  .display-sm {
+    font-family: var(--tfm-font-display);
+    font-optical-sizing: auto;
+    font-weight: 560;
+    color: var(--tfm-fg);
+    text-wrap: balance;
   }
 
-  /* Fine brushed-metal grain */
+  .display-lg {
+    font-size: clamp(2.1rem, 1.35rem + 3.3vw, 4.1rem);
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+  }
+
+  .display-md {
+    font-size: clamp(2.2rem, 1.6rem + 2.4vw, 3.4rem);
+    line-height: 1.04;
+    letter-spacing: -0.03em;
+  }
+
+  .display-sm {
+    font-size: clamp(1.4rem, 1.15rem + 1vw, 1.9rem);
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+  }
+
+  /* ---------- Radio body: graphite, brushed metal, bevelled ---------- */
+  .radio-body {
+    position: relative;
+    padding: 12px 12px 14px;
+    border-radius: var(--tfm-radius-body);
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.07) 0%, rgb(255 255 255 / 0) 22%),
+      linear-gradient(180deg, var(--tfm-body-hi) 0%, var(--tfm-body) 48%, var(--tfm-body-lo) 100%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.14),
+      inset 0 -2px 0 rgb(0 0 0 / 0.55),
+      inset 1px 0 0 rgb(255 255 255 / 0.04),
+      inset -1px 0 0 rgb(255 255 255 / 0.04),
+      0 0 0 1px rgb(0 0 0 / 0.85),
+      0 2px 0 1px rgb(255 255 255 / 0.03),
+      0 50px 90px -40px #000,
+      0 24px 50px -30px rgb(0 0 0 / 0.9);
+  }
+
+  /* Brushed grain: horizontally stretched noise, static */
   .radio-body::before {
     content: '';
     position: absolute;
     inset: 0;
     border-radius: inherit;
     pointer-events: none;
-    background: repeating-linear-gradient(90deg, rgb(255 255 255 / 0.014) 0 1px, transparent 1px 3px);
+    opacity: 0.16;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='200'%3E%3Cfilter id='b'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.003 .9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23b)'/%3E%3C/svg%3E");
+  }
+
+  /* Accent light the lit dial throws around the body (opacity only) */
+  .radio-body::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: 0 0 140px -30px var(--accent);
+    opacity: 0;
+    transition: opacity 1200ms ease;
+  }
+
+  .radio-body[data-lit='true']::after {
+    opacity: calc(0.22 + var(--level, 0) * 0.5);
+    transition: opacity 120ms linear;
+  }
+
+  @media (min-width: 640px) {
+    .radio-body {
+      padding: 16px 18px 18px;
+    }
   }
 
   @media (min-width: 1024px) {
     .radio-body {
-      padding: 18px 20px 20px;
+      padding: 20px 26px 24px;
     }
   }
 
-  .wordmark {
+  .screw {
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background:
+      linear-gradient(135deg, transparent 44%, rgb(0 0 0 / 0.7) 45% 55%, transparent 56%),
+      radial-gradient(circle at 35% 30%, #6d7077, #2a2b2f 70%);
+    box-shadow: 0 1px 0 rgb(255 255 255 / 0.08), inset 0 0 0 1px rgb(0 0 0 / 0.5);
+    display: none;
+  }
+
+  .screw-tl {
+    top: 10px;
+    left: 10px;
+  }
+
+  .screw-tr {
+    top: 10px;
+    right: 10px;
+    rotate: 70deg;
+  }
+
+  .screw-bl {
+    bottom: 10px;
+    left: 10px;
+    rotate: 25deg;
+  }
+
+  .screw-br {
+    bottom: 10px;
+    right: 10px;
+    rotate: 110deg;
+  }
+
+  @media (min-width: 1024px) {
+    .screw {
+      display: block;
+    }
+  }
+
+  .radio-top {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 4px 10px;
+  }
+
+  @media (min-width: 1024px) {
+    .radio-top {
+      padding: 0 14px 14px;
+    }
+  }
+
+  .nameplate {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    font-weight: 600;
-    font-size: 1.02rem;
-    letter-spacing: -0.01em;
+    font-family: var(--tfm-font-display);
+    font-weight: 650;
+    font-size: 1.12rem;
+    letter-spacing: -0.02em;
+    color: #e4e1dc;
+    text-shadow: 0 1px 0 rgb(0 0 0 / 0.8), 0 -1px 0 rgb(255 255 255 / 0.06);
   }
 
-  /* ON AIR lamp */
+  .nameplate-mark {
+    color: var(--accent);
+  }
+
+  .nameplate-fm {
+    margin-left: 0.15em;
+    font-weight: 500;
+    font-stretch: 75%;
+    font-variation-settings: 'wdth' 75;
+    color: var(--tfm-fg-3);
+  }
+
+  @media (min-width: 1024px) {
+    .nameplate {
+      font-size: 1.3rem;
+    }
+  }
+
+  /* ---------- ON AIR lamp ---------- */
   .lamp {
+    position: relative;
     display: inline-flex;
+    flex-shrink: 0;
     align-items: center;
     min-height: 30px;
-    padding: 0 0.7rem;
-    border-radius: 6px;
-    font-family: var(--tfm-font-ui);
+    padding: 0 0.8rem;
+    border-radius: 7px;
+    font-family: var(--tfm-font-display);
     font-weight: 700;
     font-size: 0.72rem;
-    letter-spacing: 0.18em;
-    color: #7d4238;
-    background: #1d0e0c;
-    border: 1px solid rgb(255 75 54 / 0.2);
-    box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.7);
-    transition: color 400ms, background 400ms, box-shadow 400ms, border-color 400ms;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #6a2f28;
+    background: linear-gradient(180deg, #1d0d0b, #130807);
+    border: 1px solid rgb(255 59 47 / 0.2);
+    box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.8), 0 1px 0 rgb(255 255 255 / 0.05);
+    transition: color 300ms, background 300ms, border-color 300ms;
+  }
+
+  .lamp[data-size='sm'] {
+    min-height: 24px;
+    padding: 0 0.55rem;
+    font-size: 0.62rem;
+  }
+
+  .lamp-text {
+    position: relative;
+  }
+
+  .lamp-glow {
+    position: absolute;
+    inset: -14px;
+    border-radius: 18px;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgb(255 59 47 / 0.55), transparent);
+    opacity: 0;
+    transition: opacity 300ms;
   }
 
   .lamp[data-on='true'] {
-    color: #fff3ec;
-    background: radial-gradient(120% 140% at 50% 30%, #c92d1c 0%, #a3200f 100%);
-    border-color: #ff8a70;
-    text-shadow: 0 0 8px rgb(255 214 196 / 0.75);
-    box-shadow:
-      0 0 calc(14px + var(--level, 0) * 18px) rgb(255 75 54 / calc(0.3 + var(--level, 0) * 0.5)),
-      inset 0 0 6px rgb(255 190 170 / 0.45);
+    color: #fff4ee;
+    background: radial-gradient(120% 150% at 50% 30%, #ff5440 0%, #c11d0e 70%, #8f1308 100%);
+    border-color: #ff8a73;
+    text-shadow: 0 0 8px rgb(255 220 200 / 0.85);
+    box-shadow: inset 0 0 6px rgb(255 200 180 / 0.5), 0 1px 0 rgb(255 255 255 / 0.05);
+    animation: lamp-ignite 520ms steps(1, end) both;
+  }
+
+  .lamp[data-on='true'] .lamp-glow {
+    opacity: calc(0.5 + var(--level, 0) * 0.5);
+    transition: opacity 90ms linear;
   }
 
   .lamp[data-warming='true'] {
     animation: lamp-warm 1.3s steps(1, end) infinite;
   }
 
-  /* ---------- Tuning dial (TunerDial) ---------- */
+  /* ---------- Tuning dial ---------- */
   .dial {
     position: relative;
     padding: 6px;
     border-radius: calc(var(--tfm-radius-glass) + 6px);
-    background: linear-gradient(180deg, #0d0b09, #1c1713);
+    background: linear-gradient(180deg, #050506 0%, #18191c 100%);
     box-shadow:
-      inset 0 2px 6px rgb(0 0 0 / 0.8),
-      0 1px 0 rgb(255 240 222 / 0.06),
-      0 0 0 1px color-mix(in oklab, var(--tfm-trim) 22%, transparent);
+      inset 0 2px 6px rgb(0 0 0 / 0.9),
+      inset 0 -1px 0 rgb(255 255 255 / 0.06),
+      0 1px 0 rgb(255 255 255 / 0.07),
+      0 0 0 1px rgb(0 0 0 / 0.6);
     transition:
-      --needle-x 1100ms cubic-bezier(0.34, 1.35, 0.5, 1),
+      --tune var(--tfm-dur-needle) var(--tfm-ease-spring),
       --accent 700ms ease;
     touch-action: pan-y;
   }
 
   .dial[data-dragging='true'] {
-    transition: none;
+    transition: --accent 700ms ease;
   }
 
   .dial[role='slider'] {
@@ -248,156 +491,287 @@
   }
 
   .dial-glass {
-    --glass-h: 144px;
+    --glass-h: 132px;
     position: relative;
     height: var(--glass-h);
     overflow: hidden;
     border-radius: var(--tfm-radius-glass);
-    color: var(--tfm-ink);
+    color: var(--tfm-print-off);
     user-select: none;
     -webkit-user-select: none;
-    background:
-      radial-gradient(48% 150% at var(--needle-x) 108%, color-mix(in oklab, var(--accent) calc((0.3 + var(--level, 0) * 0.5) * 100%), transparent) 0%, transparent 70%),
-      radial-gradient(120% 95% at 50% 0%, var(--tfm-glass-hi) 0%, var(--tfm-glass) 58%, var(--tfm-glass-lo) 100%);
-    box-shadow:
-      inset 0 0 0 1px rgb(70 40 15 / 0.45),
-      inset 0 10px 22px rgb(90 50 10 / 0.28),
-      inset 0 -14px 28px rgb(90 50 10 / 0.3);
-    filter: brightness(0.38) saturate(0.45);
-    transition: filter 1400ms ease 120ms;
+    background: linear-gradient(180deg, #1b1a18 0%, var(--tfm-glass-off) 100%);
+    box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.5);
+    transition: color 900ms ease 150ms;
   }
 
   .dial[data-lit='true'] .dial-glass {
-    filter: none;
+    color: var(--tfm-ink);
   }
 
-  .dial[data-compact='true'] .dial-glass {
-    --glass-h: 112px;
+  .dial[data-size='compact'] .dial-glass {
+    --glass-h: 104px;
   }
 
-  .dial-glass::after {
-    content: '';
+  @media (min-width: 640px) {
+    .dial[data-size='compact'] .dial-glass {
+      --glass-h: 120px;
+    }
+  }
+
+  .dial[data-size='mini'] {
+    padding: 3px;
+    border-radius: 10px;
+  }
+
+  .dial[data-size='mini'] .dial-glass {
+    --glass-h: 34px;
+    border-radius: 7px;
+  }
+
+  @media (min-width: 1024px) {
+    .dial-glass {
+      --glass-h: 184px;
+    }
+
+    .dial[data-size='compact'] .dial-glass {
+      --glass-h: 140px;
+    }
+  }
+
+  /* The backlight: amber light behind the glass, fades in (opacity only) and flickers while warming up */
+  .dial-backlight {
     position: absolute;
     inset: 0;
-    pointer-events: none;
-    background: linear-gradient(174deg, rgb(255 255 255 / 0.42) 0%, rgb(255 255 255 / 0.05) 32%, transparent 33%);
-    mix-blend-mode: soft-light;
+    opacity: 0;
+    background:
+      radial-gradient(120% 95% at 50% 0%, var(--tfm-glass-hi) 0%, var(--tfm-glass) 58%, var(--tfm-glass-lo) 100%);
+    box-shadow:
+      inset 0 10px 22px rgb(120 60 0 / 0.22),
+      inset 0 -16px 30px rgb(110 50 0 / 0.3);
+    transition: opacity 1400ms ease 100ms;
+  }
+
+  .dial[data-lit='true'] .dial-backlight {
+    opacity: 1;
+  }
+
+  .dial[data-tuning='true'] .dial-backlight {
+    animation: warm-up 1.6s ease-out both;
   }
 
   .dial-viz {
     position: absolute;
     left: 0;
     right: 0;
-    bottom: 2%;
-    height: 26%;
+    bottom: 3%;
+    height: 24%;
+    opacity: 0;
+    transition: opacity 800ms ease;
+  }
+
+  .dial[data-lit='true'] .dial-viz {
+    opacity: 0.85;
+  }
+
+  .dial[data-size='mini'] .dial-viz {
+    display: none;
   }
 
   .dial-print {
     position: absolute;
-    top: 7px;
+    top: 8px;
+    display: none;
     font-family: var(--tfm-font-dial);
-    font-size: 0.66rem;
+    font-size: 0.62rem;
     font-weight: 700;
     letter-spacing: 0.14em;
     opacity: 0.6;
   }
 
+  .dial-print-l {
+    left: 12px;
+  }
+
+  .dial-print-r {
+    right: 12px;
+  }
+
   .dial-station {
     position: absolute;
-    top: 11%;
+    top: 10%;
     translate: -50% 0;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 3px;
-    font-size: 0.82rem;
-    font-weight: 600;
-    line-height: 1.3;
+    gap: 2px;
     white-space: nowrap;
-    opacity: 0.7;
+    opacity: 0.66;
     transition: opacity 400ms;
   }
 
   .dial-station::after {
     content: '';
-    width: 7px;
-    height: 7px;
+    width: 6px;
+    height: 6px;
+    margin-top: 2px;
     border-radius: 50%;
-    background: rgb(43 26 16 / 0.35);
-    transition: background 400ms, box-shadow 400ms;
+    background: currentColor;
+    opacity: 0.35;
+    transition: background 400ms, opacity 400ms, box-shadow 400ms;
   }
 
   .dial-station[data-on='true'] {
     opacity: 1;
-    font-weight: 700;
+  }
+
+  .dial-station[data-on='true']::after {
+    opacity: 1;
+    background: var(--mark);
+    box-shadow: 0 0 8px var(--mark);
   }
 
   .dial-station-name {
     font-family: var(--tfm-font-dial);
+    font-size: 0.7rem;
     font-weight: 700;
-    font-stretch: 92%;
-    letter-spacing: 0.02em;
+    font-stretch: 75%;
+    font-variation-settings: 'wdth' 75;
+    letter-spacing: 0.01em;
     line-height: 1.1;
   }
 
   .dial-station-native {
+    display: none;
     font-size: 0.66rem;
     font-weight: 500;
-    line-height: 1.15;
-    opacity: 0.75;
+    line-height: 1.2;
+    opacity: 0.8;
   }
 
-  .dial[data-compact='true'] .dial-station-native {
+  .dial[data-size='mini'] .dial-station {
+    top: 3px;
+    gap: 0;
+  }
+
+  .dial[data-size='mini'] .dial-station::after {
     display: none;
   }
 
-  .dial-station[data-on='true']::after {
-    background: color-mix(in oklab, var(--accent) 80%, #3a1000);
-    box-shadow: 0 0 8px var(--accent);
+  .dial[data-size='mini'] .dial-station-name {
+    font-size: 0.58rem;
+  }
+
+  /* Phones: the slim bar names only the tuned station; the others are dots */
+  @media (max-width: 639.98px) {
+    .dial[data-size='mini'] .dial-station:not([data-on='true']) .dial-station-name {
+      visibility: hidden;
+    }
+
+    .dial[data-size='mini'] .dial-station:not([data-on='true'])::after {
+      display: block;
+      width: 4px;
+      height: 4px;
+      margin-top: -0.6rem;
+    }
+  }
+
+  @media (min-width: 640px) {
+    .dial-print {
+      display: block;
+    }
+
+    .dial[data-size='compact'] .dial-print {
+      display: none;
+    }
+
+    .dial-station-name {
+      font-size: 0.82rem;
+    }
+
+    .dial-station-native {
+      display: block;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .dial-station-name {
+      font-size: 1rem;
+    }
+
+    .dial-station-native {
+      font-size: 0.74rem;
+    }
   }
 
   .dial-ticks {
     position: absolute;
     left: 0;
-    top: 43%;
+    top: 46%;
     width: 100%;
-    height: 15%;
+    height: 14%;
     overflow: visible;
+  }
+
+  .dial[data-size='compact'] .dial-ticks {
+    top: 44%;
+  }
+
+  .dial[data-size='mini'] .dial-ticks {
+    top: 58%;
+    height: 34%;
   }
 
   .dial-num {
     position: absolute;
-    top: 61%;
+    top: 63%;
     translate: -50% 0;
     font-family: var(--tfm-font-dial);
-    font-size: 0.76rem;
+    font-size: 0.7rem;
     font-weight: 600;
-    font-stretch: 85%;
+    font-stretch: 75%;
+    font-variation-settings: 'wdth' 75;
     font-variant-numeric: tabular-nums;
     opacity: 0.85;
   }
 
-  .dial[data-compact='true'] .dial-station {
-    top: 8%;
-    font-size: 0.76rem;
+  /* Phones: every other numeral, so the scale breathes */
+  .dial-num:nth-of-type(even) {
+    opacity: 0;
   }
 
-  .dial[data-compact='true'] .dial-print {
-    display: none;
+  @media (min-width: 640px) {
+    .dial-num {
+      font-size: 0.8rem;
+    }
+
+    .dial-num:nth-of-type(even) {
+      opacity: 0.85;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .dial-num {
+      font-size: 0.95rem;
+    }
+  }
+
+  /* The needle rides --tune on a full-width track (transform only) */
+  .needle-track {
+    position: absolute;
+    inset: 0;
+    translate: calc(var(--tune) * 1%) 0;
+    pointer-events: none;
   }
 
   .needle {
     position: absolute;
-    top: 6%;
-    bottom: 6%;
-    left: var(--needle-x);
+    top: 5%;
+    bottom: 5%;
+    left: -1.5px;
     width: 3px;
-    translate: -50% 0;
     border-radius: 2px;
-    background: color-mix(in oklab, var(--accent) 80%, #3a0d00);
-    box-shadow:
-      0 0 calc(8px + var(--level, 0) * 10px) color-mix(in oklab, var(--accent) 75%, transparent),
-      0 0 2px rgb(0 0 0 / 0.45);
+    background: color-mix(in oklab, var(--accent) 82%, #300);
+    box-shadow: 0 0 2px rgb(0 0 0 / 0.5), 0 0 10px color-mix(in oklab, var(--accent) 60%, transparent);
   }
 
   .needle::before {
@@ -410,6 +784,33 @@
     translate: -50% 0;
     border-radius: 50%;
     background: inherit;
+  }
+
+  .dial[data-size='mini'] .needle {
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    left: -1px;
+  }
+
+  .dial[data-size='mini'] .needle::before {
+    display: none;
+  }
+
+  .needle-spill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -90px;
+    width: 180px;
+    background: radial-gradient(50% 70% at 50% 100%, var(--accent) 0%, transparent 100%);
+    opacity: 0;
+    transition: opacity 600ms;
+  }
+
+  .dial[data-lit='true'] .needle-spill {
+    opacity: calc(0.22 + var(--level, 0) * 0.5);
+    transition: opacity 90ms linear;
   }
 
   .dial[data-tuning='true'] .needle {
@@ -426,150 +827,819 @@
   }
 
   .dial[data-tuning='true'] .dial-static {
-    opacity: 0.6;
+    opacity: 0.55;
     animation: static-shift 160ms steps(2, end) infinite;
   }
 
-  @media (min-width: 1024px) {
-    .dial-glass {
-      --glass-h: 184px;
+  .dial-glare {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(172deg, rgb(255 255 255 / 0.16) 0%, rgb(255 255 255 / 0.03) 34%, transparent 35%);
+    box-shadow: inset 0 2px 8px rgb(0 0 0 / 0.45);
+    border-radius: inherit;
+  }
+
+  /* ---------- Controls row: grille, VU meters, readout, presets, knob ---------- */
+  .radio-controls {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'vu readout knob'
+      'presets presets presets';
+    align-items: center;
+    gap: 12px 12px;
+    margin-top: 12px;
+    padding: 0 2px;
+  }
+
+  .radio-grille {
+    grid-area: grille;
+    display: none;
+  }
+
+  .radio-vu {
+    grid-area: vu;
+    display: flex;
+    gap: 6px;
+  }
+
+  .radio-readout {
+    grid-area: readout;
+  }
+
+  .radio-presets {
+    grid-area: presets;
+  }
+
+  .radio-knob {
+    grid-area: knob;
+  }
+
+  .vu-second {
+    display: none;
+  }
+
+  @media (min-width: 640px) {
+    .radio-controls {
+      gap: 14px 18px;
+      margin-top: 16px;
     }
 
-    .dial[data-compact='true'] .dial-glass {
-      --glass-h: 150px;
-    }
-
-    .dial-station,
-    .dial[data-compact='true'] .dial-station {
-      top: 11%;
-      font-size: 1rem;
-    }
-
-    .dial-num {
-      font-size: 0.9rem;
-    }
-
-    .dial[data-compact='true'] .dial-print,
-    .dial[data-compact='true'] .dial-station-native {
+    .vu-second {
       display: block;
     }
   }
 
+  @media (min-width: 1024px) {
+    .radio-controls {
+      grid-template-columns: minmax(150px, 0.7fr) auto minmax(0, 1.6fr) auto;
+      grid-template-areas:
+        'grille vu readout knob'
+        'grille presets presets knob';
+      gap: 14px 28px;
+      margin-top: 20px;
+      padding: 0 8px;
+    }
+
+    .radio-grille {
+      display: block;
+      align-self: stretch;
+    }
+
+    .radio-vu {
+      gap: 10px;
+    }
+  }
+
+  /* Speaker grille: perforated plate over a cone that glows with the level */
+  .grille {
+    position: relative;
+    min-height: 104px;
+    overflow: hidden;
+    border-radius: 16px;
+    background: #040405;
+    box-shadow: inset 0 2px 8px rgb(0 0 0 / 0.9), 0 1px 0 rgb(255 255 255 / 0.06);
+  }
+
+  .grille-cone {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(60% 70% at 50% 55%, color-mix(in oklab, var(--accent) 75%, transparent) 0%, transparent 100%);
+    opacity: 0;
+    transition: opacity 600ms;
+  }
+
+  .radio-body[data-lit='true'] .grille-cone {
+    opacity: calc(0.08 + var(--level, 0) * 0.7);
+    transition: opacity 80ms linear;
+  }
+
+  .grille-holes {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, #2a2b30 0%, #17181b 100%);
+    -webkit-mask: radial-gradient(circle, transparent 0 1.7px, #000 2.1px) 0 0 / 7px 7px;
+    mask: radial-gradient(circle, transparent 0 1.7px, #000 2.1px) 0 0 / 7px 7px;
+  }
+
+  .grille-badge {
+    position: absolute;
+    right: 10px;
+    bottom: 8px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-family: var(--tfm-font-display);
+    font-size: 0.62rem;
+    font-weight: 650;
+    font-style: italic;
+    letter-spacing: 0.02em;
+    color: #b9bbc0;
+    background: linear-gradient(180deg, #3a3c42, #1f2023);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.15), 0 1px 2px rgb(0 0 0 / 0.8);
+  }
+
+  /* Analogue VU meter */
+  .vu {
+    position: relative;
+    width: 84px;
+    aspect-ratio: 120 / 72;
+    overflow: hidden;
+    border-radius: 9px;
+    color: var(--tfm-print-off);
+    background: linear-gradient(180deg, #1b1a18, var(--tfm-glass-off));
+    box-shadow:
+      0 0 0 3px #08080a,
+      0 0 0 4px rgb(255 255 255 / 0.06),
+      inset 0 2px 6px rgb(0 0 0 / 0.6);
+    transition: color 900ms ease 150ms;
+  }
+
+  .vu[data-lit='true'] {
+    color: var(--tfm-ink);
+  }
+
+  .vu-backlight {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    background: radial-gradient(110% 120% at 50% 100%, var(--tfm-glass-hi) 0%, var(--tfm-glass) 55%, var(--tfm-glass-lo) 100%);
+    transition: opacity 1400ms ease 250ms;
+  }
+
+  .vu[data-lit='true'] .vu-backlight {
+    opacity: 1;
+  }
+
+  .vu-scale {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    font-family: var(--tfm-font-dial);
+    font-weight: 600;
+  }
+
+  .vu-word {
+    font-family: var(--tfm-font-display);
+    letter-spacing: 0.08em;
+  }
+
+  .vu-needle {
+    position: absolute;
+    left: calc(50% - 0.75px);
+    bottom: 8.3%;
+    width: 1.5px;
+    height: 74%;
+    border-radius: 1px;
+    background: #140c06;
+    transform-origin: 50% 100%;
+    rotate: calc(-50deg + var(--vu-l, 0) * 100deg);
+  }
+
+  .vu[data-channel='r'] .vu-needle {
+    rotate: calc(-50deg + var(--vu-r, 0) * 100deg);
+  }
+
+  .vu[data-lit='false'] .vu-needle {
+    background: #6f655a;
+  }
+
+  .vu-pivot {
+    position: absolute;
+    left: 50%;
+    bottom: 3%;
+    width: 18px;
+    height: 9px;
+    translate: -50% 0;
+    border-radius: 9px 9px 0 0;
+    background: linear-gradient(180deg, #2b2c30, #101113);
+  }
+
+  .vu-glare {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(165deg, rgb(255 255 255 / 0.18) 0%, transparent 40%);
+    pointer-events: none;
+  }
+
+  @media (min-width: 1024px) {
+    .vu {
+      width: 116px;
+    }
+  }
+
+  /* Short laptop screens during a show: a tighter radio so captions start above the fold */
+  @media (min-width: 1024px) and (max-height: 860px) {
+    .dial[data-size='compact'] .dial-glass {
+      --glass-h: 116px;
+    }
+
+    .radio-body[data-compact='true'] .radio-controls {
+      margin-top: 14px;
+      row-gap: 10px;
+    }
+
+    .radio-body[data-compact='true'] .knob {
+      --size: 84px;
+    }
+
+    .radio-body[data-compact='true'] .vu {
+      width: 100px;
+    }
+
+    .radio-body[data-compact='true'] .preset-native {
+      display: none;
+    }
+
+    .radio-body[data-compact='true'] .preset-cap {
+      min-height: 48px;
+    }
+
+    .radio-body[data-compact='true'] .led-dots {
+      height: 32px;
+    }
+  }
+
   /* Frequency readout */
+  .readout {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+  }
+
   .freq {
     display: flex;
-    align-items: baseline;
-    gap: 0.3rem;
-    font-family: var(--tfm-font-dial);
-    font-weight: 700;
-    font-size: clamp(2.6rem, 2rem + 3.4vw, 4.5rem);
-    font-stretch: 75%;
-    line-height: 0.85;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
+    align-items: flex-end;
+    gap: 0.45rem;
+  }
+
+  /* Dot-matrix window: recessed dark glass with amber LEDs */
+  .led {
+    display: inline-flex;
+    padding: 6px 9px;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #0b0705, #140c07);
+    box-shadow:
+      inset 0 2px 6px rgb(0 0 0 / 0.9),
+      inset 0 0 0 1px rgb(255 179 71 / 0.06),
+      0 1px 0 rgb(255 255 255 / 0.06);
+  }
+
+  .led-dots {
+    display: block;
+    height: 28px;
+    width: auto;
+    aspect-ratio: 25 / 7;
+    overflow: visible;
+  }
+
+  .led-off {
+    fill: #2a1a0c;
+  }
+
+  .led-on {
+    fill: #7a4e22;
+    transition: fill 900ms ease;
+  }
+
+  .led[data-lit='true'] .led-on {
+    fill: var(--tfm-led-amber);
+  }
+
+  .led[data-lit='true'] .led-dots {
+    filter: drop-shadow(0 0 2px rgb(255 179 71 / 0.75));
+  }
+
+  @media (max-width: 399.98px) {
+    .led-dots {
+      height: 22px;
+    }
+
+    .freq-unit {
+      display: none;
+    }
+
+    .call-btn .call-label {
+      font-size: 0.94rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .led {
+      padding: 8px 12px;
+    }
+
+    .led-dots {
+      height: 40px;
+    }
   }
 
   .freq-unit {
     font-family: var(--tfm-font-ui);
-    font-size: 0.8rem;
+    font-size: 0.72rem;
     font-weight: 500;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.04em;
     color: var(--tfm-fg-3);
   }
 
-  /* Preset keys on the radio body */
+  .readout-name {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    gap: 0.45rem;
+    margin-top: 4px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    line-height: 1.3;
+    white-space: nowrap;
+  }
+
+  .readout-native {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 400;
+    color: var(--tfm-fg-2);
+  }
+
+  .readout-tagline {
+    display: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.85rem;
+    color: var(--tfm-fg-3);
+  }
+
+  @media (min-width: 640px) {
+    .readout-tagline {
+      display: block;
+    }
+
+    .readout-name {
+      font-size: 1.05rem;
+    }
+  }
+
+  /* Preset keys: latching push-buttons */
+  .presets {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 2px 2px 6px;
+    margin: -2px -2px -6px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  .presets::-webkit-scrollbar {
+    display: none;
+  }
+
+  @media (max-width: 1023.98px) {
+    .presets {
+      -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
+      mask-image: linear-gradient(90deg, #000 85%, transparent);
+      padding-right: 28px;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .presets {
+      display: grid;
+      grid-template-columns: repeat(var(--count, 3), minmax(0, 1fr));
+      gap: 10px;
+      overflow: visible;
+    }
+  }
+
   .preset {
     position: relative;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 1px;
-    min-width: 0;
-    min-height: 56px;
-    padding: 8px 8px 8px 25px;
+    flex: 1 0 86px;
+    min-width: 86px;
+    padding: 0;
     border-radius: var(--tfm-radius-key);
+    background: var(--tfm-well);
+    box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.9), 0 1px 0 rgb(255 255 255 / 0.06);
+    scroll-snap-align: start;
     text-align: left;
     color: var(--tfm-fg);
-    background: linear-gradient(180deg, #2c251f 0%, #1b1612 100%);
-    border: 1px solid rgb(255 236 214 / 0.08);
-    box-shadow:
-      inset 0 1px 0 rgb(255 240 222 / 0.1),
-      0 3px 0 #0b0907,
-      0 10px 16px -10px rgb(0 0 0 / 0.9);
-    transition: transform 120ms, box-shadow 120ms, border-color 300ms;
   }
 
-  .preset[aria-checked='true'] {
-    transform: translateY(2px);
-    background: linear-gradient(180deg, #14100d 0%, #1f1914 100%);
-    border-color: color-mix(in oklab, var(--led) 50%, transparent);
+  .preset-cap {
+    position: relative;
+    display: flex;
+    min-height: 54px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 7px 10px 8px 24px;
+    border-radius: var(--tfm-radius-key);
+    background: linear-gradient(180deg, #2d2e33 0%, #1e1f23 55%, #18191c 100%);
     box-shadow:
-      inset 0 2px 7px rgb(0 0 0 / 0.7),
-      0 1px 0 #0b0907;
+      inset 0 1px 0 rgb(255 255 255 / 0.14),
+      inset 0 -1px 0 rgb(0 0 0 / 0.4),
+      0 4px 0 #09090b,
+      0 6px 10px -4px rgb(0 0 0 / 0.9);
+    translate: 0 -3px;
+    transition: translate 160ms var(--tfm-ease-spring), box-shadow 160ms ease, background 200ms;
   }
 
-  .preset:active {
-    transform: translateY(2px);
+  @media (hover: hover) and (pointer: fine) {
+    .preset:hover .preset-cap {
+      background: linear-gradient(180deg, #33343a 0%, #222327 55%, #1a1b1e 100%);
+    }
+  }
+
+  .preset:active .preset-cap,
+  .preset[aria-checked='true'] .preset-cap {
+    translate: 0 0;
+    background: linear-gradient(180deg, #1a1b1e 0%, #202125 100%);
+    box-shadow:
+      inset 0 2px 6px rgb(0 0 0 / 0.7),
+      inset 0 0 0 1px color-mix(in oklab, var(--led) 35%, transparent),
+      0 1px 0 #09090b;
+  }
+
+  .preset:focus-visible {
+    outline-color: var(--led);
   }
 
   .preset-led {
     position: absolute;
     left: 10px;
-    top: 50%;
-    width: 8px;
-    height: 8px;
-    margin-top: -4px;
+    top: 12px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    background: color-mix(in oklab, var(--led) 22%, #120d0a);
-    box-shadow: inset 0 1px 1px rgb(0 0 0 / 0.6);
+    background: color-mix(in oklab, var(--led) 20%, #0c0c0d);
+    box-shadow: inset 0 1px 1px rgb(0 0 0 / 0.7);
     transition: background 300ms, box-shadow 300ms;
   }
 
   .preset[aria-checked='true'] .preset-led {
     background: var(--led);
-    box-shadow:
-      0 0 10px var(--led),
-      inset 0 0 2px rgb(255 255 255 / 0.8);
+    box-shadow: 0 0 10px var(--led), inset 0 0 2px rgb(255 255 255 / 0.8);
   }
 
-  /* Primary CTA: a lit key on the radio */
+  .preset-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.9rem;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .preset-meta {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 1px;
+    font-size: 0.72rem;
+    line-height: 1.3;
+    color: var(--tfm-fg-3);
+  }
+
+  .preset-native {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .preset-freq {
+    order: -1;
+    flex-shrink: 0;
+    font-family: var(--tfm-font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .radio-body[data-compact='true'] .preset-native {
+    display: none;
+  }
+
+  .radio-body[data-compact='true'] .preset-cap {
+    min-height: 48px;
+    padding-block: 6px 7px;
+  }
+
+  @media (min-width: 1024px) {
+    .radio-body[data-compact='true'] .preset-native {
+      display: block;
+    }
+
+    .preset {
+      min-width: 0;
+    }
+
+    .preset-cap {
+      min-height: 60px;
+    }
+
+    .preset-name {
+      font-size: 0.98rem;
+    }
+  }
+
+  /* Rotary tuning knob: knurled skirt, machined cap, accent index line */
+  .knob-well {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .knob {
+    --size: 64px;
+    position: relative;
+    width: var(--size);
+    height: var(--size);
+    border-radius: 50%;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: --tune var(--tfm-dur-needle) var(--tfm-ease-spring);
+    background: radial-gradient(circle, #060607 60%, #1d1e21 100%);
+    box-shadow: 0 1px 0 rgb(255 255 255 / 0.07), inset 0 2px 5px rgb(0 0 0 / 0.9);
+  }
+
+  .knob[data-dragging='true'] {
+    cursor: grabbing;
+    transition: none;
+  }
+
+  .knob:focus-visible {
+    outline-color: var(--accent);
+    outline-offset: 4px;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .knob:hover .knob-mark {
+      box-shadow: 0 0 10px var(--accent), 0 0 2px #fff;
+    }
+  }
+
+  .knob-skirt,
+  .knob-cap {
+    position: absolute;
+    border-radius: 50%;
+    rotate: calc((var(--tune) - 50) * 3deg);
+  }
+
+  .knob-skirt {
+    inset: 3px;
+    background:
+      repeating-conic-gradient(from 0deg, #4b4d53 0deg 3deg, #1c1d20 3deg 6deg),
+      #2a2b2f;
+    box-shadow: 0 6px 14px -4px rgb(0 0 0 / 0.95), 0 2px 3px rgb(0 0 0 / 0.8);
+  }
+
+  .knob-cap {
+    inset: 11%;
+    background:
+      radial-gradient(circle at 35% 25%, rgb(255 255 255 / 0.35), transparent 45%),
+      conic-gradient(from 210deg, #6f7279, #c9ccd2, #7b7e85, #3c3e43, #a7aab1, #5b5e64, #6f7279);
+    box-shadow:
+      inset 0 1px 1px rgb(255 255 255 / 0.4),
+      inset 0 -2px 3px rgb(0 0 0 / 0.5),
+      0 1px 2px rgb(0 0 0 / 0.8);
+  }
+
+  .knob-cap::after {
+    content: '';
+    position: absolute;
+    inset: 22%;
+    border-radius: 50%;
+    background: conic-gradient(from 30deg, #8e9198, #d6d8dd, #8e9198, #55585e, #8e9198);
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.45);
+  }
+
+  .knob-mark {
+    position: absolute;
+    top: 7%;
+    left: calc(50% - 1.5px);
+    z-index: 1;
+    width: 3px;
+    height: 24%;
+    border-radius: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+  }
+
+  .knob-label {
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--tfm-fg-3);
+  }
+
+  @media (min-width: 1024px) {
+    .knob {
+      --size: 104px;
+    }
+  }
+
+  /* ---------- Sticky compact dial bar ---------- */
+  .dialbar {
+    position: fixed;
+    top: 0;
+    inset-inline: 0;
+    z-index: 40;
+    padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left));
+    opacity: 0;
+    translate: 0 -120%;
+    pointer-events: none;
+    transition: translate 360ms var(--tfm-ease-out), opacity 200ms ease;
+  }
+
+  .dialbar[data-visible='true'] {
+    opacity: 1;
+    translate: 0 0;
+    pointer-events: auto;
+  }
+
+  .dialbar-inner {
+    display: flex;
+    width: 100%;
+    max-width: 1100px;
+    min-height: 56px;
+    align-items: center;
+    gap: 10px;
+    margin-inline: auto;
+    padding: 8px 10px;
+    border-radius: 18px;
+    text-align: left;
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.06), transparent 40%),
+      linear-gradient(180deg, var(--tfm-body-hi), var(--tfm-body));
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.12),
+      0 0 0 1px rgb(0 0 0 / 0.85),
+      0 18px 40px -16px rgb(0 0 0 / 0.95),
+      0 0 60px -24px var(--accent);
+  }
+
+  .dialbar-mark {
+    flex-shrink: 0;
+    color: var(--accent);
+  }
+
+  .dialbar-dial {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .dialbar-freq {
+    flex-shrink: 0;
+    font-family: var(--tfm-font-dial);
+    font-weight: 600;
+    font-size: 1.35rem;
+    font-stretch: 75%;
+    font-variation-settings: 'wdth' 75;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+
+  /* ---------- Idle: tune-in panel ---------- */
+  .tune-panel {
+    display: grid;
+    gap: 22px;
+    margin-top: 26px;
+  }
+
+  @media (min-width: 1024px) {
+    .tune-panel {
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+      align-items: end;
+      gap: 64px;
+      margin-top: 44px;
+      padding-inline: 8px;
+    }
+  }
+
+  .tune-lede {
+    max-width: 48ch;
+    margin-top: 14px;
+    font-size: clamp(1rem, 0.95rem + 0.3vw, 1.12rem);
+    line-height: 1.6;
+    color: var(--tfm-fg-2);
+    text-wrap: pretty;
+  }
+
+  .tune-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .tune-hint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.875rem;
+    color: var(--tfm-fg-3);
+  }
+
+  .tune-hint-dot {
+    width: 6px;
+    height: 6px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+  }
+
+  .tune-hint[data-tone='warn'] {
+    color: var(--tfm-fg-2);
+  }
+
+  .tune-hint[data-tone='warn'] .tune-hint-dot {
+    background: var(--tfm-led-amber);
+    box-shadow: 0 0 8px var(--tfm-led-amber);
+  }
+
+  /* Primary CTA: a lit key */
   .tune-btn {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.6rem;
-    min-height: 58px;
+    min-height: 60px;
     padding: 0 1.6rem;
-    border-radius: 14px;
+    border-radius: 16px;
     font-weight: 600;
     font-size: 1.08rem;
-    color: #0d0805;
-    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 70%, #fff) 0%, var(--accent) 55%, color-mix(in oklab, var(--accent) 86%, #000) 100%);
+    color: #120b06;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 62%, #fff) 0%, color-mix(in oklab, var(--accent) 88%, #fff) 50%, var(--accent) 100%);
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.45),
-      0 4px 0 color-mix(in oklab, var(--accent) 38%, #000),
-      0 16px 36px -12px color-mix(in oklab, var(--accent) 75%, transparent);
-    transition: transform 100ms, box-shadow 100ms;
+      inset 0 1px 0 rgb(255 255 255 / 0.5),
+      inset 0 -2px 0 rgb(0 0 0 / 0.15),
+      0 4px 0 color-mix(in oklab, var(--accent) 35%, #000),
+      0 18px 40px -14px color-mix(in oklab, var(--accent) 80%, transparent);
+    transition: translate 140ms var(--tfm-ease-out), box-shadow 140ms ease;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .tune-btn:hover {
+      box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 0.55),
+        inset 0 -2px 0 rgb(0 0 0 / 0.15),
+        0 4px 0 color-mix(in oklab, var(--accent) 35%, #000),
+        0 22px 50px -12px color-mix(in oklab, var(--accent) 90%, transparent);
+    }
   }
 
   .tune-btn:active {
-    transform: translateY(3px);
+    translate: 0 3px;
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.35),
-      0 1px 0 color-mix(in oklab, var(--accent) 38%, #000),
+      0 1px 0 color-mix(in oklab, var(--accent) 35%, #000),
       0 8px 18px -10px color-mix(in oklab, var(--accent) 75%, transparent);
+  }
+
+  .tune-btn-sm {
+    min-height: 48px;
+    font-size: 1rem;
   }
 
   .field {
     width: 100%;
-    min-height: 48px;
-    padding: 0 0.95rem;
-    border-radius: var(--tfm-radius-key);
+    min-height: 52px;
+    padding: 0 1rem;
+    border-radius: 14px;
     font-size: 1rem;
     color: var(--tfm-fg);
-    background: var(--tfm-surface);
+    background: var(--tfm-well);
     border: 1px solid var(--tfm-line);
+    box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.6);
     transition: border-color 150ms;
+  }
+
+  .field:hover {
+    border-color: #34363c;
   }
 
   .field::placeholder {
@@ -582,7 +1652,774 @@
     border-color: transparent;
   }
 
-  /* Pills: dock station switcher, subtitle toggle */
+  /* ---------- Programme strip ---------- */
+  .programme {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'now now'
+      'queue meta';
+    gap: 12px 16px;
+    margin-top: 16px;
+    padding: 14px 16px;
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgb(255 255 255 / 0.035), rgb(255 255 255 / 0.015));
+    box-shadow: inset 0 0 0 1px var(--tfm-line), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  }
+
+  @media (min-width: 768px) {
+    .programme {
+      grid-template-columns: minmax(0, 1.4fr) auto auto;
+      grid-template-areas: 'now queue meta';
+      align-items: center;
+      padding: 14px 20px;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .programme {
+      margin-top: 20px;
+      padding: 16px 26px;
+    }
+  }
+
+  .prog-now {
+    grid-area: now;
+    display: flex;
+    min-width: 0;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .prog-k {
+    flex-shrink: 0;
+    min-width: 2.6rem;
+    padding-top: 0.3rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--tfm-fg-3);
+  }
+
+  .prog-now .prog-k {
+    color: var(--accent);
+  }
+
+  .prog-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 1rem;
+    font-weight: 500;
+    line-height: 1.5;
+  }
+
+  .prog-queue {
+    grid-area: queue;
+    display: flex;
+    min-width: 0;
+    gap: 20px;
+  }
+
+  @media (min-width: 768px) {
+    .prog-queue {
+      gap: 28px;
+    }
+  }
+
+  .prog-slot {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .prog-slot .prog-k {
+    padding-top: 0;
+  }
+
+  .prog-slot[data-empty='true'] .prog-v {
+    color: var(--tfm-fg-3);
+  }
+
+  .prog-v {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--tfm-fg-2);
+  }
+
+  .prog-meta {
+    grid-area: meta;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 4px;
+    font-family: var(--tfm-font-mono);
+    font-size: 0.78rem;
+  }
+
+  .prog-clock,
+  .prog-ttfa {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+
+  /* ---------- Caption stage ---------- */
+  .stage {
+    margin-top: 26px;
+  }
+
+  @media (min-width: 1024px) {
+    .stage {
+      margin-top: 34px;
+      padding-inline: 8px;
+    }
+  }
+
+  .stage-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .stage-title {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--tfm-fg-3);
+  }
+
+  .stage-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: var(--tfm-fg-2);
+    background: rgb(255 255 255 / 0.03);
+    box-shadow: inset 0 0 0 1px var(--tfm-line);
+  }
+
+  .stage-note-dot {
+    width: 7px;
+    height: 7px;
+    flex-shrink: 0;
+    margin-top: 0.5em;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .stage-note[data-tone='warn'] .stage-note-dot {
+    background: var(--tfm-led-amber);
+    box-shadow: 0 0 8px var(--tfm-led-amber);
+  }
+
+  .history {
+    display: flex;
+    height: 3.4rem;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 0.4rem;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 65%);
+    mask-image: linear-gradient(180deg, transparent 0%, #000 65%);
+  }
+
+  .history-item {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--tfm-fg-2);
+    transition: opacity 400ms;
+  }
+
+  .history-who {
+    margin-right: 0.5rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--tfm-fg-3);
+  }
+
+  .caption-current {
+    min-height: 13rem;
+    margin-top: 1rem;
+    transition: opacity 500ms;
+  }
+
+  .caption-current[data-paused='true'] > div {
+    opacity: 0.45;
+  }
+
+  .paused-note {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.9rem;
+    color: var(--tfm-fg-2);
+  }
+
+  @media (min-width: 640px) {
+    .history {
+      height: 4.9rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .history {
+      height: 5.4rem;
+    }
+
+    .history-item {
+      font-size: 1.05rem;
+    }
+
+    .caption-current {
+      min-height: 15.5rem;
+    }
+  }
+
+  .speaker {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+  }
+
+  .speaker-name {
+    font-family: var(--tfm-font-display);
+    font-size: 1.1rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .speaker-role {
+    font-size: 0.85rem;
+    color: var(--tfm-fg-3);
+  }
+
+  .caption-text {
+    max-width: 34em;
+    font-size: clamp(1.65rem, 1.1rem + 2.5vw, 2.75rem);
+    font-weight: 500;
+    line-height: 1.55;
+    letter-spacing: 0;
+    color: #fff;
+    text-wrap: pretty;
+    overflow-wrap: anywhere;
+  }
+
+  .caption-text:lang(ta) {
+    font-size: clamp(1.45rem, 1rem + 2.1vw, 2.35rem);
+    line-height: 1.6;
+  }
+
+  .caption-text-sm,
+  .caption-text-sm:lang(ta) {
+    font-size: clamp(1.15rem, 1rem + 0.9vw, 1.5rem);
+  }
+
+  .caption-en {
+    max-width: 62ch;
+    margin-top: 0.6rem;
+    font-size: clamp(1rem, 0.94rem + 0.35vw, 1.2rem);
+    line-height: 1.5;
+    color: var(--tfm-fg-2);
+    text-wrap: pretty;
+  }
+
+  .fade-in {
+    animation: fade-in 360ms ease both;
+  }
+
+  /* Karaoke captions: each word rises in at its estimated time; an accent line sweeps under it */
+  .kw {
+    position: relative;
+    display: inline-block;
+    animation: word-in 420ms var(--tfm-ease-out) var(--d) both;
+  }
+
+  .kw::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0.08em;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--accent);
+    transform-origin: left center;
+    transform: scaleX(0);
+    opacity: 0;
+    animation:
+      word-sweep var(--w) linear var(--d) both,
+      word-out 600ms ease calc(var(--d) + var(--w)) forwards;
+  }
+
+  .caption-text-sm .kw::after {
+    height: 1.5px;
+  }
+
+  /* Paused: show the whole line, still */
+  .caption-current[data-paused='true'] .kw {
+    animation: none;
+  }
+
+  .caption-current[data-paused='true'] .kw::after {
+    display: none;
+  }
+
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .live-dot[data-live='true'] {
+    animation: live-pulse 1.6s ease-out infinite;
+  }
+
+  .waiting {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: var(--tfm-fg-2);
+  }
+
+  .signal-lost {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    overflow: hidden;
+    padding: 22px;
+    border-radius: 18px;
+    box-shadow: inset 0 0 0 1px var(--tfm-line);
+    background: rgb(255 255 255 / 0.02);
+  }
+
+  .signal-static {
+    position: absolute;
+    inset: 0;
+    opacity: 0.09;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='s'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.2' numOctaves='1' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23s)'/%3E%3C/svg%3E");
+    animation: static-shift 200ms steps(2, end) infinite;
+  }
+
+  .signal-lost > :not(.signal-static) {
+    position: relative;
+  }
+
+  /* ---------- Call-in: the phone line ---------- */
+  .line {
+    display: flex;
+    min-height: 13rem;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .line-head {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    color: var(--tfm-fg-2);
+  }
+
+  .line-led {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--tfm-lamp);
+    box-shadow: 0 0 10px var(--tfm-lamp);
+    animation: blink 1.1s steps(1, end) infinite;
+  }
+
+  .mic-meter {
+    display: grid;
+    grid-template-columns: repeat(24, minmax(0, 1fr));
+    gap: 3px;
+    height: 30px;
+    max-width: 460px;
+  }
+
+  .mic-meter > span {
+    border-radius: 2px;
+    background: var(--accent);
+    opacity: clamp(0.12, calc(var(--mic, 0) * 30 - var(--i)), 1);
+  }
+
+  .mic-meter > span[data-zone='warm'] {
+    background: var(--tfm-led-amber);
+  }
+
+  .mic-meter > span[data-zone='hot'] {
+    background: var(--tfm-lamp);
+  }
+
+  .line-ringing {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .ring-icon {
+    position: relative;
+    display: grid;
+    width: 56px;
+    height: 56px;
+    flex-shrink: 0;
+    place-items: center;
+    border-radius: 50%;
+    color: #120b06;
+    background: var(--accent);
+  }
+
+  .ring-icon > svg {
+    animation: handset 1.2s ease-in-out infinite;
+  }
+
+  .ring-wave {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    animation: ring-out 1.6s var(--tfm-ease-out) infinite;
+  }
+
+  .ring-wave + .ring-wave {
+    animation-delay: 0.8s;
+  }
+
+  .you-on-air {
+    position: relative;
+    display: inline-flex;
+    align-self: flex-start;
+    align-items: center;
+    gap: 10px;
+    overflow: hidden;
+    padding: 10px 18px;
+    border-radius: 12px;
+    font-family: var(--tfm-font-display);
+    font-size: clamp(1.15rem, 1rem + 0.8vw, 1.5rem);
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    color: #fff4ee;
+    text-shadow: 0 0 10px rgb(255 220 200 / 0.6);
+    background: radial-gradient(120% 150% at 50% 30%, #ff5440 0%, #c11d0e 70%, #8f1308 100%);
+    box-shadow: 0 0 44px -6px rgb(255 59 47 / 0.75), inset 0 0 8px rgb(255 200 180 / 0.45);
+    animation: on-air-in 900ms var(--tfm-ease-out) both;
+  }
+
+  .you-on-air-flash {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / 0.55) 50%, transparent 70%);
+    translate: -110% 0;
+    animation: sweep 1.1s var(--tfm-ease-out) 250ms both;
+  }
+
+  .lamp-dot {
+    position: relative;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #fff4ee;
+    box-shadow: 0 0 10px #fff;
+  }
+
+  .call-line[data-size='sm'] .speaker-name {
+    font-size: 1rem;
+  }
+
+  /* ---------- Dock: transport + push-to-talk ---------- */
+  .dock {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 30;
+    padding: 10px max(12px, env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    background: linear-gradient(180deg, rgb(10 10 11 / 0.82), rgb(5 5 6 / 0.96));
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 -20px 40px -20px rgb(0 0 0 / 0.9);
+  }
+
+  .dock-inner {
+    position: relative;
+    display: flex;
+    max-width: 760px;
+    align-items: stretch;
+    gap: 10px;
+    margin-inline: auto;
+  }
+
+  .icon-btn {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    min-width: 60px;
+    min-height: 60px;
+    border-radius: 18px;
+    color: var(--tfm-fg);
+    background: linear-gradient(180deg, #2d2e33 0%, #1a1b1e 100%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.13),
+      0 0 0 1px rgb(0 0 0 / 0.8),
+      0 3px 0 #08080a;
+    transition: translate 120ms var(--tfm-ease-out), box-shadow 120ms;
+  }
+
+  .icon-btn:hover:not(:disabled) {
+    background: linear-gradient(180deg, #34353b 0%, #1e1f23 100%);
+  }
+
+  .icon-btn:active:not(:disabled) {
+    translate: 0 2px;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.8), 0 1px 0 #08080a;
+  }
+
+  .icon-btn:disabled {
+    color: var(--tfm-fg-3);
+    cursor: not-allowed;
+  }
+
+  .icon-btn[data-attention='true'] {
+    color: #120b06;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 70%, #fff), var(--accent));
+  }
+
+  /* Push-to-talk */
+  .call-btn {
+    --mic: 0;
+    position: relative;
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.85rem;
+    min-height: 60px;
+    padding: 0.4rem 1.2rem 0.4rem 0.45rem;
+    border-radius: 999px;
+    text-align: left;
+    color: #120b06;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 60%, #fff) 0%, color-mix(in oklab, var(--accent) 84%, #fff) 50%, color-mix(in oklab, var(--accent) 94%, #fff) 100%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.5),
+      inset 0 -2px 0 rgb(0 0 0 / 0.14),
+      0 14px 34px -14px color-mix(in oklab, var(--accent) 80%, transparent);
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    transition: background 200ms, color 200ms, box-shadow 200ms, scale 140ms var(--tfm-ease-out);
+  }
+
+  .call-btn:active:not(:disabled) {
+    scale: 0.985;
+  }
+
+  .call-label {
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .call-detail {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 0.8rem;
+    font-weight: 500;
+    line-height: 1.35;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.86;
+  }
+
+  .call-led {
+    width: 6px;
+    height: 6px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .call-btn[data-state='ready'] .call-led {
+    animation: blink 2s steps(1, end) infinite;
+  }
+
+  .call-mic {
+    position: relative;
+    display: grid;
+    flex-shrink: 0;
+    place-items: center;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    color: #fff;
+    background: radial-gradient(circle at 40% 30%, #2a2b2f, #0b0b0c 70%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.15), 0 2px 6px rgb(0 0 0 / 0.5);
+  }
+
+  .call-ring {
+    position: absolute;
+    inset: -4px;
+    width: calc(100% + 8px);
+    height: calc(100% + 8px);
+    rotate: -90deg;
+    overflow: visible;
+    opacity: 0;
+  }
+
+  .call-ring circle {
+    fill: none;
+    stroke-width: 3;
+  }
+
+  .call-ring-track {
+    stroke: rgb(0 0 0 / 0.22);
+  }
+
+  .call-ring-progress {
+    stroke: #120b06;
+    stroke-linecap: round;
+    stroke-dasharray: 100;
+    stroke-dashoffset: 0;
+  }
+
+  .call-pulse {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid #120b06;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .call-btn[data-state='live'] {
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 45%, #fff), color-mix(in oklab, var(--accent) 75%, #fff));
+    box-shadow:
+      0 0 0 4px color-mix(in oklab, var(--accent) 30%, transparent),
+      0 0 48px color-mix(in oklab, var(--accent) 60%, transparent);
+  }
+
+  .call-btn[data-state='live'] .call-ring {
+    opacity: 1;
+  }
+
+  .call-btn[data-state='live'] .call-ring-progress {
+    animation: call-countdown var(--call-seconds, 15s) linear forwards;
+  }
+
+  .call-btn[data-state='live'] .call-pulse {
+    opacity: calc(0.15 + var(--mic) * 0.6);
+    scale: calc(1.18 + var(--mic) * 0.45);
+  }
+
+  .call-btn[data-state='live'] .call-pulse + .call-pulse {
+    opacity: calc(0.08 + var(--mic) * 0.35);
+    scale: calc(1.32 + var(--mic) * 0.85);
+  }
+
+  .call-btn[data-state='busy'],
+  .call-btn[data-state='onair'],
+  .call-btn[data-state='off'] {
+    color: var(--tfm-fg);
+    background: linear-gradient(180deg, #232428, #16171a);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.8);
+  }
+
+  .call-btn[data-state='busy'] .call-mic,
+  .call-btn[data-state='onair'] .call-mic {
+    color: #120b06;
+    background: var(--accent);
+  }
+
+  .call-btn[data-state='onair'] .call-led {
+    background: var(--tfm-lamp);
+    box-shadow: 0 0 8px var(--tfm-lamp);
+  }
+
+  .call-btn[data-state='off'] {
+    color: var(--tfm-fg-3);
+  }
+
+  .call-btn[data-state='off'] .call-mic {
+    color: var(--tfm-fg-3);
+  }
+
+  .call-btn:disabled {
+    cursor: not-allowed;
+  }
+
+  .call-btn:focus-visible {
+    outline-offset: 4px;
+  }
+
+  /* One-time hint above the call button: a slip of lit dial glass */
+  .coach {
+    position: absolute;
+    left: 70px;
+    bottom: calc(100% + 12px);
+    z-index: 2;
+    display: flex;
+    max-width: min(320px, calc(100% - 70px));
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.35rem 0.5rem 0.9rem;
+    border-radius: 12px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--tfm-ink);
+    background: linear-gradient(180deg, var(--tfm-glass-hi), var(--tfm-glass));
+    box-shadow: 0 12px 30px -10px rgb(0 0 0 / 0.85);
+    animation: fade-in 300ms ease both;
+  }
+
+  .coach::after {
+    content: '';
+    position: absolute;
+    left: 24px;
+    top: 100%;
+    border: 7px solid transparent;
+    border-top-color: var(--tfm-glass);
+  }
+
+  .coach-close {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    place-items: center;
+    border-radius: 8px;
+  }
+
+  .coach-close:hover,
+  .coach-close:focus-visible {
+    background: rgb(0 0 0 / 0.1);
+  }
+
+  /* Pills: subtitle toggle, preview nav */
   .pill {
     display: inline-flex;
     flex-shrink: 0;
@@ -599,9 +2436,15 @@
     transition: color 150ms, background 150ms, border-color 150ms;
   }
 
-  .pill:hover {
+  .pill-sm {
+    min-height: 44px;
+    font-size: 0.85rem;
+  }
+
+  .pill:hover,
+  .pill:focus-visible {
     color: var(--tfm-fg);
-    border-color: #3a322c;
+    border-color: #3a3c42;
   }
 
   .pill[aria-checked='true'],
@@ -625,239 +2468,38 @@
     box-shadow: 0 0 10px var(--pill-accent, var(--accent));
   }
 
-  .icon-btn {
-    display: inline-flex;
-    flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
-    min-width: 56px;
-    min-height: 56px;
-    border-radius: 14px;
-    color: var(--tfm-fg);
-    background: linear-gradient(180deg, #2c251f 0%, #1b1612 100%);
-    border: 1px solid rgb(255 236 214 / 0.08);
-    box-shadow: inset 0 1px 0 rgb(255 240 222 / 0.1);
-    transition: transform 100ms;
-  }
-
-  .icon-btn:active:not(:disabled) {
-    transform: translateY(1px);
-  }
-
-  .icon-btn:disabled {
-    color: var(--tfm-fg-3);
-    cursor: not-allowed;
-  }
-
-  .icon-btn[data-attention='true'] {
-    color: #0d0805;
-    border-color: transparent;
-    background: var(--accent);
-  }
-
-  /* Bottom dock */
-  .dock {
-    position: fixed;
-    inset-inline: 0;
-    bottom: 0;
-    z-index: 30;
-    padding: 10px max(16px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
-    background: rgb(10 8 7 / 0.84);
-    -webkit-backdrop-filter: blur(16px) saturate(140%);
-    backdrop-filter: blur(16px) saturate(140%);
-    border-top: 1px solid var(--tfm-line);
-  }
-
-  /* Reserve room for the fixed dock so the last caption line is never hidden */
-  .with-dock {
-    padding-bottom: calc(var(--dock-h, 152px) + 32px);
-  }
-
-  /* Push-to-talk */
-  .call-btn {
-    --mic: 0;
-    position: relative;
+  .pills {
     display: flex;
-    width: 100%;
-    align-items: center;
-    gap: 0.85rem;
-    min-height: 60px;
-    padding: 0.4rem 1.1rem 0.4rem 0.45rem;
-    border-radius: 999px;
-    text-align: left;
-    color: #0d0805;
-    background: var(--accent);
-    box-shadow: 0 10px 34px -10px color-mix(in oklab, var(--accent) calc((0.3 + var(--level, 0) * 0.5) * 100%), transparent);
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-    -webkit-touch-callout: none;
-    transition: background 200ms, color 200ms, box-shadow 200ms, transform 100ms;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
 
-  .call-btn:active:not(:disabled) {
-    transform: scale(0.99);
-  }
-
-  .call-mic {
-    position: relative;
+  /* ---------- Below the captions: voices + headlines ---------- */
+  .below {
     display: grid;
-    flex-shrink: 0;
-    place-items: center;
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    color: #fff;
-    background: #0d0805;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 36px;
+    margin-top: 40px;
   }
 
-  .call-ring {
-    position: absolute;
-    inset: -4px;
-    width: calc(100% + 8px);
-    height: calc(100% + 8px);
-    rotate: -90deg;
-    overflow: visible;
-    opacity: 0;
+  .below > * {
+    min-width: 0;
   }
 
-  .call-ring circle {
-    fill: none;
-    stroke-width: 3;
+  @media (min-width: 1024px) {
+    .below {
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+      gap: 56px;
+      padding-inline: 8px;
+    }
   }
 
-  .call-ring-track {
-    stroke: rgb(0 0 0 / 0.25);
-  }
-
-  .call-ring-progress {
-    stroke: #0d0805;
-    stroke-linecap: round;
-    stroke-dasharray: 100;
-    stroke-dashoffset: 0;
-  }
-
-  .call-pulse {
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    border: 2px solid #0d0805;
-    opacity: 0;
-    pointer-events: none;
-    transition: transform 80ms linear, opacity 80ms linear;
-  }
-
-  .call-btn[data-state='live'] {
-    background: color-mix(in oklab, var(--accent) 82%, #fff);
-    box-shadow:
-      0 0 0 4px color-mix(in oklab, var(--accent) 30%, transparent),
-      0 0 44px color-mix(in oklab, var(--accent) 55%, transparent);
-  }
-
-  .call-btn[data-state='live'] .call-ring {
-    opacity: 1;
-  }
-
-  .call-btn[data-state='live'] .call-ring-progress {
-    animation: call-countdown var(--call-seconds, 15s) linear forwards;
-  }
-
-  .call-btn[data-state='live'] .call-pulse {
-    opacity: calc(0.15 + var(--mic) * 0.6);
-    transform: scale(calc(1.18 + var(--mic) * 0.45));
-  }
-
-  .call-btn[data-state='live'] .call-pulse + .call-pulse {
-    opacity: calc(0.08 + var(--mic) * 0.35);
-    transform: scale(calc(1.32 + var(--mic) * 0.85));
-  }
-
-  .call-btn[data-state='busy'],
-  .call-btn[data-state='onair'],
-  .call-btn[data-state='off'] {
-    color: var(--tfm-fg);
-    background: var(--tfm-surface);
-    box-shadow: inset 0 0 0 1px var(--tfm-line);
-  }
-
-  .call-btn[data-state='busy'] .call-mic,
-  .call-btn[data-state='onair'] .call-mic {
-    color: #0d0805;
-    background: var(--accent);
-  }
-
-  .call-btn[data-state='off'] {
-    color: var(--tfm-fg-3);
-  }
-
-  .call-btn[data-state='off'] .call-mic {
-    color: var(--tfm-fg-3);
-    background: #1d1814;
-  }
-
-  .call-btn:disabled {
-    cursor: not-allowed;
-  }
-
-  /* One-time hint above the call button */
-  .coach {
-    position: absolute;
-    left: 64px;
-    bottom: calc(100% + 12px);
-    z-index: 2;
-    display: flex;
-    max-width: min(320px, calc(100% - 64px));
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.55rem 0.4rem 0.55rem 0.9rem;
-    border-radius: 12px;
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: var(--tfm-ink);
-    background: var(--tfm-glass-hi);
-    box-shadow: 0 12px 30px -10px rgb(0 0 0 / 0.8);
-  }
-
-  .coach::after {
-    content: '';
-    position: absolute;
-    left: 24px;
-    top: 100%;
-    border: 7px solid transparent;
-    border-top-color: var(--tfm-glass-hi);
-  }
-
-  /* Recording level meter */
-  .vu {
-    position: relative;
-    height: 12px;
-    max-width: 420px;
-  }
-
-  .vu::before,
-  .vu::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    -webkit-mask: repeating-linear-gradient(90deg, #000 0 6px, transparent 6px 9px);
-    mask: repeating-linear-gradient(90deg, #000 0 6px, transparent 6px 9px);
-  }
-
-  .vu::before {
-    background: var(--tfm-line);
-  }
-
-  .vu::after {
-    background: var(--accent);
-    clip-path: inset(0 calc((1 - var(--mic, 0)) * 100%) 0 0);
-    transition: clip-path 70ms linear;
-  }
-
-  /* Caption / now-playing card (SpotlightCard) glow */
-  .stage-card {
-    box-shadow:
-      0 30px 80px -40px rgb(0 0 0 / 1),
-      0 0 70px -30px color-mix(in oklab, var(--accent) calc((0.3 + var(--level, 0) * 0.5) * 100%), transparent);
+  .section-title {
+    font-family: var(--tfm-font-display);
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
   }
 
   /* Bulbul v4 speaker ID chip */
@@ -929,97 +2571,6 @@
     }
   }
 
-  /* Captions */
-  .history {
-    display: flex;
-    height: 4.9rem;
-    flex-direction: column;
-    justify-content: flex-end;
-    gap: 0.5rem;
-    overflow: hidden;
-    -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 60%);
-    mask-image: linear-gradient(180deg, transparent 0%, #000 60%);
-  }
-
-  .history-item {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    overflow: hidden;
-    font-size: 0.95rem;
-    line-height: 1.6;
-    color: var(--tfm-fg-2);
-    transition: opacity 400ms;
-  }
-
-  .caption-current {
-    min-height: 15rem;
-  }
-
-  @media (min-width: 1024px) {
-    .history {
-      height: 7.5rem;
-    }
-
-    .history-item {
-      font-size: 1.05rem;
-    }
-
-    .caption-current {
-      min-height: 16.5rem;
-    }
-
-    .caption-text {
-      font-size: clamp(2rem, 1.1rem + 1.4vw, 2.6rem);
-    }
-
-    .caption-text:lang(ta) {
-      font-size: clamp(1.8rem, 1rem + 1.2vw, 2.3rem);
-    }
-  }
-
-  .caption-text {
-    font-size: clamp(1.75rem, 1.15rem + 2.7vw, 3rem);
-    font-weight: 500;
-    line-height: 1.55;
-    letter-spacing: 0;
-    color: #fff;
-    text-wrap: pretty;
-    overflow-wrap: anywhere;
-  }
-
-  .caption-text:lang(ta) {
-    font-size: clamp(1.5rem, 1.05rem + 2.3vw, 2.6rem);
-  }
-
-  .caption-text-sm,
-  .caption-text-sm:lang(ta) {
-    font-size: clamp(1.2rem, 1rem + 1vw, 1.55rem);
-  }
-
-  .caption-en {
-    max-width: 62ch;
-    font-size: clamp(1rem, 0.94rem + 0.4vw, 1.2rem);
-    line-height: 1.5;
-    color: var(--tfm-fg-2);
-  }
-
-  .fade-in {
-    animation: fade-in 360ms ease both;
-  }
-
-  .live-dot {
-    width: 8px;
-    height: 8px;
-    flex-shrink: 0;
-    border-radius: 50%;
-    background: var(--accent);
-  }
-
-  .live-dot[data-live='true'] {
-    animation: live-pulse 1.6s ease-out infinite;
-  }
-
   .eq {
     display: inline-flex;
     height: 16px;
@@ -1058,8 +2609,21 @@
     transition: text-decoration-color 150ms;
   }
 
-  .source-link:hover {
+  .source-link:hover,
+  .source-link:focus-visible {
     text-decoration-color: var(--accent);
+  }
+
+  .footer-link {
+    color: var(--tfm-fg-2);
+    text-decoration-line: underline;
+    text-decoration-color: #3a3c42;
+    text-underline-offset: 4px;
+  }
+
+  .footer-link:hover,
+  .footer-link:focus-visible {
+    color: var(--tfm-fg);
   }
 
   /* Split-flap segment board (React Bits SplitFlapText) */
@@ -1079,7 +2643,7 @@
     height: 1.55em;
     overflow: hidden;
     border-radius: var(--split-flap-radius, 3px);
-    background: var(--split-flap-tile-color, #1d1814);
+    background: var(--split-flap-tile-color, #18191c);
     box-shadow:
       inset 0 0 0 1px rgb(255 236 214 / 0.07),
       0 2px 4px rgb(0 0 0 / 0.5);
@@ -1107,7 +2671,7 @@
     width: 100%;
     height: 50%;
     overflow: hidden;
-    background: linear-gradient(180deg, rgb(255 255 255 / 0.05), transparent 40%), var(--split-flap-tile-color, #1d1814);
+    background: linear-gradient(180deg, rgb(255 255 255 / 0.05), transparent 40%), var(--split-flap-tile-color, #18191c);
     backface-visibility: hidden;
   }
 
@@ -1119,7 +2683,7 @@
   .split-flap-text__half--bottom,
   .split-flap-text__flap--back {
     bottom: 0;
-    background: color-mix(in srgb, var(--split-flap-tile-color, #1d1814) 88%, black);
+    background: color-mix(in srgb, var(--split-flap-tile-color, #18191c) 88%, black);
   }
 
   .split-flap-text__char {
@@ -1184,16 +2748,17 @@
   }
 }
 
+
 @keyframes needle-search {
   0%,
   100% {
-    translate: -50% 0;
+    transform: translateX(0);
   }
   30% {
-    translate: calc(-50% - 9px) 0;
+    transform: translateX(-9px);
   }
   65% {
-    translate: calc(-50% + 6px) 0;
+    transform: translateX(6px);
   }
 }
 
@@ -1206,13 +2771,52 @@
   }
 }
 
+/* Filament warm-up: stutter, dip, then settle to full glow */
+@keyframes warm-up {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.45;
+  }
+  18% {
+    opacity: 0.15;
+  }
+  30% {
+    opacity: 0.6;
+  }
+  38% {
+    opacity: 0.4;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
 @keyframes lamp-warm {
   0%,
   100% {
-    color: #7d4238;
+    color: #6a2f28;
   }
   50% {
     color: #e8735f;
+  }
+}
+
+/* Three-step ignition when the lamp comes on */
+@keyframes lamp-ignite {
+  0% {
+    opacity: 0.55;
+  }
+  30% {
+    opacity: 1;
+  }
+  45% {
+    opacity: 0.7;
+  }
+  60%,
+  100% {
+    opacity: 1;
   }
 }
 
@@ -1225,6 +2829,39 @@
 @keyframes fade-in {
   from {
     opacity: 0;
+  }
+}
+
+@keyframes word-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.18em);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes word-sweep {
+  from {
+    opacity: 0.9;
+    transform: scaleX(0);
+  }
+  to {
+    opacity: 0.9;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes word-out {
+  from {
+    opacity: 0.9;
+    transform: scaleX(1);
+  }
+  to {
+    opacity: 0;
+    transform: scaleX(1);
   }
 }
 
@@ -1247,25 +2884,113 @@
   }
 }
 
+@keyframes blink {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  61%,
+  100% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes ring-out {
+  from {
+    opacity: 0.75;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+}
+
+@keyframes handset {
+  0%,
+  40%,
+  100% {
+    transform: rotate(0);
+  }
+  8%,
+  24% {
+    transform: rotate(-14deg);
+  }
+  16%,
+  32% {
+    transform: rotate(14deg);
+  }
+}
+
+@keyframes on-air-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  25% {
+    opacity: 1;
+  }
+  35% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes sweep {
+  from {
+    translate: -110% 0;
+  }
+  to {
+    translate: 110% 0;
+  }
+}
+
+/* Reduced motion, tiered: no travel, flicker, static or springs; fades and level glows stay. */
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --tfm-ease-spring: ease-out;
+    --tfm-dur-needle: 220ms;
+  }
+
   .radio {
     transition: --accent 200ms linear;
   }
 
-  .dial {
-    transition: --needle-x 250ms ease-out;
-  }
-
-  .dial-glass {
-    transition: filter 300ms linear;
+  .dial-backlight,
+  .vu-backlight {
+    transition-duration: 300ms;
   }
 
   .dial[data-tuning='true'] .needle,
   .dial[data-tuning='true'] .dial-static,
+  .dial[data-tuning='true'] .dial-backlight,
+  .signal-static,
   .lamp[data-warming='true'],
+  .lamp[data-on='true'],
   .live-dot[data-live='true'],
-  .split-flap-text__flap {
+  .split-flap-text__flap,
+  .ring-wave,
+  .ring-icon > svg,
+  .line-led,
+  .call-btn[data-state='ready'] .call-led,
+  .you-on-air-flash {
     animation: none;
+  }
+
+  .you-on-air {
+    animation: fade-in 200ms ease both;
+  }
+
+  .ring-wave,
+  .you-on-air-flash {
+    display: none;
   }
 
   .call-btn[data-state='live'] .call-pulse {
@@ -1277,7 +3002,16 @@
     animation-timing-function: steps(3, end);
   }
 
-  .preset,
+  .dialbar {
+    transition: opacity 150ms ease;
+    translate: 0 0;
+  }
+
+  .dialbar:not([data-visible='true']) {
+    visibility: hidden;
+  }
+
+  .preset-cap,
   .tune-btn,
   .icon-btn,
   .call-btn {

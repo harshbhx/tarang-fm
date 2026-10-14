@@ -1,9 +1,20 @@
-/** Studio "ON AIR" sign. Glows with the audio level; flickers while warming up (tuning). */
-export default function OnAirLamp({ on, warming = false }: { on: boolean; warming?: boolean }) {
+/** Studio "ON AIR" sign: a red glass lamp that glows with the audio level and flickers while warming up. */
+export default function OnAirLamp({
+  on,
+  warming = false,
+  size = 'md',
+}: {
+  on: boolean;
+  warming?: boolean;
+  size?: 'sm' | 'md';
+}) {
   return (
-    <p className="lamp" data-on={on} data-warming={warming && !on}>
-      <span aria-hidden="true">ON AIR</span>
+    <span className="lamp" data-on={on} data-warming={warming && !on} data-size={size}>
+      <span className="lamp-glow" aria-hidden="true" />
+      <span className="lamp-text" aria-hidden="true">
+        On air
+      </span>
       <span className="sr-only">{on ? 'On air' : warming ? 'Tuning in' : 'Off air'}</span>
-    </p>
+    </span>
   );
 }

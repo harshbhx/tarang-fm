@@ -1,3 +1,4 @@
+import { SHOW_CLOCK } from '../../shared/constants';
 import { ROLES } from '../../shared/stations';
 import type { Role, SegmentType, Station } from '../../shared/types';
 import type { Caption, RadioStatus } from '../radio/state';
@@ -80,4 +81,38 @@ export function castVoices(station: Station): CastVoice[] {
     else if (!entry.roles.includes(name)) entry.roles.push(name);
   }
   return [...voices.values()];
+}
+
+/**
+ * The segment after `next` on the show clock, or undefined when the clock is ambiguous
+ * (the same pair appears twice with different followers) or the pair is unknown.
+ */
+export function laterOnClock(current?: SegmentType, next?: SegmentType): SegmentType | undefined {
+  if (!current || !next) return undefined;
+  const loop = SHOW_CLOCK.slice(1);
+  const n = loop.length;
+  const found = new Set<SegmentType>();
+  for (let i = 0; i < n; i++) {
+    if (loop[i] === current && loop[(i + 1) % n] === next) found.add(loop[(i + 2) % n]);
+  }
+  if (SHOW_CLOCK[0] === current && SHOW_CLOCK[1] === next) found.add(SHOW_CLOCK[2] ?? loop[0]);
+  return found.size === 1 ? [...found][0] : undefined;
+}
+
+/** 75 → '01:15'; 3725 → '1:02:05' */
+export function formatClock(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(sec).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+/** Nearest station to a dial position (percent). */
+export function nearestStation(stations: Station[], pct: number): Station {
+  return stations.reduce((best, s) =>
+    Math.abs(dialPct(Number(s.frequency)) - pct) < Math.abs(dialPct(Number(best.frequency)) - pct) ? s : best,
+  );
 }

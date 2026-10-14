@@ -6,12 +6,16 @@ interface StationPickerProps {
   stations: Station[];
   value: StationId;
   onChange: (id: StationId) => void;
-  /** Preset keys on the radio body, or compact pills in the dock */
+  /** Mechanical preset keys on the radio body, or compact pills */
   variant: 'keys' | 'pills';
+  className?: string;
 }
 
-/** Accessible radiogroup of stations (arrow keys move between them). */
-export default function StationPicker({ stations, value, onChange, variant }: StationPickerProps) {
+/**
+ * Accessible radiogroup of stations (arrow keys move between them). As preset keys, the
+ * selected key latches down like a real push-button radio. Works for any number of stations.
+ */
+export default function StationPicker({ stations, value, onChange, variant, className = '' }: StationPickerProps) {
   const items = useRef<(HTMLButtonElement | null)[]>([]);
   const index = Math.max(0, stations.findIndex((s) => s.id === value));
 
@@ -36,9 +40,10 @@ export default function StationPicker({ stations, value, onChange, variant }: St
   return (
     <div
       role="radiogroup"
-      aria-label="Stations"
+      aria-label="Station presets"
       onKeyDown={onKeyDown}
-      className={variant === 'keys' ? 'grid grid-cols-3 gap-2 sm:gap-3' : 'flex gap-2 overflow-x-auto [scrollbar-width:none]'}
+      className={`${variant === 'keys' ? 'presets' : 'pills'} ${className}`}
+      style={{ '--count': stations.length } as CSSProperties}
     >
       {stations.map((station, i) => {
         const on = station.id === value;
@@ -59,20 +64,22 @@ export default function StationPicker({ stations, value, onChange, variant }: St
             <button key={station.id} {...common} className="pill" style={{ '--pill-accent': station.accent } as CSSProperties}>
               <span className="pill-dot" aria-hidden="true" />
               {station.languageName}
-              <span className="text-fg-3 hidden font-mono text-xs tabular-nums sm:inline">{station.frequency}</span>
+              <span className="text-fg-3 font-mono text-xs tabular-nums">{station.frequency}</span>
             </button>
           );
         }
 
         return (
           <button key={station.id} {...common} className="preset" style={{ '--led': station.accent } as CSSProperties}>
-            <span className="preset-led" aria-hidden="true" />
-            <span className="truncate text-[0.92rem] leading-tight font-semibold sm:text-[0.98rem]">{station.languageName}</span>
-            <span className="text-fg-3 flex items-baseline gap-1.5 text-xs">
-              <span lang={station.language} className="hidden truncate sm:inline">
-                {nativeLanguage(station)}
+            <span className="preset-cap">
+              <span className="preset-led" aria-hidden="true" />
+              <span className="preset-name">{station.languageName}</span>
+              <span className="preset-meta">
+                <span lang={station.language} className="preset-native">
+                  {nativeLanguage(station)}
+                </span>
+                <span className="preset-freq">{station.frequency}</span>
               </span>
-              <span className="font-mono tabular-nums">{station.frequency}</span>
             </span>
           </button>
         );

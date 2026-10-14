@@ -1,117 +1,107 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
+import { useRef, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import type { Station, StationId } from '../../shared/types';
 import { DIAL_MAX, DIAL_MIN, dialPct, nativeLanguage } from './format';
 
+/** Pointer and keyboard handlers when the dial is a live control (see RadioDevice). */
+export interface DialControl {
+  /** Needle follows the pointer (percent of the glass width) */
+  onDrag: (pct: number) => void;
+  /** Pointer released: snap to the nearest station */
+  onRelease: () => void;
+  /** Keyboard: step one station, or jump to the ends */
+  onStep: (to: -1 | 1 | 'first' | 'last') => void;
+}
+
 export interface TunerDialProps {
   stations: Station[];
+  /** Station shown as selected (lit mark, accent) */
   value: StationId;
-  /** Omit for a purely decorative dial */
-  onChange?: (id: StationId) => void;
-  /** Backlight on (tuned in); off dims the glass */
+  /** Needle position in percent of the glass; defaults to the selected station */
+  pct?: number;
+  /** Pointer is moving the needle (no spring) */
+  dragging?: boolean;
+  /** Backlight on (tuned in); off leaves smoky, unlit glass */
   lit?: boolean;
-  /** Needle hunts and static plays while a station locks in */
+  /** Warm-up flicker, needle hunting and static while a station locks in */
   tuning?: boolean;
-  /** Shorter glass, e.g. while the show is playing */
-  compact?: boolean;
-  /** Needle and glow colour; defaults to the selected station's accent */
-  accent?: string;
+  /** full: idle hero; compact: during a show; mini: sticky bar strip */
+  size?: 'full' | 'compact' | 'mini';
+  /** Omit for a purely decorative dial */
+  control?: DialControl;
   /** Rendered behind the scale, e.g. a visualizer */
   children?: ReactNode;
   className?: string;
 }
 
 const TICKS = Array.from({ length: (DIAL_MAX - DIAL_MIN) * 2 + 1 }, (_, i) => {
-  const height = i % 4 === 0 ? 20 : i % 2 === 0 ? 13 : 7;
+  const height = i % 4 === 0 ? 20 : i % 2 === 0 ? 12 : 7;
   return { x: dialPct(DIAL_MIN + i / 2) * 10, height };
 });
 
 const NUMERALS = Array.from({ length: (DIAL_MAX - DIAL_MIN) / 2 + 1 }, (_, i) => DIAL_MIN + i * 2);
 
 /**
- * Backlit analogue FM dial. The needle springs between stations; drag or tap the glass to tune
- * (it snaps to the nearest station), or use the arrow keys. Exposed as a slider.
+ * Backlit analogue FM dial: smoky glass that warms up to amber when tuned in, a printed scale,
+ * station marks and the accent needle. The needle rides `--tune` (0..100), a registered property
+ * that springs on change, so the knob and needle move as one mechanism.
  */
 export default function TunerDial({
   stations,
   value,
-  onChange,
+  pct,
+  dragging = false,
   lit = true,
   tuning = false,
-  compact = false,
-  accent,
+  size = 'full',
+  control,
   children,
   className = '',
 }: TunerDialProps) {
   const glassRef = useRef<HTMLDivElement>(null);
-  const [drag, setDrag] = useState<number | null>(null);
-  const [pending, setPending] = useState<StationId | null>(null);
-  const interactive = !!onChange;
-  const byFreq = [...stations].sort((a, b) => Number(a.frequency) - Number(b.frequency));
-
-  if (pending && pending === value) setPending(null);
-
-  useEffect(() => {
-    if (!pending) return;
-    const timer = window.setTimeout(() => setPending(null), 1500);
-    return () => window.clearTimeout(timer);
-  }, [pending]);
-
   const selected = stations.find((s) => s.id === value) ?? stations[0];
-  const shown = stations.find((s) => s.id === (pending ?? value)) ?? selected;
-  const needle = drag ?? dialPct(Number(shown.frequency));
+  const needle = pct ?? dialPct(Number(selected.frequency));
+  const nearestId = stations.reduce((best, s) =>
+    Math.abs(dialPct(Number(s.frequency)) - needle) < Math.abs(dialPct(Number(best.frequency)) - needle) ? s : best,
+  ).id;
+  const markedId = dragging ? nearestId : selected.id;
+  const marked = stations.find((s) => s.id === markedId) ?? selected;
 
   const pctAt = (clientX: number) => {
     const rect = glassRef.current?.getBoundingClientRect();
     if (!rect || rect.width === 0) return needle;
-    const pct = ((clientX - rect.left) / rect.width) * 100;
-    return Math.min(dialPct(DIAL_MAX), Math.max(dialPct(DIAL_MIN), pct));
-  };
-
-  const nearest = (pct: number) =>
-    stations.reduce((best, s) =>
-      Math.abs(dialPct(Number(s.frequency)) - pct) < Math.abs(dialPct(Number(best.frequency)) - pct) ? s : best,
-    );
-
-  const choose = (id: StationId) => {
-    if (!onChange || id === value) return;
-    setPending(id);
-    onChange(id);
+    const p = ((clientX - rect.left) / rect.width) * 100;
+    return Math.min(dialPct(DIAL_MAX), Math.max(dialPct(DIAL_MIN), p));
   };
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (!interactive || (event.pointerType === 'mouse' && event.button !== 0)) return;
+    if (!control || (event.pointerType === 'mouse' && event.button !== 0)) return;
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
       // Best effort; the drag still works while the pointer stays on the dial.
     }
-    setDrag(pctAt(event.clientX));
-  };
-
-  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    if (drag !== null) setDrag(pctAt(event.clientX));
-  };
-
-  const onPointerUp = () => {
-    if (drag === null) return;
-    const target = nearest(drag);
-    setDrag(null);
-    choose(target.id);
+    control.onDrag(pctAt(event.clientX));
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const index = byFreq.findIndex((s) => s.id === (pending ?? value));
-    let next = -1;
-    if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next = Math.min(byFreq.length - 1, index + 1);
-    else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next = Math.max(0, index - 1);
-    else if (event.key === 'Home') next = 0;
-    else if (event.key === 'End') next = byFreq.length - 1;
-    if (next < 0) return;
+    if (!control) return;
+    const map: Record<string, -1 | 1 | 'first' | 'last'> = {
+      ArrowRight: 1,
+      ArrowUp: 1,
+      ArrowLeft: -1,
+      ArrowDown: -1,
+      PageUp: 1,
+      PageDown: -1,
+      Home: 'first',
+      End: 'last',
+    };
+    const to = map[event.key];
+    if (to === undefined) return;
     event.preventDefault();
-    choose(byFreq[next].id);
+    control.onStep(to);
   };
 
-  const sliderProps = interactive
+  const sliderProps = control
     ? {
         role: 'slider',
         tabIndex: 0,
@@ -119,13 +109,19 @@ export default function TunerDial({
         'aria-orientation': 'horizontal' as const,
         'aria-valuemin': DIAL_MIN,
         'aria-valuemax': DIAL_MAX,
-        'aria-valuenow': Number(shown.frequency),
-        'aria-valuetext': `${shown.languageName}, ${shown.frequency} MHz`,
+        'aria-valuenow': Number(marked.frequency),
+        'aria-valuetext': `${marked.languageName}, ${marked.frequency} MHz`,
         onKeyDown,
         onPointerDown,
-        onPointerMove,
-        onPointerUp,
-        onPointerCancel: () => setDrag(null),
+        onPointerMove: (event: PointerEvent<HTMLDivElement>) => {
+          if (dragging) control.onDrag(pctAt(event.clientX));
+        },
+        onPointerUp: () => {
+          if (dragging) control.onRelease();
+        },
+        onPointerCancel: () => {
+          if (dragging) control.onRelease();
+        },
       }
     : { 'aria-hidden': true };
 
@@ -133,27 +129,34 @@ export default function TunerDial({
     <div
       {...sliderProps}
       className={`dial ${className}`}
+      data-size={size}
       data-lit={lit}
-      data-tuning={tuning && drag === null}
-      data-compact={compact}
-      data-dragging={drag !== null}
-      style={{ '--needle-x': `${needle}%`, '--accent': accent ?? selected.accent } as CSSProperties}
+      data-tuning={tuning && !dragging}
+      data-dragging={dragging}
+      style={{ '--tune': needle, '--accent': selected.accent } as CSSProperties}
     >
       <div ref={glassRef} className="dial-glass" aria-hidden="true">
+        <span className="dial-backlight" />
         {children}
-        <span className="dial-print left-3">FM</span>
-        <span className="dial-print right-3">MHz</span>
+        {size === 'mini' ? null : (
+          <>
+            <span className="dial-print dial-print-l">FM</span>
+            <span className="dial-print dial-print-r">MHz</span>
+          </>
+        )}
         {stations.map((station) => (
           <span
             key={station.id}
             className="dial-station"
-            data-on={station.id === shown.id}
-            style={{ left: `${dialPct(Number(station.frequency))}%` }}
+            data-on={station.id === markedId}
+            style={{ left: `${dialPct(Number(station.frequency))}%`, '--mark': station.accent } as CSSProperties}
           >
             <span className="dial-station-name">{station.languageName}</span>
-            <span lang={station.language} className="dial-station-native">
-              {nativeLanguage(station)}
-            </span>
+            {size === 'full' ? (
+              <span lang={station.language} className="dial-station-native">
+                {nativeLanguage(station)}
+              </span>
+            ) : null}
           </span>
         ))}
         <svg className="dial-ticks" viewBox="0 0 1000 20" preserveAspectRatio="none">
@@ -177,17 +180,23 @@ export default function TunerDial({
               stroke="currentColor"
               strokeWidth={tick.height === 20 ? 1.6 : 1}
               vectorEffect="non-scaling-stroke"
-              opacity={tick.height === 7 ? 0.5 : 0.8}
+              opacity={tick.height === 7 ? 0.5 : 0.85}
             />
           ))}
         </svg>
-        {NUMERALS.map((n) => (
-          <span key={n} className="dial-num" style={{ left: `${dialPct(n)}%` }}>
-            {n}
-          </span>
-        ))}
+        {size === 'mini'
+          ? null
+          : NUMERALS.map((n) => (
+              <span key={n} className="dial-num" style={{ left: `${dialPct(n)}%` }}>
+                {n}
+              </span>
+            ))}
         <span className="dial-static" />
-        <span className="needle" />
+        <span className="needle-track">
+          <span className="needle-spill" />
+          <span className="needle" />
+        </span>
+        <span className="dial-glare" />
       </div>
     </div>
   );
