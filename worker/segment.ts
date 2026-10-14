@@ -2,12 +2,14 @@
 import { z } from 'zod';
 import { PAUSE_AFTER_MS } from '../shared/constants';
 import { LlmSegmentSchema, type SegmentRequest } from '../shared/schemas';
-import type { Line, Role, Segment, SegmentType, Source, Station, TtsLanguage } from '../shared/types';
+import type { Delivery, Line, Mood, Role, Segment, SegmentType, Source, Station, TtsLanguage, Voice } from '../shared/types';
 import { randomFiller } from './fallbacks';
-import { MAX_LINES, NEWS_HEADLINES, SEGMENT_PLAN, SEGMENT_ROLES, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
+import { MAX_LINES, NEWS_HEADLINES, rjOnAir, SEGMENT_PLAN, SEGMENT_ROLES, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
 import type { Sarvam } from './sarvam';
+import { gapAfter, isDelivery, timePhrase, voiceFor } from './show';
 import { cleanText, processLines, type RawLine } from './text';
 import type { Timings } from './timing';
+import { copiesExample, dropInventedNumbers, validateScript } from './validate';
 
 /** Total budget for one segment request, including the retry. */
 const SEGMENT_BUDGET_MS = 19_000;
@@ -19,9 +21,11 @@ const MIN_LINES: Record<LlmSegmentType, number> = { rj_link: 2, news: 3, ad_brea
 /** Accepts slightly oversized model output and leaves the trimming to post-processing. */
 const LenientSegmentSchema = z.preprocess((value) => {
   if (!value || typeof value !== 'object') return value;
-  const v = value as { title?: unknown; lines?: unknown };
+  const v = value as { title?: unknown; lines?: unknown; summary_en?: unknown; mood?: unknown };
   return {
     title: typeof v.title === 'string' ? v.title.slice(0, 120) : v.title,
+    summary_en: typeof v.summary_en === 'string' ? v.summary_en.slice(0, 400) : undefined,
+    mood: typeof v.mood === 'string' ? v.mood.slice(0, 10) : undefined,
     lines: Array.isArray(v.lines)
       ? v.lines.slice(0, 16).map((l: unknown) => {
           const line = l as { role?: unknown; text?: unknown };
@@ -33,16 +37,61 @@ const LenientSegmentSchema = z.preprocess((value) => {
 
 const annotationCache = new Map<string, string>();
 
-export function toLine(station: Station, role: Role, text: string, type: SegmentType): Line {
-  const voice = station.cast[role];
+/** One spoken line: the role's voice (or the daypart RJ), shaped by its delivery. */
+export function toLine(
+  station: Station,
+  role: Role,
+  text: string,
+  type: SegmentType,
+  opts: { delivery?: Delivery; voice?: Voice } = {},
+): Line {
+  const voice = opts.voice ?? station.cast[role];
+  const delivery = opts.delivery ?? 'normal';
+  const params = voiceFor(voice, delivery);
   return {
     role,
     speaker: voice.speaker,
     text,
-    pace: voice.pace,
-    temperature: voice.temperature,
+    delivery,
+    pace: params.pace,
+    temperature: params.temperature,
+    loudness: params.loudness,
+    pitch: params.pitch,
     pauseAfterMs: PAUSE_AFTER_MS[type],
   };
+}
+
+/** Applies the pack's gap rules once the whole script is known; `continues[i]` marks a line split from line i. */
+export function applyGaps(lines: Line[], type: SegmentType, random = Math.random, continues: boolean[] = []): Line[] {
+  return lines.map((line, i) => ({
+    ...line,
+    pauseAfterMs: gapAfter(type, line.delivery ?? 'normal', Boolean(continues[i + 1]) && lines[i + 1]?.speaker === line.speaker, random),
+  }));
+}
+
+const KICKER = /(आखिर में|आख़िर में)[^।]*अच्छी ख़?बर/u;
+
+/** Drops a kicker intro ("…एक अच्छी खबर।") that is not followed by a story before the sign-off. */
+export function dropOrphanKicker<T extends { text: string }>(lines: T[]): T[] {
+  return lines.filter((line, i) => !(KICKER.test(line.text) && i >= lines.length - 2));
+}
+
+const nameCache = new Map<string, string>();
+
+/** The listener's name in the station script (Sarvam Transliterate), cached; the Latin spelling on failure. */
+export async function nativeListenerName(sarvam: Sarvam, name: string | undefined, language: TtsLanguage): Promise<string | undefined> {
+  const who = name?.trim();
+  if (!who || language === 'en-IN' || !/^[\p{Script=Latin}\s.'-]+$/u.test(who)) return who;
+  const key = `${language}:${who.toLowerCase()}`;
+  const hit = nameCache.get(key);
+  if (hit) return hit;
+  try {
+    const out = await sarvam.transliterate(who, 'en-IN', language);
+    if (nameCache.size < 500) nameCache.set(key, out);
+    return out;
+  } catch {
+    return who;
+  }
 }
 
 /** Writes the station brand in Latin script so Translate keeps it as "Tarang". */
@@ -140,6 +189,13 @@ export function capLines<T>(lines: T[], max: number): T[] {
   return [...lines.slice(0, max - 1), lines[lines.length - 1]];
 }
 
+interface Script {
+  title: string;
+  lines: RawLine[];
+  summary?: string;
+  mood?: Mood;
+}
+
 async function writeScript(
   sarvam: Sarvam,
   station: Station,
@@ -147,11 +203,15 @@ async function writeScript(
   req: SegmentRequest,
   headlines: Source[],
   timings: Timings,
-): Promise<{ title: string; lines: RawLine[] }> {
+  listenerName: string | undefined,
+): Promise<Script> {
   const deadline = Date.now() + SEGMENT_BUDGET_MS;
   const plan = SEGMENT_PLAN[type];
   const roles = SEGMENT_ROLES[type];
   const schema = segmentJsonSchema(type);
+  const headlinesText = headlines.map((h) => h.title).join(' ');
+  const time = timePhrase(station, req.listener);
+  const greet = type === 'rj_link' && Boolean(req.producer?.greetListener || req.producer?.firstLink || !req.showLog?.some((e) => e.type === 'rj_link'));
   let lastError: unknown;
 
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -161,18 +221,24 @@ async function writeScript(
       const raw = await timings.measure('llm', () =>
         sarvam.chatJson(segmentMessages(station, type, req, headlines), schema, LenientSegmentSchema, {
           name: `tarang_${type}`,
-          temperature: plan.temperature,
+          // The pack's retry: one more try at a slightly lower temperature.
+          temperature: Math.max(0.1, plan.temperature - attempt * 0.1),
           maxTokens: plan.maxTokens,
           reasoningEffort: plan.reasoningEffort,
           timeoutMs: Math.min(plan.timeoutMs + attempt * 3000, remaining),
         }),
       );
-      const max = type === 'news' ? headlines.length + 2 : MAX_LINES[type];
-      const named = raw.lines.map((l) => ({ ...l, text: fillName(l.text, req.listener.name) }));
-      const lines = processLines(capLines(named, max), roles, type, station.language);
+      const problems = validateScript(station, type, raw.lines, { greet, listenerName: req.listener.name, headlinesText, timePhrase: time });
+      if (problems.length && attempt === 0) throw new Error(`validation: ${problems.slice(0, 3).join(' | ')}`);
+      // After the retry, drop any line that still copies a prompt example (the Kahani may echo its own scene line).
+      let scriptLines = type === 'kahani' ? raw.lines : raw.lines.filter((l) => !copiesExample(l.text));
+      if (type === 'news') scriptLines = dropOrphanKicker(dropInventedNumbers(scriptLines, headlinesText, `${time} ${station.frequency}`));
+      const named = scriptLines.map((l) => ({ ...l, text: fillName(l.text, listenerName) }));
+      const lines = processLines(capLines(named as RawLine[], MAX_LINES[type]), roles, type, station.language);
       const min = type === 'news' ? Math.min(MIN_LINES.news, headlines.length + 1) : MIN_LINES[type];
       if (lines.length < min) throw new Error(`only ${lines.length} usable lines for ${type}`);
-      return { title: raw.title, lines };
+      const mood: Mood | undefined = raw.mood === 'heavy' ? 'heavy' : raw.mood === 'light' ? 'light' : undefined;
+      return { title: raw.title, lines, summary: raw.summary_en?.trim() || undefined, mood };
     } catch (err) {
       lastError = err;
       console.error(`[segment] ${station.id}/${type} attempt ${attempt + 1} failed: ${String(err)}`);
@@ -199,6 +265,7 @@ export async function buildSegment(
       type,
       title: `${station.nativeName} · FM ${station.frequency}`,
       lines: [line],
+      summary: 'the station jingle',
     };
   }
 
@@ -212,20 +279,30 @@ export async function buildSegment(
     if (!headlines.length) return withSubtitles(sarvam, fallbackSegment(station, type), station.language, timings, true);
   }
 
-  let script: { title: string; lines: RawLine[] };
+  const listenerName = await timings.measure('name', () => nativeListenerName(sarvam, req.listener.name, station.language));
+  let script: Script;
   try {
-    script = await writeScript(sarvam, station, type, req, headlines, timings);
+    script = await writeScript(sarvam, station, type, req, headlines, timings, listenerName);
   } catch {
     return withSubtitles(sarvam, fallbackSegment(station, type), station.language, timings, true);
   }
 
+  const rjVoice = rjOnAir(station, req.listener).voice;
+  const lines = script.lines.map((l) =>
+    toLine(station, l.role, l.text, type, {
+      delivery: isDelivery(l.delivery) ? l.delivery : 'normal',
+      voice: l.role === 'rj' ? rjVoice : undefined,
+    }),
+  );
   const segment: Segment = {
     id: crypto.randomUUID(),
     station: station.id,
     type,
-    title: cleanTitle(fillName(script.title, req.listener.name), station.nativeName, station.language),
-    lines: script.lines.map((l) => toLine(station, l.role, l.text, type)),
+    title: cleanTitle(fillName(script.title, listenerName), station.nativeName, station.language),
+    lines: applyGaps(lines, type, Math.random, script.lines.map((l) => Boolean(l.continuation))),
   };
+  if (script.summary) segment.summary = script.summary.slice(0, 200);
+  if (script.mood) segment.mood = script.mood;
   if (type === 'news') segment.sources = headlines;
   return withSubtitles(sarvam, segment, station.language, timings);
 }
