@@ -174,7 +174,7 @@ All routes are JSON unless noted. Errors use `{ error: { code: string, message: 
 ### `POST /api/segment`
 ```json
 { "station": "hi", "type": "kahani", "listener": { "name": "Harsh", "city": "Jammu", "localTime": "21:40", "daypart": "night" },
-  "headlines": [{ "title": "...", "url": "..." }], "theme": "भूतिया हवेली", "recentCalls": ["..."] }
+  "headlines": [{ "title": "...", "url": "..." }], "theme": "भूतिया हवेली", "recentCalls": ["..."], "upNext": "news" }
 ```
 - `headlines` is required for `news` (the client passes the ones it got from `/api/context`).
 - `theme` is optional (from a story request).

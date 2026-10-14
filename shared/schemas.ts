@@ -37,6 +37,8 @@ export const SegmentRequestSchema = z.object({
   headlines: z.array(SourceSchema).max(8).optional(),
   theme: z.string().trim().max(120).optional(),
   recentCalls: z.array(z.string().max(300)).max(5).optional(),
+  /** Segment type that follows (rj_link teases it) */
+  upNext: SegmentTypeSchema.optional(),
 });
 
 export const TtsRequestSchema = z.object({
