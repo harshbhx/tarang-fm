@@ -105,6 +105,7 @@ function liveState(stationId: LiveId, index: number): RadioState {
     ttfaMs: current.ttfa,
     upNext,
     phone: { number: STUDIO_NUMBER, calls: mockPhoneCalls() },
+    phoneStatus: { 'mock-3': 'on_air', 'mock-2': 'up_next', 'mock-1': 'aired' },
   };
 }
 

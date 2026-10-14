@@ -45,6 +45,16 @@ export const ListenerContextSchema = z.object({
   nickname: z.string().trim().max(40).optional(),
 });
 
+/** A studio phone-line call the RJ link must read on air. */
+export const DedicationSchema = z.object({
+  id: z.string().trim().min(1).max(100),
+  name: z.string().trim().max(40).optional(),
+  city: z.string().trim().max(60).optional(),
+  type: z.enum(['dedication', 'story_request', 'news_request', 'chat', 'other']),
+  message: z.string().trim().min(1).max(220),
+  theme: z.string().trim().max(120).optional(),
+});
+
 export const SegmentRequestSchema = z.object({
   station: StationIdSchema,
   type: SegmentTypeSchema,
@@ -73,6 +83,8 @@ export const SegmentRequestSchema = z.object({
   moodAfterPrevious: MoodSchema.optional(),
   /** One line about the last caller, e.g. '"चाय-chief" (Harsh, Vadodara) asked for a haunted haveli story.' */
   lastCaller: z.string().trim().max(240).optional(),
+  /** rj_link only: studio phone calls to read on air, oldest first (max 2) */
+  dedications: z.array(DedicationSchema).max(2).optional(),
 });
 
 export const TtsRequestSchema = z.object({
@@ -114,6 +126,7 @@ export const LlmCallSchema = z.object({
 });
 
 export type SegmentRequest = z.infer<typeof SegmentRequestSchema>;
+export type Dedication = z.infer<typeof DedicationSchema>;
 export type TtsRequest = z.infer<typeof TtsRequestSchema>;
 export type CallMeta = z.infer<typeof CallMetaSchema>;
 export type LlmSegment = z.infer<typeof LlmSegmentSchema>;

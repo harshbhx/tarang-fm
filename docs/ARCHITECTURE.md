@@ -219,7 +219,7 @@ Old prefetches are aborted (`pruneSegments()`), so the browser holds at most the
 
 ```mermaid
 flowchart TD
-  REQ["SegmentRequest<br/>station · type · listener · headlines<br/>showLog · producer plan · theme · recentCalls"] --> T{type?}
+  REQ["SegmentRequest<br/>station · type · listener · headlines<br/>showLog · producer plan · theme · recentCalls<br/>dedications (studio calls)"] --> T{type?}
   T -->|station_id| SID["Fixed jingle line<br/>+ English subtitle"] --> OUT
   T -->|news| H{headlines?}
   H -->|none, even after fetching| FB
@@ -404,8 +404,25 @@ sequenceDiagram
     W->>KV: read · keep last 24 h · newest 6
     W-->>C: {number, calls[]}
   end
-  C->>C: next rj_link takes up to 2 unread calls<br/>(marked read, released if the segment fails)
+  C->>W: POST /api/segment (rj_link) with dedications[] (≤ 2, oldest first)
+  W->>W: prompt: STUDIO CALLS block, {caller1}, {caller2}<br/>missing placeholder → retry → fixed line per language
+  W-->>C: Segment with dedicated[] ids
+  Note over C: card shows "Up next"
   C-->>C: 🔊 "…we just got a call from Priya in Vadodara…"
+  Note over C: "On air now" → "Read on air"<br/>a story request themes the next Kahani
+```
+
+**Why every call gets read.** The RJ link receives each call as structured data (`dedications`), not as free text. The prompt makes reading them the link's one job and asks for a `{callerN}` placeholder where each name goes. The Worker checks for each placeholder: a missing one triggers the retry, and if the retry still skips a caller, a fixed studio-call line in the station's language is inserted before the closing tease. The returned `dedicated` ids tell the browser which calls were read; any call left out, or whose link fails or is dropped, goes back in the queue for the next RJ link.
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> waiting: call stored in KV
+  waiting --> up_next: RJ link written with it
+  up_next --> waiting: link failed or dropped
+  up_next --> on_air: link starts playing
+  on_air --> aired: link finishes
+  on_air --> waiting: station switched mid-link
 ```
 
 The caller's number is never stored in full: `maskNumber()` keeps only the country code and last four digits (`+91 ••••• 4148`).

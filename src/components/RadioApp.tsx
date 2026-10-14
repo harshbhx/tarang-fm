@@ -346,7 +346,12 @@ function Show({
         {segment?.type === 'news' && segment.sources?.length && !tuning ? (
           <Sources sources={segment.sources} lang={station.language} />
         ) : null}
-        <StudioLinePanel phone={state.phone} className="below-wide" />
+        <StudioLinePanel
+          phone={state.phone}
+          phoneStatus={state.phoneStatus}
+          tunedIn={state.status !== 'idle' && state.status !== 'error' && state.status !== 'paused'}
+          className="below-wide"
+        />
       </div>
     </>
   );

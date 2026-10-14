@@ -77,7 +77,8 @@ sequenceDiagram
 **📞 +91 79 6585 4148** is a real phone line into the show. Call it from any phone, no app or internet needed.
 
 - **RJ Sunny picks up** and chats with you in Hindi, Marathi, Gujarati, Tamil, Bangla or English. Leave a dedication, ask for a story or ask what's in the news (the RJ reads you live headlines).
-- **Your message goes on air.** When you hang up, the next RJ link on the web show reads your dedication out by first name and city ("and we just got a call on the studio line from Priya in Vadodara…"). The radio also lists recent calls under **From the studio line**.
+- **Your message goes on air.** When you hang up, the next RJ link on the web show reads your dedication out by first name and city ("and we just got a call on the studio line from Priya in Vadodara…"). Every call is guaranteed a read: if the script skips one, the Worker retries and then adds a fixed studio-call line. A story request also sets the theme of the next Kahani.
+- **Follow your call to air.** The **Call the studio** panel lists recent calls, each tagged *In the queue*, *Up next*, *On air now* or *Read on air*.
 ```mermaid
 flowchart LR
   P["☎️ Your phone"] <--> VA["Sarvam Voice Agent<br/>RJ Sunny"]

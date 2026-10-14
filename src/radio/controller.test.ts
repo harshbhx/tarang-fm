@@ -3,7 +3,7 @@ import type { CallMeta, SegmentRequest } from '../../shared/schemas';
 import { getStation } from '../../shared/stations';
 import type { CallResponse, Line, PhoneCall, PhoneRecentResponse, Segment, StationId } from '../../shared/types';
 import type { AudioEngine, PlayResult, Recorder } from '../audio/types';
-import { RadioController, phoneCallLine, producerPlan, type RadioApi } from './controller';
+import { RadioController, producerPlan, toDedication, type RadioApi } from './controller';
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const abortError = () => new DOMException('Aborted', 'AbortError');
@@ -121,6 +121,8 @@ function harness() {
   const calls: CallMeta[] = [];
   const failSegment = new Set<string>();
   const failTts = new Set<string>();
+  /** Studio call ids the fake worker leaves out of its script */
+  const skipDedications = new Set<string>();
   let segDelay = 3;
   let callDelay = 5;
   let callResponse: CallResponse = {
@@ -165,6 +167,7 @@ function harness() {
         lines: [0, 1].map((i) => rjLine(req.station, `${tag}:${i}`)),
         summary: `${req.type} ${n} aired`,
         ...(req.type === 'news' ? { mood: 'heavy' as const } : {}),
+        ...(req.dedications?.length ? { dedicated: req.dedications.map((d) => d.id).filter((id) => !skipDedications.has(id)) } : {}),
       };
     },
     ttsFetch: async (line, _station, signal) => {
@@ -208,6 +211,7 @@ function harness() {
     calls,
     failSegment,
     failTts,
+    skipDedications,
     setSegDelay: (ms: number) => (segDelay = ms),
     setCallDelay: (ms: number) => (callDelay = ms),
     setCallResponse: (r: CallResponse) => (callResponse = r),
@@ -571,12 +575,17 @@ function phoneCall(id: string, patch: Partial<PhoneCall> = {}): PhoneCall {
 const rjLinks = (h: ReturnType<typeof harness>) => h.requests.filter((r) => r.type === 'rj_link');
 
 describe('RadioController studio phone line', () => {
-  it('formats a call for the RJ link without the number', () => {
-    expect(phoneCallLine(phoneCall('a'))).toBe('Phone call from Priya in Vadodara: मम्मी को जन्मदिन की ढेर सारी शुभकामनाएँ!');
-    expect(phoneCallLine(phoneCall('b', { name: undefined, city: undefined, message: 'Hello' }))).toBe(
-      'Phone call from a listener: Hello',
-    );
-    expect(phoneCallLine(phoneCall('c', { message: 'x'.repeat(400) })).length).toBe(300);
+  it('sends a call to the RJ link as structured data, without the number', () => {
+    expect(toDedication(phoneCall('a'))).toEqual({
+      id: 'a',
+      name: 'Priya',
+      city: 'Vadodara',
+      type: 'dedication',
+      message: 'मम्मी को जन्मदिन की ढेर सारी शुभकामनाएँ!',
+    });
+    const bare = toDedication(phoneCall('b', { name: '  ', city: undefined, message: 'x'.repeat(400), type: 'story_request', theme: 'ghosts' }));
+    expect(bare).toEqual({ id: 'b', type: 'story_request', message: 'x'.repeat(220), theme: 'ghosts' });
+    expect(JSON.stringify(bare)).not.toContain('4148');
   });
 
   it('polls only while tuned in, with a single poller across station switches', async () => {
@@ -609,7 +618,9 @@ describe('RadioController studio phone line', () => {
     expect(h.phone.maxInFlight).toBe(1);
   });
 
-  it('reads each phone dedication in one RJ link only, alongside web call-ins', async () => {
+  const dedicationIds = (r: SegmentRequest) => (r.dedications ?? []).map((d) => d.id);
+
+  it('reads every studio call in one RJ link only, oldest first', async () => {
     const h = setup();
     h.phone.calls = [
       phoneCall('call-3', { name: 'Arjun', city: 'Pune', message: 'Play something for my team' }),
@@ -620,22 +631,46 @@ describe('RadioController studio phone line', () => {
     await waitFor(() => expect(rjLinks(h).length).toBeGreaterThanOrEqual(2));
 
     const [first, second] = rjLinks(h);
-    expect(first.recentCalls).toEqual([
-      'Phone call from Arjun in Pune: Play something for my team',
-      'Phone call from a listener in Surat: Hello Sunny',
-    ]);
-    expect(second.recentCalls).toEqual(['Phone call from Priya in Vadodara: मम्मी को जन्मदिन की ढेर सारी शुभकामनाएँ!']);
-    expect(h.requests.filter((r) => r.type !== 'rj_link').every((r) => !r.recentCalls)).toBe(true);
+    expect(dedicationIds(first)).toEqual(['call-1', 'call-2']);
+    expect(dedicationIds(second)).toEqual(['call-3']);
+    // Phone calls no longer ride along as free text, and only RJ links carry them
+    expect(h.requests.every((r) => !r.recentCalls)).toBe(true);
+    expect(h.requests.filter((r) => r.type !== 'rj_link').every((r) => !r.dedications)).toBe(true);
 
     // A new call arrives between polls: the next RJ link reads it, and nothing is read twice
     h.phone.calls = [phoneCall('call-4', { name: 'Meena', city: 'Indore', message: 'Hi!' }), ...h.phone.calls];
     await waitFor(() => expect(rjLinks(h).length).toBeGreaterThanOrEqual(4));
-    const later = rjLinks(h).slice(2).map((r) => r.recentCalls ?? []);
-    expect(later[0]).toEqual(['Phone call from Meena in Indore: Hi!']);
+    const later = rjLinks(h).slice(2).map(dedicationIds);
+    expect(later[0]).toEqual(['call-4']);
     expect(later[1]).toEqual([]);
   });
 
-  it('keeps a dedication unread when its RJ link fails', async () => {
+  it('tracks each call from up next to on air to aired', async () => {
+    const h = setup();
+    h.phone.calls = [phoneCall('call-1')];
+    const seen = new Set<string>();
+    h.c.subscribe(() => {
+      const status = h.c.getSnapshot().phoneStatus['call-1'];
+      if (status) seen.add(status);
+    });
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.c.getSnapshot().phoneStatus['call-1']).toBe('aired'));
+    expect([...seen]).toEqual(['up_next', 'on_air', 'aired']);
+  });
+
+  it('puts a call the script left out back in the queue for the next RJ link', async () => {
+    const h = setup();
+    h.phone.calls = [phoneCall('call-1')];
+    h.skipDedications.add('call-1');
+    await h.c.tuneIn();
+    await waitFor(() => expect(rjLinks(h).length).toBeGreaterThanOrEqual(2));
+    expect(h.c.getSnapshot().phoneStatus['call-1']).toBeUndefined();
+    h.skipDedications.delete('call-1');
+    await waitFor(() => expect(h.c.getSnapshot().phoneStatus['call-1']).toBe('aired'));
+    expect(rjLinks(h).filter((r) => dedicationIds(r).includes('call-1')).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps a call queued when its RJ link fails', async () => {
     const h = setup();
     h.phone.calls = [phoneCall('call-1')];
     h.failSegment.add('rj_link');
@@ -645,9 +680,20 @@ describe('RadioController studio phone line', () => {
     expect(h.engine.played).not.toContain('hi:rj_link:0');
     h.failSegment.delete('rj_link');
     await waitFor(() => expect(h.engine.played).toContain('hi:rj_link:0'));
-    const lines = rjLinks(h).map((r) => r.recentCalls?.[0]);
-    expect(lines.length).toBeGreaterThanOrEqual(3);
-    expect(lines.every((l) => l?.startsWith('Phone call from Priya'))).toBe(true);
+    const ids = rjLinks(h).map(dedicationIds);
+    expect(ids.length).toBeGreaterThanOrEqual(3);
+    expect(ids.every((d) => d[0] === 'call-1')).toBe(true);
+  });
+
+  it("gives a studio caller's story theme to the next Kahani", async () => {
+    const h = setup();
+    h.phone.calls = [phoneCall('call-1', { type: 'story_request', theme: 'भूतिया हवेली', message: 'एक भूतिया कहानी!' })];
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.requests.some((r) => r.type === 'kahani')).toBe(true));
+    const kahanis = h.requests.filter((r) => r.type === 'kahani');
+    expect(kahanis[0].theme).toBe('भूतिया हवेली');
+    await waitFor(() => expect(h.requests.filter((r) => r.type === 'kahani').length).toBeGreaterThanOrEqual(2));
+    expect(h.requests.filter((r) => r.type === 'kahani')[1].theme).toBeUndefined();
   });
 });
 

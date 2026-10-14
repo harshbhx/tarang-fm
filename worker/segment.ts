@@ -1,10 +1,10 @@
 /** Builds programme segments: model script → clean lines → cast voices → English subtitles. */
 import { z } from 'zod';
 import { PAUSE_AFTER_MS } from '../shared/constants';
-import { LlmSegmentSchema, type SegmentRequest } from '../shared/schemas';
+import { LlmSegmentSchema, type Dedication, type SegmentRequest } from '../shared/schemas';
 import type { Delivery, Line, Mood, Role, Segment, SegmentType, Source, Station, TtsLanguage, Voice } from '../shared/types';
-import { randomFiller } from './fallbacks';
-import { MAX_LINES, NEWS_HEADLINES, rjOnAir, SEGMENT_PLAN, SEGMENT_ROLES, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
+import { randomFiller, someoneFor, studioCallLine } from './fallbacks';
+import { callerPlaceholder, MAX_LINES, NEWS_HEADLINES, rjOnAir, SEGMENT_PLAN, SEGMENT_ROLES, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
 import type { Sarvam } from './sarvam';
 import { gapAfter, isDelivery, timePhrase, voiceFor } from './show';
 import { cleanSubtitle } from './subtitle';
@@ -196,6 +196,52 @@ interface Script {
   lines: RawLine[];
   summary?: string;
   mood?: Mood;
+  /** Ids of the studio calls the script reads on air */
+  dedicated?: string[];
+}
+
+/** A studio caller's name and city in the station's script (best-effort transliteration). */
+interface Caller {
+  name?: string;
+  city?: string;
+}
+
+export async function nativeCallers(sarvam: Sarvam, calls: Dedication[], language: TtsLanguage): Promise<Caller[]> {
+  return Promise.all(
+    calls.map(async (c) => {
+      const [name, city] = await Promise.all([nativeListenerName(sarvam, c.name, language), nativeListenerName(sarvam, c.city, language)]);
+      return { name, city };
+    }),
+  );
+}
+
+const CALLER_SLOT = /\{\s*caller\s*(\d)\s*\}/giu;
+
+/** Numbers (1-based) of the studio calls whose placeholder appears in the script. */
+export function callersRead(lines: { text: string }[]): Set<number> {
+  const read = new Set<number>();
+  for (const line of lines) for (const m of line.text.matchAll(CALLER_SLOT)) read.add(Number(m[1]));
+  return read;
+}
+
+/**
+ * Makes sure every studio call is on air: a call the script left out gets the station's fixed studio-call line,
+ * placed before the closing tease. Then each {callerN} placeholder becomes the caller's name.
+ */
+export function withStudioCalls<T extends RawLine>(station: Station, lines: T[], calls: Dedication[], callers: Caller[]): RawLine[] {
+  if (!calls.length) return lines;
+  const read = callersRead(lines);
+  const missing: RawLine[] = calls.flatMap((call, i) =>
+    read.has(i + 1)
+      ? []
+      : [{ role: 'rj' as Role, text: studioCallLine(station.id, callerPlaceholder(i + 1), callers[i]?.city, call.message), delivery: 'warm' }],
+  );
+  const all: RawLine[] = missing.length && lines.length > 1 ? [...lines.slice(0, -1), ...missing, lines[lines.length - 1]] : [...lines, ...missing];
+  const someone = someoneFor(station.id);
+  return all.map((l) => ({
+    ...l,
+    text: l.text.replace(CALLER_SLOT, (_m, n: string) => callers[Number(n) - 1]?.name || someone),
+  }));
 }
 
 async function writeScript(
@@ -214,6 +260,8 @@ async function writeScript(
   const headlinesText = headlines.map((h) => h.title).join(' ');
   const time = timePhrase(station, req.listener);
   const greet = type === 'rj_link' && Boolean(req.producer?.greetListener || req.producer?.firstLink || !req.showLog?.some((e) => e.type === 'rj_link'));
+  const calls = type === 'rj_link' ? (req.dedications ?? []) : [];
+  const callers = calls.length ? await timings.measure('name', () => nativeCallers(sarvam, calls, station.language)) : [];
   let lastError: unknown;
 
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -231,16 +279,21 @@ async function writeScript(
         }),
       );
       const problems = validateScript(station, type, raw.lines, { greet, listenerName: req.listener.name, headlinesText, timePhrase: time });
+      const read = callersRead(raw.lines);
+      calls.forEach((_c, i) => {
+        if (!read.has(i + 1)) problems.push(`studio call ${i + 1} not read (no ${callerPlaceholder(i + 1)})`);
+      });
       if (problems.length && attempt === 0) throw new Error(`validation: ${problems.slice(0, 3).join(' | ')}`);
       // After the retry, drop any line that still copies a prompt example (the Kahani may echo its own scene line).
       let scriptLines = type === 'kahani' ? raw.lines : raw.lines.filter((l) => !copiesExample(l.text));
       if (type === 'news') scriptLines = dropOrphanKicker(dropInventedNumbers(scriptLines, headlinesText, `${time} ${station.frequency}`));
-      const named = scriptLines.map((l) => ({ ...l, text: fillName(l.text, listenerName) }));
-      const lines = processLines(capLines(named as RawLine[], MAX_LINES[type]), roles, type, station.language);
+      const named = withStudioCalls(station, scriptLines as RawLine[], calls, callers).map((l) => ({ ...l, text: fillName(l.text, listenerName) }));
+      const lines = processLines(capLines(named, MAX_LINES[type] + calls.length), roles, type, station.language);
       const min = type === 'news' ? Math.min(MIN_LINES.news, headlines.length + 1) : MIN_LINES[type];
       if (lines.length < min) throw new Error(`only ${lines.length} usable lines for ${type}`);
       const mood: Mood | undefined = raw.mood === 'heavy' ? 'heavy' : raw.mood === 'light' ? 'light' : undefined;
-      return { title: raw.title, lines, summary: raw.summary_en?.replace(/\{name\}/g, 'the listener').trim() || undefined, mood };
+      const summary = raw.summary_en?.replace(/\{name\}/g, 'the listener').replace(CALLER_SLOT, 'a studio caller').trim() || undefined;
+      return { title: raw.title, lines, summary, mood, dedicated: calls.length ? calls.map((c) => c.id) : undefined };
     } catch (err) {
       lastError = err;
       console.error(`[segment] ${station.id}/${type} attempt ${attempt + 1} failed: ${String(err)}`);
@@ -300,11 +353,12 @@ export async function buildSegment(
     id: crypto.randomUUID(),
     station: station.id,
     type,
-    title: cleanTitle(fillName(script.title, listenerName), station.nativeName, station.language),
+    title: cleanTitle(fillName(script.title, listenerName).replace(CALLER_SLOT, someoneFor(station.id)), station.nativeName, station.language),
     lines: applyGaps(lines, type, Math.random, script.lines.map((l) => Boolean(l.continuation))),
   };
   if (script.summary) segment.summary = script.summary.slice(0, 200);
   if (script.mood) segment.mood = script.mood;
+  if (script.dedicated?.length) segment.dedicated = script.dedicated;
   if (type === 'news') segment.sources = headlines;
   return withSubtitles(sarvam, segment, station.language, timings);
 }

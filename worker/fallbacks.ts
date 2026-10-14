@@ -76,3 +76,60 @@ export function randomFiller(station: StationId): string {
   const { filler } = fallbacksFor(station);
   return filler[Math.floor(Math.random() * filler.length)];
 }
+
+interface StudioCallTemplate {
+  /** Lead-in before the caller's message; {caller} and {city} are filled in */
+  withCity: string;
+  noCity: string;
+  /** Said in place of a caller who gave no name */
+  someone: string;
+}
+
+const STUDIO_CALL: Partial<Record<StationId, StudioCallTemplate>> = {
+  hi: {
+    withCity: 'और अभी-अभी स्टूडियो लाइन पर {city} से {caller} का कॉल आया, उनका कहना है:',
+    noCity: 'और अभी-अभी स्टूडियो लाइन पर {caller} का कॉल आया, उनका कहना है:',
+    someone: 'एक श्रोता',
+  },
+  mr: {
+    withCity: 'आणि आत्ताच स्टुडिओ लाइनवर {city} हून {caller} यांचा कॉल आला, ते म्हणतात:',
+    noCity: 'आणि आत्ताच स्टुडिओ लाइनवर {caller} यांचा कॉल आला, ते म्हणतात:',
+    someone: 'एक श्रोते',
+  },
+  gu: {
+    withCity: 'અને હમણાં જ સ્ટુડિયો લાઇન પર {city}થી {caller}નો કૉલ આવ્યો, એ કહે છે:',
+    noCity: 'અને હમણાં જ સ્ટુડિયો લાઇન પર {caller}નો કૉલ આવ્યો, એ કહે છે:',
+    someone: 'એક શ્રોતા',
+  },
+  bn: {
+    withCity: 'আর এইমাত্র স্টুডিও লাইনে {city} থেকে {caller} ফোন করেছিলেন, উনি বলছেন:',
+    noCity: 'আর এইমাত্র স্টুডিও লাইনে {caller} ফোন করেছিলেন, উনি বলছেন:',
+    someone: 'একজন শ্রোতা',
+  },
+  ta: {
+    withCity: 'இப்போ தான் {city}-லிருந்து {caller} ஸ்டுடியோ லைனுக்கு கால் பண்ணாங்க, அவங்க சொல்றது:',
+    noCity: 'இப்போ தான் {caller} ஸ்டுடியோ லைனுக்கு கால் பண்ணாங்க, அவங்க சொல்றது:',
+    someone: 'ஒரு நேயர்',
+  },
+};
+
+const DEFAULT_STUDIO_CALL: StudioCallTemplate = {
+  withCity: 'We just got a call on the studio line from {caller} in {city}, who says:',
+  noCity: 'We just got a call on the studio line from {caller}, who says:',
+  someone: 'a listener',
+};
+
+/**
+ * A fixed on-air line for a studio call the script left out, so a caller is never silently skipped.
+ * `caller` and `city` are already in the station's script; the message is read as the caller left it.
+ */
+export function studioCallLine(station: StationId, caller: string | undefined, city: string | undefined, message: string): string {
+  const t = STUDIO_CALL[station] ?? DEFAULT_STUDIO_CALL;
+  const lead = (city ? t.withCity : t.noCity).replace('{caller}', caller || t.someone).replace('{city}', city ?? '');
+  return `${lead} ${message.trim()}`;
+}
+
+/** The word for an unnamed caller in the station language. */
+export function someoneFor(station: StationId): string {
+  return (STUDIO_CALL[station] ?? DEFAULT_STUDIO_CALL).someone;
+}

@@ -116,6 +116,8 @@ export interface Segment {
   summary?: string;
   /** News only: heavy when the bulletin was dominated by death, disaster or violence */
   mood?: Mood;
+  /** rj_link only: ids of the studio phone calls this link reads on air */
+  dedicated?: string[];
 }
 
 export interface ListenerContext {

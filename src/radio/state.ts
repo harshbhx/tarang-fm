@@ -38,6 +38,9 @@ export interface CallState {
   error?: string;
 }
 
+/** Where a studio phone call is on its way to air: written into the next RJ link, being read, or read. */
+export type PhoneAirStatus = 'up_next' | 'on_air' | 'aired';
+
 export interface RadioState {
   status: RadioStatus;
   stationId: StationId;
@@ -56,6 +59,8 @@ export interface RadioState {
   error?: string;
   /** The studio phone line: its number and recent on-air calls, newest first (polled while tuned in) */
   phone?: { number: string; calls: PhoneCall[] };
+  /** Per studio call id: how far it got on this listener's show (absent = waiting for the next RJ link) */
+  phoneStatus: Record<string, PhoneAirStatus>;
   /** Support line shown after a call that sounded like distress; cleared on a new call or station */
   helpline?: { name: string; number: string };
 }
@@ -85,4 +90,5 @@ export const INITIAL_STATE: RadioState = {
   lineIndex: 0,
   history: [],
   showSubtitles: true,
+  phoneStatus: {},
 };

@@ -1,6 +1,6 @@
 /** Show scheduler and radio store (docs/TECH-SPEC.md §9). */
 import { CALL_MAX_SECONDS, LISTENER_NAME_MAX, PAUSE_AFTER_MS } from '../../shared/constants';
-import type { CallMeta, SegmentRequest } from '../../shared/schemas';
+import type { CallMeta, Dedication, SegmentRequest } from '../../shared/schemas';
 import { getStation, STATION_BY_ID } from '../../shared/stations';
 import type {
   CallResponse,
@@ -25,6 +25,7 @@ import {
   type Caption,
   type CallState,
   type NowPlaying,
+  type PhoneAirStatus,
   type RadioActions,
   type RadioState,
   type RadioStatus,
@@ -261,11 +262,16 @@ function cleanPhone(res: PhoneRecentResponse | null | undefined): RadioState['ph
   return { number: typeof res.number === 'string' ? res.number : '', calls };
 }
 
-/** 'Phone call from Priya in Vadodara: …', the form the RJ link reads out on air. */
-export function phoneCallLine(call: PhoneCall): string {
-  const name = call.name?.trim() || 'a listener';
-  const city = call.city?.trim();
-  return `Phone call from ${name}${city ? ` in ${city}` : ''}: ${call.message.trim()}`.slice(0, RECENT_CALL_CHARS);
+/** A studio call as the RJ link request carries it (the script reads it on air). */
+export function toDedication(call: PhoneCall): Dedication {
+  const d: Dedication = { id: call.id, type: call.type, message: call.message.trim().slice(0, 220) };
+  const name = call.name?.trim().slice(0, 40);
+  const city = call.city?.trim().slice(0, 60);
+  const theme = call.theme?.trim().slice(0, 120);
+  if (name) d.name = name;
+  if (city) d.city = city;
+  if (theme) d.theme = theme;
+  return d;
 }
 
 function errorMessage(err: unknown, fallback: string): string {
@@ -308,8 +314,13 @@ export class RadioController implements RadioActions {
   private readonly random: () => number;
   private localSegments = 0;
   private phonePoll: PhonePoll | null = null;
-  /** Studio-line calls already given to an RJ link this session (each is read on air once) */
-  private readonly phoneRead = new Set<string>();
+  /**
+   * Studio-line calls handed to an RJ link this session: 'writing' while the link is requested, then the
+   * on-air status. A call is read on air once; one whose link never airs goes back in the queue.
+   */
+  private readonly phoneTaken = new Map<string, 'writing' | PhoneAirStatus>();
+  /** Story theme a studio caller asked for; the next unthemed Kahani uses it */
+  private phoneTheme: string | undefined;
 
   private callResume: 'playing' | 'paused' = 'playing';
   private recStart: Promise<void> | null = null;
@@ -628,6 +639,7 @@ export class RadioController implements RadioActions {
     this.stationAbort.abort();
     this.stationAbort = new AbortController();
     this.segments.clear();
+    this.releaseCalls([...this.phoneTaken].filter(([, s]) => s !== 'aired').map(([id]) => id));
     this.plannedNext = null;
     this.context = null;
     this.headlines = [];
@@ -707,6 +719,8 @@ export class RadioController implements RadioActions {
           await this.playSegment(gen, station, entry, segment, lineIndex, !resumed);
           if (gen !== this.gen) return;
         }
+        // Also reached when a call-in ended on the link's last line and the show resumes past it
+        this.markCalls(segment.dedicated ?? [], 'aired');
       } catch (err) {
         if (gen !== this.gen) return;
         console.error('Programme error', err);
@@ -733,6 +747,7 @@ export class RadioController implements RadioActions {
     this.pruneSegments([entry, following]);
     this.prefetchSegment(following, station.id);
     this.set({ segment: toNowPlaying(segment), lineIndex: startLine, upNext: following.type });
+    this.airCalls(segment);
 
     for (let i = startLine; i < segment.lines.length; i++) {
       if (gen !== this.gen) return;
@@ -865,6 +880,8 @@ export class RadioController implements RadioActions {
       if (keys.has(key)) continue;
       pending.controller.abort();
       this.segments.delete(key);
+      const ids = (pending.segment?.dedicated ?? []).filter((id) => this.phoneTaken.get(id) === 'up_next');
+      this.releaseCalls(ids);
     }
   }
 
@@ -875,8 +892,8 @@ export class RadioController implements RadioActions {
         return stationIdSegment(getStation(station), this.localSegments);
       }
       const { req, phoneIds } = await this.segmentRequest(entry, station);
-      // A dedication that never makes it on air (failed, aborted or template segment) stays unread
-      const release = () => phoneIds.forEach((id) => this.phoneRead.delete(id));
+      // A studio call that never makes it into a script (failed, aborted or template segment) goes back in the queue
+      const release = () => this.releaseCalls(phoneIds);
       for (let attemptNo = 0; ; attemptNo++) {
         if (signal.aborted) {
           release();
@@ -884,7 +901,13 @@ export class RadioController implements RadioActions {
         }
         try {
           const segment = await this.api.getSegment(req, signal);
-          if (segment.fallback) release();
+          if (signal.aborted) {
+            release();
+            return null;
+          }
+          const read = new Set(segment.fallback ? [] : (segment.dedicated ?? []));
+          this.releaseCalls(phoneIds.filter((id) => !read.has(id)));
+          this.markCalls([...read].filter((id) => phoneIds.includes(id)), 'up_next');
           return segment;
         } catch (err) {
           if (signal.aborted || attemptNo >= 1) {
@@ -928,19 +951,58 @@ export class RadioController implements RadioActions {
     const previous = this.aired[this.aired.length - 1];
     if (previous?.mood) req.moodAfterPrevious = previous.mood;
     if (entry.type === 'kahani' && entry.theme) req.theme = entry.theme;
-    const phoneCalls = entry.type === 'rj_link' ? this.takePhoneCalls() : [];
-    const recent = [...phoneCalls.map(phoneCallLine), ...this.recentCalls.slice(-MAX_RECENT_CALLS)];
+    else if (entry.type === 'kahani' && this.phoneTheme) {
+      req.theme = this.phoneTheme;
+      this.phoneTheme = undefined;
+    }
+    const recent = this.recentCalls.slice(-MAX_RECENT_CALLS);
     if (recent.length) req.recentCalls = recent.slice(0, MAX_REQUEST_CALLS);
+    const phoneCalls = entry.type === 'rj_link' ? this.takePhoneCalls() : [];
+    if (phoneCalls.length) req.dedications = phoneCalls.map(toDedication);
     return { req, phoneIds: phoneCalls.map((c) => c.id) };
   }
 
-  /** Up to two unread studio-line calls, newest first, marked read so each is dedicated on air once. */
+  /** Up to two waiting studio-line calls, oldest first, taken so each is read on air once. */
   private takePhoneCalls(): PhoneCall[] {
     const calls = (this.state.phone?.calls ?? [])
-      .filter((c) => !this.phoneRead.has(c.id))
-      .slice(0, MAX_PHONE_CALLS_PER_LINK);
-    for (const c of calls) this.phoneRead.add(c.id);
+      .filter((c) => !this.phoneTaken.has(c.id))
+      .slice(-MAX_PHONE_CALLS_PER_LINK)
+      .reverse();
+    for (const c of calls) this.phoneTaken.set(c.id, 'writing');
     return calls;
+  }
+
+  /** Puts calls whose RJ link never aired back in the queue. */
+  private releaseCalls(ids: string[]): void {
+    let changed = false;
+    for (const id of ids) {
+      const status = this.phoneTaken.get(id);
+      if (!status || status === 'aired') continue;
+      this.phoneTaken.delete(id);
+      changed = true;
+    }
+    if (changed) this.publishPhoneStatus();
+  }
+
+  private markCalls(ids: string[], status: PhoneAirStatus): void {
+    if (!ids.length) return;
+    for (const id of ids) if (this.phoneTaken.get(id) !== 'aired') this.phoneTaken.set(id, status);
+    this.publishPhoneStatus();
+  }
+
+  private publishPhoneStatus(): void {
+    const phoneStatus: Record<string, PhoneAirStatus> = {};
+    for (const [id, status] of this.phoneTaken) phoneStatus[id] = status === 'writing' ? 'up_next' : status;
+    this.set({ phoneStatus });
+  }
+
+  /** As an RJ link with studio calls starts: those calls are on air, and a caller's story theme is queued. */
+  private airCalls(segment: Segment): void {
+    const ids = segment.dedicated ?? [];
+    if (!ids.length) return;
+    this.markCalls(ids, 'on_air');
+    const story = (this.state.phone?.calls ?? []).find((c) => ids.includes(c.id) && c.type === 'story_request' && c.theme?.trim());
+    if (story) this.phoneTheme = story.theme!.trim();
   }
 
   // ---- studio phone line -------------------------------------------------
