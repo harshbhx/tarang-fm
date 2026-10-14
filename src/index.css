@@ -1203,7 +1203,19 @@
     }
   }
 
-  /* Preset keys: latching push-buttons */
+  /* ClickSpark wraps the Tune in button; the button still fills the form */
+  .tune-spark > .tune-btn {
+    width: 100%;
+  }
+
+  /* Station name while it scrambles in (DecryptedText) */
+  .readout-scramble {
+    font-family: var(--tfm-font-mono);
+    font-weight: 500;
+    color: color-mix(in oklab, var(--tfm-led-amber) 70%, transparent);
+  }
+
+    /* Preset keys: latching push-buttons */
   .presets {
     display: flex;
     gap: 8px;

@@ -279,4 +279,5 @@ Tests sit next to the code they cover (`*.test.ts`).
 
 - Hosts, ads and stories are AI-generated and fictional. News lines rephrase real headlines, and the original sources are linked on screen.
 - Caller audio is sent to Sarvam for transcription and is never stored.
+- UI effects adapted from [React Bits](https://reactbits.dev) (Threads, CurvedLoop, BlurText, SpotlightCard, ClickSpark, DecryptedText, ShinyText; MIT + Commons Clause), [Magic UI](https://magicui.design) (BorderBeam, Ripple, NumberTicker; MIT) and [motion-primitives](https://motion-primitives.com) (TextLoop; MIT). Each adapted file names its source and what changed.
 - Headlines via BBC, Bing News and Google News. Weather by [Open-Meteo](https://open-meteo.com). Voices, transcription, translation and scripts by [Sarvam AI](https://www.sarvam.ai).

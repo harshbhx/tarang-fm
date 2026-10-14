@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { LazyMotion, MotionConfig, domAnimation } from 'motion/react';
+import BlurText from './bits/BlurText';
+import ClickSpark from './bits/ClickSpark';
 import { LISTENER_NAME_MAX, STUDIO_NUMBER, STUDIO_NUMBER_DISPLAY } from '../../shared/constants';
 import { STATIONS, getStation } from '../../shared/stations';
 import type { Station, StationId } from '../../shared/types';
@@ -35,6 +37,9 @@ type Props = {
   /** Design review only: render the offline notice */
   previewOffline?: boolean;
 };
+
+/** Sparks in the station's warm amber when the radio switches on. */
+const TUNE_SPARKS = ['#ffd38a', '#ff9a4d', '#ff6b2c'];
 
 export default function RadioApp({ state, actions, previewOffline = false }: Props) {
   return (
@@ -186,9 +191,7 @@ function TunePanel({
   return (
     <section aria-labelledby="tune-title" className="tune-panel">
       <div className="tune-copy">
-        <h1 id="tune-title" className="display-lg">
-          Pick a station, then tune&nbsp;in
-        </h1>
+        <BlurText as="h1" id="tune-title" className="display-lg" text="Pick a station, then tune in" delay={60} />
         <p className="tune-lede">
           Live shows in {LANGUAGE_LIST}: today&rsquo;s headlines, a comic ad break, Kahani Corner and your
           call&#8209;ins, all voiced by Sarvam&rsquo;s Bulbul&nbsp;v4.
@@ -215,10 +218,21 @@ function TunePanel({
             }}
           />
         </label>
-        <button type="submit" className="tune-btn">
-          <PlayIcon width={18} height={18} />
-          Tune in to {station.languageName} {station.frequency}
-        </button>
+        <ClickSpark
+          sparkColor={TUNE_SPARKS}
+          sparkCount={10}
+          sparkRadius={40}
+          sparkSize={10}
+          duration={520}
+          glow={0.6}
+          className="tune-spark"
+          style={{ height: 'auto' }}
+        >
+          <button type="submit" className="tune-btn">
+            <PlayIcon width={18} height={18} />
+            Tune in to {station.languageName} {station.frequency}
+          </button>
+        </ClickSpark>
         {online ? (
           <p className="tune-hint">
             <span className="tune-hint-dot" aria-hidden="true" />

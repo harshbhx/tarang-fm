@@ -1,4 +1,5 @@
 import { CALL_EXAMPLE } from './data';
+import { BorderBeam } from '../components/bits/MagicUi';
 import CallChain from './CallChain';
 import { PlayGlyph, SectionHead, SpeakerId, STUDIO_LANGUAGES, StudioCall, type Vars } from './ui';
 import type { VoicePlayer } from './useVoicePlayer';
@@ -46,6 +47,7 @@ export default function CallIn({ player }: { player: VoicePlayer }) {
             <p className="lp-english">{caller.en}</p>
           </figure>
           <figure className="lp-bubble lp-bubble--rj">
+            <BorderBeam size={110} duration={8} colorFrom="#ffd38a" colorTo="#ff6b2c" />
             <figcaption>
               RJ reply, written by Sarvam-105B <SpeakerId id={voice.speaker} />
             </figcaption>

@@ -56,3 +56,20 @@ test('API answers with JSON errors, never HTML', async ({ request }) => {
   const health = await request.get('/api/health');
   expect((await health.json()).ok).toBe(true);
 });
+
+test('landing page signature pieces: radio waves, the dial band and readable headings', async ({ page }) => {
+  const errors = trackErrors(page);
+  await page.goto('/');
+  // WebGL waves behind the hero (lazy-loaded)
+  await expect(page.locator('.lp-hero-waves canvas')).toBeAttached();
+  // The curved band names every station for screen readers
+  const band = page.getByRole('img', { name: /Five stations: Hindi 91\.1, Marathi 94\.3, Tamil 98\.3, Bangla 102\.7, Gujarati 106\.1/ });
+  await band.scrollIntoViewIfNeeded();
+  await expect(band).toBeVisible();
+  // Blur-in headings keep their accessible names
+  for (const name of ['Hear every voice', 'Call the RJ', 'Built on Sarvam', 'Dil se suniye.']) {
+    await expect(page.getByRole('heading', { level: 2, name })).toBeAttached();
+  }
+  await noHorizontalScroll(page);
+  expect(errors).toEqual([]);
+});

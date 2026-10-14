@@ -1,4 +1,6 @@
+import type { CSSProperties } from 'react';
 import { STATIONS } from '../../shared/stations';
+import SpotlightCard from '../components/bits/SpotlightCard';
 import { MODELS, VOICE_COUNT } from './data';
 import { CountUp } from './CountUp';
 import { SectionHead, SpeakerId } from './ui';
@@ -26,7 +28,15 @@ export default function BuiltOnSarvam() {
           Four Sarvam models run the station live. Nothing you hear is pre-recorded.
         </SectionHead>
 
-        <div className="lp-rack">
+        <SpotlightCard
+          className="lp-rack"
+          spotlightColor="#f2b25c"
+          intensity={0.16}
+          spotlightSize={420}
+          borderGlow={0.7}
+          proximity={120}
+          style={{ '--spotlight-card-surface': 'transparent', '--spotlight-card-shadow': 'none', '--spotlight-card-border': 'transparent' } as CSSProperties}
+        >
           <span className="lp-screw" aria-hidden="true" />
           <span className="lp-screw" aria-hidden="true" />
           <span className="lp-screw" aria-hidden="true" />
@@ -61,7 +71,7 @@ export default function BuiltOnSarvam() {
               </li>
             ))}
           </ul>
-        </div>
+        </SpotlightCard>
       </div>
     </section>
   );
