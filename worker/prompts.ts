@@ -312,7 +312,7 @@ function listenerBrief(listener: ListenerContext, language: TtsLanguage): string
       ? `Listener's name: ${listener.name}. Wherever you say the listener's name, write exactly {name} instead; it is filled in later.`
       : "Listener's name: unknown (address all listeners warmly)",
     listener.city ? `Listener's city: ${listener.city}` : "Listener's city: unknown (do not invent one)",
-    `Local time: ${spokenTime(listener, language)}. Say it the way people speak, with the right word for the time of day; never use a 24-hour clock.`,
+    `Local time: ${spokenTime(listener, language)}. Say it the way people speak and use exactly that word for the time of day (never call the evening "night"); never use a 24-hour clock.`,
   ];
 }
 
@@ -341,7 +341,7 @@ function rjLinkPrompt(station: Station, req: SegmentRequest): string {
 function newsPrompt(station: Station, req: SegmentRequest, headlines: Source[]): string {
   return [
     `Write a short news bulletin read by the news reader, ${headlines.length + 2} lines in total:`,
-    `- Line 1: a crisp intro on ${onAirName(station)} saying these are the latest headlines${headlines.some((h) => h.local) && req.listener.city ? `, starting with news from the listener's own city, ${req.listener.city}` : ''}.`,
+    `- Line 1: a crisp intro on ${onAirName(station)}: the news reader, ${voiceName(station.cast.news)}, may say their own name (never the word "news" as a name), then say these are the latest headlines${headlines.some((h) => h.local) && req.listener.city ? `, starting with news from the listener's own city, ${req.listener.city}` : ''}.`,
     `- Then exactly one line per headline below, in the same order (${headlines.length} lines).`,
     '- Last line: a short, polite sign-off that hands back to the station.',
     'News integrity rules (strict): rephrase each headline as one clear, natural spoken news sentence in the station language. Use ONLY facts stated in that headline. Do not add any new fact, number, name, place, cause, quote, prediction or opinion. If a headline is a teaser question or clickbait, state only what it actually reports, as a statement. If a headline is in another language, translate it faithfully. Keep names exactly as given.',
