@@ -189,8 +189,10 @@ export function StudioLinePanel({
   const now = useNow(30_000);
   const { tel, display } = studioNumber(phone);
   const calls = phone?.calls ?? [];
-  const live = radio === 'live' ? calls.find((c) => phoneStatus[c.id] === 'on_air') : undefined;
-  const waiting = calls.filter((c) => !phoneStatus[c.id] || phoneStatus[c.id] === 'up_next').length;
+  // A call any listener's RJ has read is done for everyone (the studio line keeps one shared record)
+  const statusOf = (c: PhoneCall): PhoneAirStatus | undefined => phoneStatus[c.id] ?? (c.airedAt ? 'aired' : undefined);
+  const live = radio === 'live' ? calls.find((c) => statusOf(c) === 'on_air') : undefined;
+  const waiting = calls.filter((c) => !statusOf(c) || statusOf(c) === 'up_next').length;
 
   return (
     <section aria-labelledby="studio-title" className={`studio ${className}`} data-live={live ? 'true' : undefined}>
@@ -247,7 +249,7 @@ export function StudioLinePanel({
         {calls.length ? (
           <ul className="studio-calls" aria-label="Recent calls">
             {calls.map((call) => (
-              <CallRow key={call.id} call={call} now={now} status={phoneStatus[call.id]} radio={radio} />
+              <CallRow key={call.id} call={call} now={now} status={statusOf(call)} radio={radio} />
             ))}
           </ul>
         ) : (

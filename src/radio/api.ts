@@ -1,5 +1,5 @@
 /** Typed client for the Worker API (docs/TECH-SPEC.md §5). */
-import type { CallMeta, SegmentRequest, TtsRequest } from '../../shared/schemas';
+import type { CallMeta, PhoneAired, SegmentRequest, TtsRequest } from '../../shared/schemas';
 import { STUDIO_NUMBER } from '../../shared/constants';
 import type {
   ApiError,
@@ -76,6 +76,17 @@ export async function getPhoneRecent(signal?: AbortSignal): Promise<PhoneRecentR
     number: typeof res?.number === 'string' && res.number ? res.number : STUDIO_NUMBER,
     calls: Array.isArray(res?.calls) ? res.calls : [],
   };
+}
+
+/** Tells the studio line an RJ link has started reading these calls, so no listener's RJ reads them again. */
+export async function markPhoneAired(body: PhoneAired, signal?: AbortSignal): Promise<string[]> {
+  const res = await json<{ aired?: unknown } | null>('/api/phone/aired', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal,
+  });
+  return Array.isArray(res?.aired) ? res.aired.filter((id): id is string => typeof id === 'string') : [];
 }
 
 /** Starts a streamed TTS request. The body is raw PCM (or WAV) for AudioEngine.playStream. */

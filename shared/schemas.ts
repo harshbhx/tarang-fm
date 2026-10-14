@@ -55,6 +55,9 @@ export const DedicationSchema = z.object({
   theme: z.string().trim().max(120).optional(),
 });
 
+/** A listening session's random id (the studio line's claims are held in its name). */
+const HolderSchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
+
 export const SegmentRequestSchema = z.object({
   station: StationIdSchema,
   type: SegmentTypeSchema,
@@ -87,6 +90,15 @@ export const SegmentRequestSchema = z.object({
   recentStories: z.array(z.string().trim().max(200)).max(8).optional(),
   /** rj_link only: studio phone calls to read on air, oldest first (max 2) */
   dedications: z.array(DedicationSchema).max(2).optional(),
+  /** rj_link only: this listening session's random id, which the studio calls are claimed in */
+  holder: HolderSchema.optional(),
+});
+
+/** POST /api/phone/aired: the studio calls an RJ link has started reading on air. */
+export const PhoneAiredSchema = z.object({
+  station: StationIdSchema,
+  holder: HolderSchema,
+  ids: z.array(z.string().trim().min(1).max(100)).min(1).max(2),
 });
 
 export const TtsRequestSchema = z.object({
@@ -129,6 +141,7 @@ export const LlmCallSchema = z.object({
 
 export type SegmentRequest = z.infer<typeof SegmentRequestSchema>;
 export type Dedication = z.infer<typeof DedicationSchema>;
+export type PhoneAired = z.infer<typeof PhoneAiredSchema>;
 export type TtsRequest = z.infer<typeof TtsRequestSchema>;
 export type CallMeta = z.infer<typeof CallMetaSchema>;
 export type LlmSegment = z.infer<typeof LlmSegmentSchema>;

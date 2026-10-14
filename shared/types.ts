@@ -195,6 +195,8 @@ export interface PhoneCall {
   /** Short on-air message in the caller's language */
   message: string;
   theme?: string;
+  /** When an RJ first read it on air (any listener); a call is read once, ever */
+  airedAt?: string;
 }
 
 export interface PhoneRecentResponse {

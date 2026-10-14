@@ -3,6 +3,7 @@
 // Runtime types generated with workerd@1.20261012.1 2026-10-01 nodejs_compat
 interface __BaseEnv_Env {
 	PHONE: KVNamespace;
+	STUDIO: DurableObjectNamespace<import("./worker/index").StudioLine>;
 	RL_SEGMENT: RateLimit;
 	RL_TTS: RateLimit;
 	RL_CALL: RateLimit;

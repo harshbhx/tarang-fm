@@ -14,7 +14,14 @@ export function getSharedEngine(): AudioEngine {
 
 /** The app-wide controller, created on first use (the AudioContext itself waits for Tune in). */
 export function getRadioController(): RadioController {
-  shared ??= new RadioController({ engine: getSharedEngine(), recorder: createRecorder() });
+  if (!shared) {
+    const controller = new RadioController({ engine: getSharedEngine(), recorder: createRecorder() });
+    // Coming back to the tab shows the studio line's latest calls at once, not at the next poll
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') controller.refreshPhone();
+    });
+    shared = controller;
+  }
   return shared;
 }
 

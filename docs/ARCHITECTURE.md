@@ -63,7 +63,8 @@ flowchart TB
     WX["Open-Meteo"]
   end
 
-  KV[("Workers KV<br/>PHONE")]
+  KV[("Workers KV<br/>show memory")]
+  DO[("StudioLine<br/>Durable Object · SQLite<br/>call table")]
   PHONE["☎️ Caller's phone"]
 
   CTRL -- "JSON" --> API
@@ -72,14 +73,15 @@ flowchart TB
   API --> TTS
   CALL --> STT & LLM & TR
   CTX --> NEWS & WX
-  PH <--> KV
+  PH <--> DO
+  SEG <--> KV
   PHONE <--> VA
   VA -- "headlines tool · call-end webhook" --> API
 ```
 
 Three ideas carry the whole design:
 
-- **The browser runs the show; the Worker writes it.** The client owns the clock, timing, audio and state. The Worker is stateless (apart from the phone-call list in KV) and answers one question at a time: *write this segment*, *speak this line*, *answer this caller*.
+- **The browser runs the show; the Worker writes it.** The client owns the clock, timing, audio and state. The Worker is stateless apart from two shared records: the studio line's call table (a Durable Object) and the show memory (KV) and answers one question at a time: *write this segment*, *speak this line*, *answer this caller*.
 - **Everything is streamed or prefetched.** Speech is piped byte by byte from Bulbul to the speaker, and the next line and next segment are always being prepared while the current one plays.
 - **Every model output is checked before it's heard.** Scripts are validated, cleaned and cast on the server. Subtitles and phone messages are filtered. A crisis on a call-in never reaches the model.
 
@@ -417,7 +419,7 @@ flowchart TD
 
 ## 11. The studio phone line
 
-The phone line (+91 79 6585 4148) is a Sarvam Voice Agent. It never talks to the browser directly; the Worker and KV connect the two.
+The phone line (+91 79 6585 4148) is a Sarvam Voice Agent. It never talks to the browser directly; the Worker and the studio line's call table connect the two. The table is SQLite inside one Durable Object (`StudioLine`, `worker/studio.ts`), so every listener and every rejoin sees the same calls and the same "read on air" state at once. KV, which can take up to a minute to agree with itself, isn't used for calls.
 
 ```mermaid
 sequenceDiagram
@@ -425,7 +427,7 @@ sequenceDiagram
   actor P as Caller (any phone)
   participant VA as Sarvam Voice Agent<br/>(RJ Sunny, Bulbul v4)
   participant W as Worker
-  participant KV as Workers KV (PHONE)
+  participant DO as StudioLine (SQLite)
   participant C as Listener's radio
 
   P->>VA: dials the studio number
@@ -437,27 +439,37 @@ sequenceDiagram
   P->>VA: hangs up
   VA->>W: POST /api/phone/call-end?token=…
   W->>W: token check (constant time)<br/>needs on_air_message and on_air_ok<br/>grim-word filter · mask number
-  W->>KV: prepend call, keep newest 20
-  loop every 45 s while tuned in
+  W->>DO: save(call) · upsert, never un-airs · drop calls older than 7 days
+  loop every 10 s while tuned in (and at once when the tab comes back into view)
     C->>W: GET /api/phone/recent
-    W->>KV: read · keep last 24 h · newest 6
+    W->>DO: recent() · last 24 h · newest 6 · with airedAt
     W-->>C: {number, calls[]}
   end
-  C->>W: POST /api/segment (rj_link) with dedications[] (≤ 2, oldest first)
+  Note over C: a call with airedAt is never taken<br/>a fresh call brings an RJ link forward
+  C->>W: POST /api/segment (rj_link) with dedications[] (≤ 2, oldest first) and holder
+  W->>DO: claim(ids, holder) · 10 min lease · unaired calls nobody else holds
   W->>W: prompt: STUDIO CALLS block, {caller1}, {caller2}<br/>missing placeholder → retry → fixed line per language
+  W->>DO: release(ids the script left out)
   W-->>C: Segment with dedicated[] ids
   Note over C: card shows "Up next"
+  C->>W: POST /api/phone/aired {ids, holder} as the link starts
+  W->>DO: markAired · only the claim holder can
   C-->>C: 🔊 "…we just got a call from Priya in Vadodara…"
   Note over C: "On air now" → "Read on air"<br/>a story request themes the next Kahani
 ```
+
+**Why a call is read once, ever.** Each tab has a random `holder` id (kept in `sessionStorage`, so a reload keeps it). An RJ link only gets the calls it could claim: unaired, and not held by another listener's live claim. The claim is a 10-minute lease, so a listener who leaves mid-way never blocks a call for long, and calls the script didn't use are released straight away. When the link starts playing, the browser marks its calls aired; from then on `/api/phone/recent` carries `airedAt`, every radio shows the call as *Read on air*, and no claim on it succeeds again. If another listener's RJ reads a call while this tab's upcoming link still holds it (only possible once a long pause let the lease run out), that link is written again without it.
+
+**How a fresh call jumps the queue.** RJ links come twice in each loop of the show clock, up to five or six minutes apart. When a call from the last 15 minutes is waiting, the browser doesn't wait for the clock: if the next segment is an RJ link, it is written again with the call in it; otherwise an extra RJ link is slotted in after the current segment (`inserted: true`, so the clock carries on as if it never ran, and the segment already written for the next slot moves along one place rather than being thrown away). Each call moves the queue once, and only when at least two lines of the current segment remain, so the new link is ready in time.
 
 **Why every call gets read.** The RJ link receives each call as structured data (`dedications`), not as free text. The prompt makes reading them the link's one job and asks for a `{callerN}` placeholder where each name goes. The Worker checks for each placeholder: a missing one triggers the retry, and if the retry still skips a caller, a fixed studio-call line in the station's language is inserted before the closing tease. The returned `dedicated` ids tell the browser which calls were read; any call left out, or whose link fails or is dropped, goes back in the queue for the next RJ link.
 
 ```mermaid
 stateDiagram-v2
   direction LR
-  [*] --> waiting: call stored in KV
-  waiting --> up_next: RJ link written with it
+  [*] --> waiting: call saved in the table
+  waiting --> up_next: RJ link claims it and is written
+  waiting --> aired: another listener's RJ read it
   up_next --> waiting: link failed or dropped
   up_next --> on_air: link starts playing
   on_air --> aired: link finishes
@@ -529,7 +541,8 @@ On the infrastructure side: the Sarvam key only lives in the Worker; `/api/tts` 
 | Weather or a news feed fails | The last cached value, or nothing | `worker/context.ts` |
 | Call-in model fails | A warm "thanks for calling" line | `worker/call.ts` |
 | Mic blocked / recording empty | A message under the call button; the show resumes | `startCall()` · `endCall()` |
-| KV unreachable | No phone calls listed; the show is unaffected | `/api/phone/recent` |
+| Call table unreachable | No phone calls listed, and RJ links go without them; the show is unaffected | `/api/phone/recent` · `/api/segment` |
+| KV unreachable | The show memory is skipped; stories and ads are still checked against this session's own log | `worker/memory.ts` |
 
 ## 15. Deployment
 
@@ -540,7 +553,8 @@ flowchart LR
   WR --> CFW["Worker tarang-fm<br/>+ static assets (SPA fallback)"]
   CFW --- DOM["tarang-fm.dualmindlab.tech"]
   CFW --- RL["Rate limiters<br/>RL_SEGMENT · RL_TTS · RL_CALL"]
-  CFW --- KVB[("KV: PHONE")]
+  CFW --- KVB[("KV: PHONE<br/>show memory")]
+  CFW --- DOB[("Durable Object: StudioLine<br/>call table · SQLite")]
   CFW --- SEC["Secrets<br/>SARVAM_API_KEY<br/>PHONE_WEBHOOK_TOKEN"]
   CFW --- OBS["Workers Logs<br/>+ Server-Timing"]
 ```
@@ -559,8 +573,10 @@ flowchart LR
 | Call-in model timeout | 8 s | `CALL_PLAN` |
 | Headlines per bulletin | 4 (≤ 2 local) | `NEWS_LIMIT`, `LOCAL_LIMIT` |
 | News / weather cache | 30 min / 15 min | `worker/context.ts` |
-| Phone poll | every 45 s | `DEFAULT_TIMINGS.phonePollMs` |
-| Phone calls kept / shown | 20 in KV / 6 from the last 24 h | `worker/phone.ts` |
+| Phone poll | every 10 s, and on returning to the tab | `DEFAULT_TIMINGS.phonePollMs` |
+| Phone calls kept / shown | 7 days in the call table / 6 from the last 24 h | `worker/calls.ts` |
+| Claim lease on a call | 10 min | `CLAIM_LEASE_MS` |
+| A call brings an RJ link forward if made within | 15 min | `PHONE_JUMP_MS` |
 | Dedications per RJ link | up to 2 | `MAX_PHONE_CALLS_PER_LINK` |
 | Rate limits per IP | segment 30/min · tts 120/min · call 8/min | `wrangler.jsonc` |
 | Measured warm TTS first byte | 190–390 ms | spike, TECH-SPEC §11 |

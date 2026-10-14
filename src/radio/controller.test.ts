@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CallMeta, SegmentRequest } from '../../shared/schemas';
+import type { CallMeta, PhoneAired, SegmentRequest } from '../../shared/schemas';
 import { getStation } from '../../shared/stations';
 import type { CallResponse, Line, PhoneCall, PhoneRecentResponse, Segment, StationId } from '../../shared/types';
 import type { AudioEngine, PlayResult, Recorder } from '../audio/types';
 import { readCallStream, type LiveCallResponse } from './api';
-import { RadioController, producerPlan, toDedication, type RadioApi } from './controller';
+import { RadioController, producerPlan, toDedication, type RadioApi, type RadioTimings } from './controller';
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const abortError = () => new DOMException('Aborted', 'AbortError');
@@ -113,7 +113,7 @@ function rjLine(station: StationId, text: string): Line {
   return { role: 'rj', speaker: voice.speaker, text, en: `${text} (en)`, pace: 1, temperature: 0.5, pauseAfterMs: 0 };
 }
 
-function harness() {
+function harness(timings: Partial<RadioTimings> = {}) {
   const engine = new FakeEngine();
   const recorder = new FakeRecorder();
   const requests: SegmentRequest[] = [];
@@ -134,7 +134,9 @@ function harness() {
     reply: rjLine('hi', 'reply-text'),
   };
   let n = 0;
-  const phone = { calls: [] as PhoneCall[], polls: 0, inFlight: 0, maxInFlight: 0 };
+  const phone = { calls: [] as PhoneCall[], polls: 0, inFlight: 0, maxInFlight: 0, aired: [] as PhoneAired[] };
+  /** Every segment the fake worker wrote, in order */
+  const served: Segment[] = [];
 
   const api: RadioApi = {
     getPhoneRecent: async (signal?: AbortSignal): Promise<PhoneRecentResponse> => {
@@ -149,6 +151,10 @@ function harness() {
         phone.inFlight -= 1;
       }
     },
+    markPhoneAired: async (body: PhoneAired) => {
+      phone.aired.push(body);
+      return body.ids;
+    },
     getContext: async () => ({ city: 'Jammu', headlines: [{ title: 'Headline', url: 'https://example.com/1' }] }),
     getSegment: async (req: SegmentRequest, signal?: AbortSignal): Promise<Segment> => {
       requests.push(req);
@@ -160,7 +166,7 @@ function harness() {
       if (failSegment.has(req.type)) throw new Error('segment failed');
       n += 1;
       const tag = `${req.station}:${req.type}${req.theme ? `(${req.theme})` : ''}`;
-      return {
+      const segment: Segment = {
         id: `seg-${n}`,
         station: req.station,
         type: req.type,
@@ -170,6 +176,8 @@ function harness() {
         ...(req.type === 'news' ? { mood: 'heavy' as const } : {}),
         ...(req.dedications?.length ? { dedicated: req.dedications.map((d) => d.id).filter((id) => !skipDedications.has(id)) } : {}),
       };
+      served.push(segment);
+      return segment;
     },
     ttsFetch: async (line, _station, signal) => {
       tts.push(line.text);
@@ -199,11 +207,13 @@ function harness() {
       callLingerMs: 30,
       staticMs: 1,
       phonePollMs: 20,
+      ...timings,
     },
   });
   return {
     c,
     phone,
+    served,
     engine,
     recorder,
     requests,
@@ -223,8 +233,8 @@ const HI_ID = getStation('hi').stationIdText;
 const TA_ID = getStation('ta').stationIdText;
 
 let active: ReturnType<typeof harness> | null = null;
-function setup() {
-  active = harness();
+function setup(timings: Partial<RadioTimings> = {}) {
+  active = harness(timings);
   return active;
 }
 
@@ -736,6 +746,92 @@ describe('RadioController studio phone line', () => {
     const ids = rjLinks(h).map(dedicationIds);
     expect(ids.length).toBeGreaterThanOrEqual(3);
     expect(ids.every((d) => d[0] === 'call-1')).toBe(true);
+  });
+
+  it('never reads a call that any listener’s RJ has already read, even after a rejoin', async () => {
+    const h = setup();
+    const airedAt = new Date(Date.now() - 60_000).toISOString();
+    h.phone.calls = [phoneCall('new'), phoneCall('old', { airedAt })];
+    await h.c.tuneIn();
+    await waitFor(() => expect(rjLinks(h).length).toBeGreaterThanOrEqual(3));
+    expect(dedicationIds(rjLinks(h)[0])).toEqual(['new']);
+    expect(h.requests.some((r) => dedicationIds(r).includes('old'))).toBe(false);
+    expect(h.c.getSnapshot().phoneStatus.old).toBe('aired');
+  });
+
+  it("claims calls in this tab's name and tells the studio line once the link is on air", async () => {
+    const h = setup();
+    h.phone.calls = [phoneCall('call-1')];
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.c.getSnapshot().phoneStatus['call-1']).toBe('aired'));
+    const [withCall] = rjLinks(h).filter((r) => dedicationIds(r).length);
+    expect(withCall.holder).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(h.requests.filter((r) => !r.dedications).every((r) => r.holder === undefined)).toBe(true);
+    expect(h.phone.aired).toEqual([{ station: 'hi', holder: withCall.holder, ids: ['call-1'] }]);
+  });
+
+  /** Index in the played lines of the n-th (0-based) line starting with `text`. */
+  const playedAt = (h: ReturnType<typeof harness>, text: string, n = 0) =>
+    h.engine.played.map((t, i) => (t === text ? i : -1)).filter((i) => i >= 0)[n] ?? Infinity;
+
+  it('brings an RJ link forward for a fresh call, without wasting the segment already written', async () => {
+    const h = setup();
+    h.engine.playMs = 30;
+    await h.c.tuneIn();
+    await waitFor(() => expect(rjLinks(h).length).toBe(1));
+    h.phone.calls = [phoneCall('fresh')];
+    // The clock's next RJ link comes after the Kahani; this one is slotted in before it
+    await waitFor(() => expect(playedAt(h, 'hi:rj_link:0', 1)).toBeLessThan(Infinity));
+    expect(playedAt(h, 'hi:rj_link:0', 1)).toBeLessThan(playedAt(h, 'hi:kahani:0'));
+    expect(dedicationIds(rjLinks(h)[1])).toEqual(['fresh']);
+    await waitFor(() => expect(h.c.getSnapshot().phoneStatus.fresh).toBe('aired'));
+    // The ad break written before the jump still aired, and was written once
+    await waitFor(() => expect(h.engine.played).toContain('hi:ad_break:0'));
+    expect(h.requests.filter((r) => r.type === 'ad_break')).toHaveLength(1);
+  });
+
+  it('leaves an old call to the clock’s own RJ links', async () => {
+    const h = setup();
+    h.engine.playMs = 30;
+    await h.c.tuneIn();
+    await waitFor(() => expect(rjLinks(h).length).toBe(1));
+    h.phone.calls = [phoneCall('old', { at: new Date(Date.now() - 60 * 60_000).toISOString() })];
+    await waitFor(() => expect(h.c.getSnapshot().phoneStatus.old).toBe('aired'));
+    expect(playedAt(h, 'hi:rj_link:0', 1)).toBeGreaterThan(playedAt(h, 'hi:kahani:0'));
+  });
+
+  it('rewrites an upcoming link when another listener’s RJ read its call first', async () => {
+    const h = setup();
+    const playedSegments = new Set<string>();
+    h.c.subscribe(() => {
+      const id = h.c.getSnapshot().segment?.id;
+      if (id) playedSegments.add(id);
+    });
+    h.engine.playMs = 80;
+    h.phone.calls = [phoneCall('call-1')];
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.c.getSnapshot().phoneStatus['call-1']).toBe('up_next'));
+    h.phone.calls = [phoneCall('call-1', { airedAt: new Date().toISOString() })];
+    await waitFor(() => expect(h.engine.played).toContain('hi:news:0'));
+    const withCall = h.served.filter((s) => s.dedicated?.includes('call-1')).map((s) => s.id);
+    expect(withCall.length).toBeGreaterThan(0);
+    expect(withCall.some((id) => playedSegments.has(id))).toBe(false);
+    expect(h.engine.played).toContain('hi:rj_link:0');
+    expect(h.c.getSnapshot().phoneStatus['call-1']).toBe('aired');
+    expect(h.phone.aired).toEqual([]);
+  });
+
+  it('checks the studio line at once when asked (the tab came back into view)', async () => {
+    const h = setup({ phonePollMs: 60_000 });
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.c.getSnapshot().phone?.calls).toEqual([]));
+    await waitFor(() => expect(h.phone.inFlight).toBe(0));
+    expect(h.phone.polls).toBe(1);
+    h.phone.calls = [phoneCall('call-1')];
+    h.c.refreshPhone();
+    await waitFor(() => expect(h.c.getSnapshot().phone?.calls.map((c) => c.id)).toEqual(['call-1']));
+    expect(h.phone.polls).toBe(2);
+    expect(h.phone.maxInFlight).toBe(1);
   });
 
   it("gives a studio caller's story theme to the next Kahani", async () => {

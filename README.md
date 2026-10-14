@@ -100,19 +100,21 @@ sequenceDiagram
 **📞 +91 79 6585 4148** is a real phone line into the show. Call it from any phone, no app or internet needed.
 
 - **RJ Sunny picks up** and chats with you in Hindi, Marathi, Gujarati, Tamil, Bangla or English. Leave a dedication, ask for a story or ask what's in the news (the RJ reads you live headlines).
-- **Your message goes on air.** When you hang up, the next RJ link on the web show reads your dedication out by first name and city ("and we just got a call on the studio line from Priya in Vadodara…"). Every call is guaranteed a read: if the script skips one, the Worker retries and then adds a fixed studio-call line. A story request also sets the theme of the next Kahani.
+- **Your message goes on air, within minutes.** Your call shows up on the website about 10 seconds after you hang up, and an RJ link is brought forward to read it ("and we just got a call on the studio line from Priya in Vadodara…"). Every call is guaranteed a read: if the script skips one, the Worker retries and then adds a fixed studio-call line. A story request also sets the theme of the next Kahani.
+- **Read once, ever.** One shared call table (SQLite in a Durable Object) records which calls have aired. Once any listener's RJ reads a call, no RJ reads it again: not after a rejoin, not on another device, not for another listener.
 - **Follow your call to air.** The **Call the studio** panel lists recent calls, each tagged *In the queue*, *Up next*, *On air now* or *Read on air*.
 ```mermaid
 flowchart LR
   P["☎️ Your phone"] <--> VA["Sarvam Voice Agent<br/>RJ Sunny"]
   VA -- "news tool" --> H["/api/phone/headlines"]
   VA -- "call-end webhook" --> CE["/api/phone/call-end"]
-  CE --> KV[("Workers KV<br/>number masked")]
-  KV --> R["/api/phone/recent"]
-  R -- "polled every 45 s" --> WEB["📻 Web radio<br/>next RJ link reads it"]
+  CE --> DO[("Shared call table<br/>Durable Object · SQLite<br/>number masked")]
+  DO --> R["/api/phone/recent"]
+  R -- "polled every 10 s" --> WEB["📻 Web radio<br/>an RJ link is brought forward"]
+  WEB -- "claim · mark aired" --> DO
 ```
 
-- **How it works:** the line runs on [Sarvam Voice Agents](https://docs.sarvam.ai) with the Bulbul v4 Sunny voice. When a call ends, Sarvam posts a call-end webhook to the Worker (`/api/phone/call-end`, token-protected), which keeps the on-air message in Cloudflare KV with the caller's number masked (`+91 ••••• 4148`). Listeners' radios poll `/api/phone/recent` and hand each new call to the RJ exactly once.
+- **How it works:** the line runs on [Sarvam Voice Agents](https://docs.sarvam.ai) with the Bulbul v4 Sunny voice. When a call ends, Sarvam posts a call-end webhook to the Worker (`/api/phone/call-end`, token-protected), which saves the on-air message in the studio line's call table (a SQLite Durable Object) with the caller's number masked (`+91 ••••• 4148`). Listeners' radios poll `/api/phone/recent` every 10 seconds. The RJ link that reads a call claims it, so no other listener's RJ writes it in at the same time, and marks it aired the moment it starts playing.
 
 ## How it uses Sarvam
 
@@ -245,7 +247,8 @@ All routes live under `/api` on the same Worker that serves the app. Errors are 
 | `POST /api/call` | Push-to-talk call-in: Saaras v4 transcript, then the RJ's on-air reply | 8 / min |
 | `GET /api/phone/headlines` | Headlines tool for the phone RJ | 30 / min |
 | `POST /api/phone/call-end` | Sarvam call-end webhook (token-protected) | n/a |
-| `GET /api/phone/recent` | Recent studio calls, numbers masked | n/a |
+| `GET /api/phone/recent` | Recent studio calls, numbers masked, each with when it was read on air | n/a |
+| `POST /api/phone/aired` | An RJ link has started reading these calls (only the listener holding the claim can mark them) | 30 / min |
 
 Request and response shapes are the zod schemas in `shared/schemas.ts` and the types in `shared/types.ts`.
 
@@ -264,7 +267,11 @@ worker/        Cloudflare Worker (Hono)
   care.ts        deterministic distress check with the helpline reply
   context.ts     geo, weather and news feeds, with the grim-news filter
   subtitle.ts    profanity guard for English subtitles
-  phone.ts       studio phone line: webhook, KV storage, number masking
+  phone.ts       studio phone line: webhook payloads, number masking, the phone RJ's headlines
+  calls.ts       the shared call table: save, claim, release, mark aired (plain SQL, tested on node:sqlite)
+  studio.ts      StudioLine Durable Object holding that table
+  memory.ts      show memory: the stories and ads each station already aired
+  story.ts       Kahani briefs and casting, ad briefs
   fallbacks.ts   template lines for when a segment fails
 src/
   audio/         Web Audio engine: PCM stream decoder, music bed, SFX, recorder

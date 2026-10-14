@@ -278,14 +278,17 @@ All routes are JSON unless noted. Errors use `{ error: { code: string, message: 
   4. Return `CallResponse`. The client then calls `/api/tts` with `reply` (two round trips, which keeps the API simple).
 - Caller audio is never stored.
 
-### Studio phone line (`worker/phone.ts`)
-The phone line runs on Sarvam Voice Agents. The Worker only stores and serves what callers asked for.
+### Studio phone line (`worker/phone.ts`, `worker/calls.ts`, `worker/studio.ts`)
+The phone line runs on Sarvam Voice Agents. The Worker only stores and serves what callers asked for. Calls live in one shared table (SQLite inside the `StudioLine` Durable Object, binding `STUDIO`), which records for every call whether an RJ has read it, so each call is read on air once, ever, across all listeners and rejoins.
 
 | Route | Notes |
 |---|---|
 | `GET /api/phone/headlines?station=hi&city=…` | The phone RJ's news tool. Rate-limited like `/api/segment` |
-| `POST /api/phone/call-end?token=…` | Sarvam's call-end webhook. The token must match `PHONE_WEBHOOK_TOKEN`. Stores the on-air message in the `PHONE` KV namespace with the caller's number masked |
-| `GET /api/phone/recent` | `PhoneRecentResponse`: the studio number and recent calls. The web show reads each new call on air once |
+| `POST /api/phone/call-end?token=…` | Sarvam's call-end webhook. The token must match `PHONE_WEBHOOK_TOKEN`. Saves the on-air message in the call table with the caller's number masked. A retry of the same call updates its text but never un-airs it |
+| `GET /api/phone/recent` | `PhoneRecentResponse`: the studio number and the 6 newest calls of the last 24 h, each with `airedAt` once any RJ has read it. `Cache-Control: no-store`; the radio polls it every 10 s |
+| `POST /api/phone/aired` | `{station, holder, ids}`: the RJ link holding these calls has started reading them. Only the claim's holder can mark a call, so nobody can silence the queue. Returns `{aired: ids}`. Rate-limited like `/api/segment` |
+
+An `rj_link` request with `dedications` must carry `holder` (the tab's random id, `[A-Za-z0-9_-]{8,64}`). The Worker claims the calls in that name before writing the script (unaired, and not under another holder's 10-minute lease), drops any it couldn't claim, and releases the ones the script left out.
 
 ### Rate limits (Workers rate-limiting binding, per IP)
 | Route | Limit |

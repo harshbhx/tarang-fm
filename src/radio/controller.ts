@@ -18,7 +18,7 @@ import type { AudioEngine, Recorder } from '../audio/types';
 import * as defaultApi from './api';
 import { readAhead, type CallSubtitles, type LiveCallResponse } from './api';
 import { entryKey, firstEntry, nextEntry, withStoryRequest, type ClockEntry } from './clock';
-import { cleanListenerName, listenerContext, loadListenerName, saveListenerName } from './listener';
+import { cleanListenerName, listenerContext, loadListenerName, loadPhoneHolder, saveListenerName } from './listener';
 import {
   INITIAL_STATE,
   type Caption,
@@ -37,6 +37,8 @@ export interface RadioApi {
   postCall: typeof defaultApi.postCall;
   /** Optional: without it the studio phone line is not polled */
   getPhoneRecent?: typeof defaultApi.getPhoneRecent;
+  /** Optional: reports the studio calls an RJ link has started reading, so no other listener's RJ reads them */
+  markPhoneAired?: typeof defaultApi.markPhoneAired;
 }
 
 export interface RadioTimings {
@@ -69,7 +71,7 @@ export const DEFAULT_TIMINGS: RadioTimings = {
   stopFadeMs: 150,
   callStopFadeMs: 200,
   staticMs: 600,
-  phonePollMs: 45_000,
+  phonePollMs: 10_000,
 };
 
 export interface RadioControllerOptions {
@@ -111,6 +113,8 @@ interface PhonePoll {
   timer: ReturnType<typeof setTimeout> | null;
   /** Settles once the first poll of this run has finished (ok or not) */
   first: Promise<void>;
+  /** Polls now instead of waiting for the timer (no-op while a poll is in flight) */
+  now: () => void;
 }
 
 interface PendingTts {
@@ -129,6 +133,8 @@ const MAX_HISTORY = 6;
 const MAX_RECENT_CALLS = 3;
 /** Studio-line dedications read in one RJ link */
 const MAX_PHONE_CALLS_PER_LINK = 2;
+/** A studio call this fresh brings the next RJ link forward; older ones wait for the clock's own links. */
+const PHONE_JUMP_MS = 15 * 60 * 1000;
 /** SegmentRequest.recentCalls limit */
 const MAX_REQUEST_CALLS = 5;
 const RECENT_CALL_CHARS = 300;
@@ -320,6 +326,10 @@ export class RadioController implements RadioActions {
    * on-air status. A call is read on air once; one whose link never airs goes back in the queue.
    */
   private readonly phoneTaken = new Map<string, 'writing' | PhoneAirStatus>();
+  /** This tab's id on the studio line; the calls its RJ links read are claimed in this name */
+  private readonly phoneHolder = loadPhoneHolder();
+  /** Calls an RJ link was already brought forward (or rewritten) for, so each call moves the queue once */
+  private readonly phoneJumped = new Set<string>();
   /** Summaries of the Kahanis aired this session, oldest first, so each new story is different */
   private storyLog: string[] = [];
   /** Story theme a studio caller asked for; the next unthemed Kahani uses it */
@@ -646,6 +656,7 @@ export class RadioController implements RadioActions {
     this.stationAbort = new AbortController();
     this.segments.clear();
     this.releaseCalls([...this.phoneTaken].filter(([, s]) => s !== 'aired').map(([id]) => id));
+    this.phoneJumped.clear();
     this.plannedNext = null;
     this.context = null;
     this.headlines = [];
@@ -718,6 +729,11 @@ export class RadioController implements RadioActions {
             continue;
           }
           misses = 0;
+          if (entry.inserted && entry.type === 'rj_link' && !loaded.dedicated?.length) {
+            // Slotted in for a studio call that another listener's RJ got to first: the clock just carries on
+            entry = this.advance(entry);
+            continue;
+          }
           segment = loaded;
           lineIndex = 0;
         }
@@ -754,6 +770,7 @@ export class RadioController implements RadioActions {
     this.prefetchSegment(following, station.id);
     this.set({ segment: toNowPlaying(segment), lineIndex: startLine, upNext: following.type });
     this.airCalls(segment);
+    this.jumpQueue(entry, segment.lines.length - startLine);
 
     for (let i = startLine; i < segment.lines.length; i++) {
       if (gen !== this.gen) return;
@@ -965,16 +982,21 @@ export class RadioController implements RadioActions {
     const recent = this.recentCalls.slice(-MAX_RECENT_CALLS);
     if (recent.length) req.recentCalls = recent.slice(0, MAX_REQUEST_CALLS);
     const phoneCalls = entry.type === 'rj_link' ? this.takePhoneCalls() : [];
-    if (phoneCalls.length) req.dedications = phoneCalls.map(toDedication);
+    if (phoneCalls.length) {
+      req.dedications = phoneCalls.map(toDedication);
+      req.holder = this.phoneHolder;
+    }
     return { req, phoneIds: phoneCalls.map((c) => c.id) };
+  }
+
+  /** Studio-line calls no RJ has read (here or for any other listener), newest first. */
+  private waitingCalls(): PhoneCall[] {
+    return (this.state.phone?.calls ?? []).filter((c) => !c.airedAt && !this.phoneTaken.has(c.id));
   }
 
   /** Up to two waiting studio-line calls, oldest first, taken so each is read on air once. */
   private takePhoneCalls(): PhoneCall[] {
-    const calls = (this.state.phone?.calls ?? [])
-      .filter((c) => !this.phoneTaken.has(c.id))
-      .slice(-MAX_PHONE_CALLS_PER_LINK)
-      .reverse();
+    const calls = this.waitingCalls().slice(-MAX_PHONE_CALLS_PER_LINK).reverse();
     for (const c of calls) this.phoneTaken.set(c.id, 'writing');
     return calls;
   }
@@ -1003,13 +1025,79 @@ export class RadioController implements RadioActions {
     this.set({ phoneStatus });
   }
 
-  /** As an RJ link with studio calls starts: those calls are on air, and a caller's story theme is queued. */
+  /**
+   * As an RJ link with studio calls starts: those calls are on air (and marked aired in the shared table, so
+   * no listener's RJ reads them again), and a caller's story theme is queued.
+   */
   private airCalls(segment: Segment): void {
     const ids = segment.dedicated ?? [];
     if (!ids.length) return;
+    const fresh = ids.filter((id) => this.phoneTaken.get(id) !== 'on_air' && this.phoneTaken.get(id) !== 'aired');
     this.markCalls(ids, 'on_air');
+    if (fresh.length) {
+      void this.api.markPhoneAired?.({ station: segment.station, holder: this.phoneHolder, ids: fresh }).catch(noop);
+    }
     const story = (this.state.phone?.calls ?? []).find((c) => ids.includes(c.id) && c.type === 'story_request' && c.theme?.trim());
     if (story) this.phoneTheme = story.theme!.trim();
+  }
+
+  /**
+   * A fresh studio call doesn't wait for the clock's next RJ link: one is slotted in after the current
+   * segment (or the upcoming link is rewritten to include it), so the caller hears it within minutes.
+   * `linesLeft` is how much of the current segment remains; with less than two lines there's no time to
+   * write a link, and the next segment start looks again.
+   */
+  private jumpQueue(current: ClockEntry, linesLeft: number): void {
+    const status = this.state.status;
+    if ((status !== 'playing' && status !== 'tuning') || this.plannedNext || current.type === 'rj_link') return;
+    if (linesLeft < 2 || [...this.phoneTaken.values()].includes('writing')) return;
+    const cutoff = Date.now() - PHONE_JUMP_MS;
+    const fresh = this.waitingCalls().filter((c) => !this.phoneJumped.has(c.id) && Date.parse(c.at) >= cutoff);
+    if (!fresh.length) return;
+    for (const c of fresh) this.phoneJumped.add(c.id);
+
+    const station = this.state.stationId;
+    const following = this.following(current);
+    const key = entryKey(following);
+    const pending = this.segments.get(key);
+    if (following.type === 'rj_link') {
+      // The next link is already written: write it again with the new call(s) in it, unless it's full
+      if ((pending?.segment?.dedicated?.length ?? 0) >= MAX_PHONE_CALLS_PER_LINK) return;
+      if (pending) {
+        pending.controller.abort();
+        this.segments.delete(key);
+        this.releaseCalls(pending.segment?.dedicated ?? []);
+      }
+      this.prefetchSegment(following, station);
+      return;
+    }
+    // Slot a link in; the segment already written for the next slot moves along one place, unwasted
+    const inserted: ClockEntry = { seq: current.seq + 1, index: current.index, type: 'rj_link', inserted: true };
+    if (pending) {
+      this.segments.delete(key);
+      this.segments.set(entryKey(nextEntry(inserted)), pending);
+    }
+    this.plannedNext = { afterSeq: current.seq, entry: inserted };
+    this.prefetchSegment(inserted, station);
+    this.set({ upNext: 'rj_link' });
+  }
+
+  /**
+   * Calls another listener's RJ has read since this tab wrote them into an upcoming link (only possible once
+   * this tab's claim ran out, e.g. after a long pause): that link is written again without them.
+   */
+  private dropStaleLinks(ids: string[]): void {
+    const live = new Set([this.cursor?.segment, this.resumeAt?.segment]);
+    let dropped: ClockEntry | null = null;
+    for (const [key, pending] of this.segments) {
+      const segment = pending.segment;
+      if (!segment || live.has(segment) || !segment.dedicated?.some((id) => ids.includes(id))) continue;
+      pending.controller.abort();
+      this.segments.delete(key);
+      this.releaseCalls(segment.dedicated.filter((id) => !ids.includes(id)));
+      dropped = this.cursor ? this.following(this.cursor.entry) : null;
+    }
+    if (dropped && this.state.status === 'playing') this.prefetchSegment(dropped, this.state.stationId);
   }
 
   // ---- studio phone line -------------------------------------------------
@@ -1024,22 +1112,30 @@ export class RadioController implements RadioActions {
   private startPhonePoll(): void {
     if (!this.api.getPhoneRecent) return;
     let settleFirst = noop;
+    let inFlight = false;
     const poll: PhonePoll = {
       abort: new AbortController(),
       timer: null,
       first: new Promise<void>((resolve) => {
         settleFirst = resolve;
       }),
+      now: () => {
+        if (inFlight || this.phonePoll !== poll) return;
+        if (poll.timer !== null) clearTimeout(poll.timer);
+        void tick();
+      },
     };
     this.phonePoll = poll;
     const tick = async (): Promise<void> => {
       poll.timer = null;
+      inFlight = true;
       try {
         const res = await this.api.getPhoneRecent?.(poll.abort.signal);
         if (this.phonePoll === poll) this.applyPhone(res);
       } catch {
         /* keep the last list; the next poll tries again */
       }
+      inFlight = false;
       settleFirst();
       if (this.phonePoll !== poll) return;
       poll.timer = setTimeout(() => void tick(), this.timings.phonePollMs);
@@ -1063,9 +1159,34 @@ export class RadioController implements RadioActions {
       !!prev &&
       prev.number === phone.number &&
       prev.calls.length === phone.calls.length &&
-      prev.calls.every((c, i) => c.id === phone.calls[i].id && c.message === phone.calls[i].message);
+      prev.calls.every((c, i) => {
+        const next = phone.calls[i];
+        return c.id === next.id && c.message === next.message && c.airedAt === next.airedAt;
+      });
     if (!same) this.set({ phone });
+
+    // Calls any listener's RJ has read are done here too: never taken again, shown as aired
+    const airedElsewhere: string[] = [];
+    let changed = false;
+    for (const c of phone.calls) {
+      if (!c.airedAt) continue;
+      const status = this.phoneTaken.get(c.id);
+      if (status === 'on_air' || status === 'aired') continue;
+      if (status === 'up_next') airedElsewhere.push(c.id);
+      this.phoneTaken.set(c.id, 'aired');
+      changed = true;
+    }
+    if (changed) this.publishPhoneStatus();
+    if (airedElsewhere.length) this.dropStaleLinks(airedElsewhere);
+
+    const c = this.cursor;
+    if (c?.segment) this.jumpQueue(c.entry, c.segment.lines.length - c.lineIndex);
   }
+
+  /** Checks the studio line right away (the tab came back into view); the regular poll carries on after. */
+  refreshPhone = (): void => {
+    this.phonePoll?.now();
+  };
 
   // ---- call-in -----------------------------------------------------------
 
