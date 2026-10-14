@@ -10,6 +10,8 @@
   },
   "observability": { "enabled": true },
   "kv_namespaces": [{ "binding": "PHONE", "id": "e6fbf31533664a5c8d3872ef86298183" }],
+  "durable_objects": { "bindings": [{ "name": "LIVE", "class_name": "LiveStation" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiveStation"] }],
   "ratelimits": [
     { "name": "RL_SEGMENT", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
     { "name": "RL_TTS", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },

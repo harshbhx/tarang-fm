@@ -11,6 +11,7 @@ import { getContext, getHeadlines, localNewsCity } from './context';
 import { phoneHeadlines, recentCalls, saveCall, toPhoneCall, tokenMatches } from './phone';
 import { createSarvam, SarvamError } from './sarvam';
 import { capStream, maxPcmBytes } from './show';
+import type { LiveStation } from './live/station';
 import { buildSegment } from './segment';
 import { Timings } from './timing';
 
@@ -260,6 +261,51 @@ app.get('/phone/recent', async (c) => {
   return c.json(recent, 200, { 'Cache-Control': 'no-store' });
 });
 
+// ---- Listen together (one shared show per station, see shared/live.ts) ----------------------------
+
+const LINE_ID = /^[A-Za-z0-9-]{1,64}$/;
+
+/** The station's Durable Object, or undefined for a station not on the dial. */
+function liveStation(c: Ctx): DurableObjectStub<LiveStation> | undefined {
+  const station = stationFor(c.req.param('station') ?? '');
+  return station ? c.env.LIVE.get(c.env.LIVE.idFromName(station.id)) : undefined;
+}
+
+app.get('/live/:station/ws', async (c) => {
+  const stub = liveStation(c);
+  if (!stub) return apiError(c, 404, 'unknown_station', 'That station is not on the dial yet.');
+  if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') return apiError(c, 426, 'upgrade_required', 'Expected a WebSocket upgrade.');
+  return stub.fetch(c.req.raw);
+});
+
+/** A line's speech (immutable): the edge cache first, then the station. */
+app.get('/live/:station/audio/:lineId', async (c) => {
+  const stub = liveStation(c);
+  if (!stub) return apiError(c, 404, 'unknown_station', 'That station is not on the dial yet.');
+  if (!LINE_ID.test(c.req.param('lineId'))) return apiError(c, 404, 'not_found', 'No audio for that line.');
+  const url = new URL(c.req.url);
+  const key = new Request(`${url.origin}${url.pathname}`);
+  const cache = typeof caches !== 'undefined' ? (caches as unknown as { default?: Cache }).default : undefined;
+  const hit = await cache?.match(key).catch(() => undefined);
+  if (hit) return new Response(hit.body, hit);
+  const res = await stub.fetch(c.req.raw);
+  if (!res.ok) return new Response(res.body, res);
+  const out = new Response(res.body, res);
+  if (cache) {
+    const put = cache.put(key, out.clone()).catch((err: unknown) => console.error(`[api] live audio cache write failed: ${String(err)}`));
+    const wait = waitUntil(c);
+    if (wait) wait(put);
+  }
+  return out;
+});
+
+app.get('/live/:station/now', async (c) => {
+  const stub = liveStation(c);
+  if (!stub) return apiError(c, 404, 'unknown_station', 'That station is not on the dial yet.');
+  const res = await stub.fetch(c.req.raw);
+  return new Response(res.body, res);
+});
+
 app.notFound((c) => apiError(c, 404, 'not_found', `No route for ${c.req.method} ${c.req.path}.`));
 
 app.onError((err, c) => {
@@ -267,4 +313,5 @@ app.onError((err, c) => {
   return apiError(c, 500, 'internal_error', 'Something went wrong on our side.');
 });
 
+export { LiveStation } from './live/station';
 export default app;
