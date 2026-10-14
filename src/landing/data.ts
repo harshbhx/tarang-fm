@@ -278,7 +278,7 @@ export interface ModelRow {
 
 /** The supporting models behind Bulbul. */
 export const MODELS: ModelRow[] = [
-  { name: 'Sarvam-105B', id: 'sarvam-105b', job: 'Writes every script and every call-in reply' },
+  { name: 'Sarvam-105B', id: 'sarvam-105b', job: 'Writes every script, call-in reply and English subtitle' },
   { name: 'Saaras v4', id: 'saaras:v4', job: 'Transcribes callers, code-mixed or native' },
-  { name: 'Sarvam Translate', id: 'mayura:v1', job: 'English subtitle under every line' },
+  { name: 'Sarvam Transliterate', id: 'transliterate', job: 'Writes listener and caller names in each script' },
 ];

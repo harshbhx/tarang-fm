@@ -2,7 +2,7 @@
  * "Listen together": one shared live show per station, run by this Durable Object (one instance per station).
  * Listeners connect over hibernatable WebSockets. The first join wakes the station; a producer driven by storage
  * alarms writes segments along the show clock, voices every line, stores the PCM and places it on one shared
- * timeline; every join gets a live on-air welcome. The station sleeps a minute after the last listener leaves.
+ * timeline; every join gets a live on-air welcome. A station only wakes once the studio starts it, and switches itself off after six minutes, or three with nobody listening.
  */
 import { DurableObject } from 'cloudflare:workers';
 import { SHOW_CLOCK, TTS_SAMPLE_RATE } from '../../shared/constants';

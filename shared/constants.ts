@@ -4,7 +4,6 @@ export const TTS_MODEL = 'bulbul:v4-flash';
 export const TTS_SAMPLE_RATE = 24000;
 export const STT_MODEL = 'saaras:v4';
 export const LLM_MODEL = 'sarvam-105b';
-export const TRANSLATE_MODEL = 'mayura:v1';
 
 /** Max characters per spoken line after cleaning */
 export const MAX_LINE_CHARS = 220;
