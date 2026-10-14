@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getStation } from '../../../shared/stations';
-import type { LiveLine, LiveListener } from '../../../shared/live';
+import { LIVE_OFF_AIR_NOTE, type LiveLine, type LiveListener } from '../../../shared/live';
 import type { Role, SegmentType, StationId } from '../../../shared/types';
 import type { LiveActions, LiveViewState } from '../types';
 import LiveView from './LiveView';
@@ -76,6 +76,7 @@ function timeline(station: StationId, index: number, withWelcomes: boolean): { c
 type MockKey =
   | 'idle'
   | 'idle_count'
+  | 'idle_off_air'
   | 'connecting'
   | 'warming_up'
   | 'on_air'
@@ -86,12 +87,14 @@ type MockKey =
   | 'muted'
   | 'reconnecting'
   | 'sleeping'
+  | 'off_air'
   | 'offline'
   | 'error';
 
 const MOCK_LABELS: { key: MockKey; label: string }[] = [
   { key: 'idle', label: 'Name entry' },
   { key: 'idle_count', label: 'Name entry, 9 listening' },
+  { key: 'idle_off_air', label: 'Name entry, off air' },
   { key: 'connecting', label: 'Connecting' },
   { key: 'warming_up', label: 'Warming up' },
   { key: 'hello_next', label: 'Hello up next' },
@@ -101,6 +104,7 @@ const MOCK_LABELS: { key: MockKey; label: string }[] = [
   { key: 'muted', label: 'Muted' },
   { key: 'reconnecting', label: 'Reconnecting' },
   { key: 'sleeping', label: 'Sleeping' },
+  { key: 'off_air', label: 'Off air' },
   { key: 'offline', label: 'Offline' },
   { key: 'error', label: 'Error' },
 ];
@@ -119,6 +123,7 @@ function buildState(key: MockKey, station: StationId, index: number, extra: Live
     welcomingYou: false,
     clockOffsetMs: 0,
     muted,
+    enabled: true,
   };
   const air = timeline(station, index, false);
   const hiScript = station === 'hi';
@@ -127,6 +132,10 @@ function buildState(key: MockKey, station: StationId, index: number, extra: Live
       return { ...base, status: 'idle', you: undefined, listeners: [], welcomedYou: false, muted: false };
     case 'idle_count':
       return { ...base, status: 'idle', you: undefined, listeners: OTHERS.slice(0, 9), welcomedYou: false, muted: false };
+    case 'idle_off_air':
+      return { ...base, status: 'idle', you: undefined, listeners: [], welcomedYou: false, muted: false, enabled: false };
+    case 'off_air':
+      return { ...base, status: 'sleeping', listeners: [YOU, ...OTHERS.slice(0, 2)], welcomedYou: false, enabled: false, note: LIVE_OFF_AIR_NOTE };
     case 'connecting':
     case 'sleeping':
       return { ...base, status: key, listeners: key === 'sleeping' ? listeners : [], welcomedYou: false };
@@ -227,7 +236,7 @@ export default function LivePreview() {
       },
       setStation: (id) => {
         setStation(id);
-        if (keyRef.current === 'idle' || keyRef.current === 'idle_count') return;
+        if (keyRef.current === 'idle' || keyRef.current === 'idle_count' || keyRef.current === 'idle_off_air') return;
         setIndex(0);
         run([
           [0, 'connecting'],
@@ -281,7 +290,13 @@ export default function LivePreview() {
           </button>
         </div>
       </nav>
-      <LiveView state={state} actions={actions} getAnalyser={getAnalyser} previewOffline={key === 'offline'} />
+      <LiveView
+        state={state}
+        actions={actions}
+        getAnalyser={getAnalyser}
+        previewOffline={key === 'offline'}
+        preJoin={key === 'idle_off_air' ? { offAir: true, listening: 0 } : undefined}
+      />
     </>
   );
 }

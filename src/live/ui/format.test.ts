@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import type { LiveLine, LiveListener } from '../../../shared/live';
+import { LIVE_OFF_AIR_NOTE, type LiveLine, type LiveListener } from '../../../shared/live';
 import { getStation } from '../../../shared/stations';
-import { initial, joinNames, liveBoard, newestFirst, upcomingSegments, voiceLabel, welcomedNames } from './format';
+import {
+  formatAutoOff,
+  initial,
+  isOffAir,
+  joinNames,
+  liveBoard,
+  newestFirst,
+  OFF_AIR_COPY,
+  statusCopy,
+  upcomingSegments,
+  voiceLabel,
+  welcomedNames,
+} from './format';
 
 function line(id: string, segmentId: string, extra: Partial<LiveLine> = {}): LiveLine {
   return {
@@ -63,5 +75,26 @@ describe('live UI format', () => {
     expect(liveBoard('on_air')).toBe('ON AIR');
     expect(liveBoard('on_air', line('w', 'w', { welcome: ['x'] }))).toBe('WELCOME');
     expect(liveBoard('on_air', line('n', 'n', { type: 'news' }))).toBe('NEWS');
+  });
+
+  it('tells an off-air station apart from one resting between listeners', () => {
+    const hi = getStation('hi');
+    expect(isOffAir({ status: 'sleeping', enabled: false, note: LIVE_OFF_AIR_NOTE })).toBe(true);
+    expect(isOffAir({ status: 'sleeping', enabled: false })).toBe(true);
+    expect(isOffAir({ status: 'sleeping', enabled: true })).toBe(false);
+    expect(isOffAir({ status: 'warming_up', enabled: false })).toBe(false);
+    expect(statusCopy('sleeping', hi, true)).toBe(OFF_AIR_COPY);
+    expect(statusCopy('sleeping', hi, false)?.title).toMatch(/asleep/);
+    expect(statusCopy('warming_up', hi, true)?.title).toMatch(/Waking up/);
+  });
+
+  it('counts down to the auto-off', () => {
+    expect(formatAutoOff(6 * 60_000)).toBe('6m');
+    expect(formatAutoOff(4 * 60_000 + 11_200)).toBe('4m 12s');
+    expect(formatAutoOff(119_000)).toBe('1m 59s');
+    expect(formatAutoOff(45_000)).toBe('45s');
+    expect(formatAutoOff(42 * 60_000)).toBe('42m');
+    expect(formatAutoOff((60 + 42) * 60_000 - 5_000)).toBe('1h 42m');
+    expect(formatAutoOff(0)).toBe('any moment');
   });
 });

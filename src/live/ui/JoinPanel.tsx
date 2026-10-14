@@ -15,6 +15,8 @@ interface JoinPanelProps {
   station: Station;
   /** Listeners already on this station, when known before joining */
   listening: number;
+  /** The studio has this station switched off (joining still works: you wait for the show) */
+  offAir?: boolean;
   /** Prefill for the name field (read once when the form appears) */
   initialName: string;
   online: boolean;
@@ -24,7 +26,16 @@ interface JoinPanelProps {
 }
 
 /** Name entry for the shared show: who you are, which station, then "Join live". */
-export default function JoinPanel({ stations, station, listening, initialName, online, onStation, onJoin }: JoinPanelProps) {
+export default function JoinPanel({
+  stations,
+  station,
+  listening,
+  offAir = false,
+  initialName,
+  online,
+  onStation,
+  onJoin,
+}: JoinPanelProps) {
   const [name, setName] = useState(() => initialName.slice(0, LIVE_NAME_MAX));
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -47,6 +58,15 @@ export default function JoinPanel({ stations, station, listening, initialName, o
             <span>
               <strong className="text-fg tabular-nums">{listening}</strong> listening to {station.languageName}{' '}
               {station.frequency} right now
+            </span>
+          </p>
+        ) : null}
+        {offAir ? (
+          <p className="live-off-air-hint" role="status">
+            <span className="live-off-air-dot" aria-hidden="true" />
+            <span>
+              <strong className="text-fg font-medium">Off air right now.</strong> Join anyway and you&rsquo;ll hear the show
+              the moment the studio starts it.
             </span>
           </p>
         ) : null}

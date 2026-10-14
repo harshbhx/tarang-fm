@@ -14,7 +14,7 @@ import { STATIONS, getStation, rjVoiceAt } from '../../../shared/stations';
 import type { Station } from '../../../shared/types';
 import type { Caption } from '../../radio/state';
 import type { LiveActions, LiveViewState } from '../types';
-import { liveCaption, statusCopy } from './format';
+import { isOffAir, liveCaption, statusCopy } from './format';
 import { useAiredLines } from './hooks';
 import JoinPanel from './JoinPanel';
 import LiveDock from './LiveDock';
@@ -32,6 +32,10 @@ interface LiveViewProps {
   savedName?: () => string | undefined;
   /** Design review only: render the offline notice */
   previewOffline?: boolean;
+  /** What the join form knows about the station before joining (from its public snapshot) */
+  preJoin?: { offAir: boolean; listening: number };
+  /** Owner-only studio switch panel */
+  studio?: ReactNode;
 }
 
 /** "Listen together": the shared live show, on the same radio as the personal mode. */
@@ -49,7 +53,15 @@ const noAnalyser = () => null;
 
 const noName = () => undefined;
 
-function LiveShell({ state, actions, getAnalyser = noAnalyser, savedName = noName, previewOffline = false }: LiveViewProps) {
+function LiveShell({
+  state,
+  actions,
+  getAnalyser = noAnalyser,
+  savedName = noName,
+  previewOffline = false,
+  preJoin,
+  studio,
+}: LiveViewProps) {
   const { status } = state;
   const station = getStation(state.station);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -97,6 +109,7 @@ function LiveShell({ state, actions, getAnalyser = noAnalyser, savedName = noNam
       )}
 
       <div className={`shell ${idle ? 'pb-10' : 'with-dock'}`}>
+        {studio}
         <main className="flex flex-col">
           {idle ? null : (
             <h1 className="sr-only">
@@ -132,7 +145,8 @@ function LiveShell({ state, actions, getAnalyser = noAnalyser, savedName = noNam
             <JoinPanel
               stations={STATIONS}
               station={station}
-              listening={state.listeners.length}
+              listening={preJoin?.listening ?? state.listeners.length}
+              offAir={preJoin?.offAir ?? false}
               initialName={savedName() ?? ''}
               online={online}
               onStation={(id) => actions.setStation(id)}
@@ -221,7 +235,8 @@ function LiveStage({
   onRetry: () => void;
 }) {
   const { status } = state;
-  const copy = statusCopy(status, station);
+  const offAir = isOffAir(state);
+  const copy = statusCopy(status, station, offAir);
   const showLine = status === 'on_air' || status === 'reconnecting';
 
   let stage: ReactNode;
@@ -235,7 +250,7 @@ function LiveStage({
         showSubtitles={showSubtitles}
         lang={station.language}
         live={status === 'on_air' && !state.muted}
-        placeholder={copy ? <StatusNotice title={copy.title} detail={copy.detail} /> : null}
+        placeholder={copy ? <StatusNotice title={copy.title} detail={copy.detail} calm={offAir} /> : null}
       />
     );
   }
@@ -268,10 +283,18 @@ function LiveStage({
   );
 }
 
-function StatusNotice({ title, detail }: { title: string; detail: string }) {
+/** `calm`: nothing is coming until the studio starts the show, so no busy equalizer. */
+function StatusNotice({ title, detail, calm = false }: { title: string; detail: string; calm?: boolean }) {
   return (
     <div role="status" className="flex flex-col gap-3 pt-1">
-      <WaitingLine>{title}</WaitingLine>
+      {calm ? (
+        <p className="waiting live-off-air">
+          <span className="live-off-air-dot" aria-hidden="true" />
+          {title}
+        </p>
+      ) : (
+        <WaitingLine>{title}</WaitingLine>
+      )}
       <p className="text-fg-3 max-w-md">{detail}</p>
     </div>
   );

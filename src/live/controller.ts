@@ -184,8 +184,29 @@ function initialState(station: StationId): LiveViewState {
     welcomingYou: false,
     clockOffsetMs: 0,
     muted: false,
+    enabled: false,
   };
 }
+
+/** The studio switch fields of a snapshot or status message, keeping only the ones present and valid. */
+function studioPatch(msg: { state: LiveState; enabled?: unknown; enabledUntil?: unknown; note?: unknown }): Partial<LiveViewState> {
+  const patch: Partial<LiveViewState> = {};
+  if (typeof msg.enabled === 'boolean') {
+    patch.enabled = msg.enabled;
+    if (!msg.enabled) patch.enabledUntil = undefined;
+  }
+  if (typeof msg.enabledUntil === 'number' && Number.isFinite(msg.enabledUntil)) patch.enabledUntil = msg.enabledUntil;
+  if (typeof msg.note === 'string' && msg.note) patch.note = msg.note;
+  else if (msg.state !== 'sleeping') patch.note = undefined;
+  return patch;
+}
+
+/** What a new connection starts from: off air until the server says otherwise. */
+const STUDIO_RESET: Pick<LiveViewState, 'enabled' | 'enabledUntil' | 'note'> = {
+  enabled: false,
+  enabledUntil: undefined,
+  note: undefined,
+};
 
 export class LiveController implements LiveActions {
   private state: LiveViewState;
@@ -275,6 +296,7 @@ export class LiveController implements LiveActions {
       welcomedYou: false,
       welcomingYou: false,
       error: undefined,
+      ...STUDIO_RESET,
     });
     this.connect(gen);
     if (!(await this.ready(gen))) return;
@@ -300,6 +322,7 @@ export class LiveController implements LiveActions {
       welcomedYou: false,
       welcomingYou: false,
       error: undefined,
+      ...STUDIO_RESET,
     });
     this.connect(gen);
     void (async () => {
@@ -341,6 +364,7 @@ export class LiveController implements LiveActions {
       you: undefined,
       current: undefined,
       error: undefined,
+      ...STUDIO_RESET,
     });
   };
 
@@ -543,7 +567,7 @@ export class LiveController implements LiveActions {
         this.set({ listeners: cleanListeners(msg.listeners) });
         break;
       case 'status':
-        if (this.socketJoined && LIVE_STATES.has(msg.state)) this.set({ status: msg.state });
+        if (this.socketJoined && LIVE_STATES.has(msg.state)) this.set({ status: msg.state, ...studioPatch(msg) });
         break;
       case 'pong':
         if (this.clock.add(msg.now, this.mono() - msg.t0, this.now())) this.syncClock();
@@ -561,11 +585,14 @@ export class LiveController implements LiveActions {
     this.attempts = 0;
     this.myIds.add(you.id);
     this.seedClock(snapshot.now);
+    const status = LIVE_STATES.has(snapshot.state) ? snapshot.state : 'on_air';
     this.set({
       you,
       listeners: cleanListeners(snapshot.listeners),
-      status: LIVE_STATES.has(snapshot.state) ? snapshot.state : 'on_air',
+      status,
       error: undefined,
+      ...STUDIO_RESET,
+      ...studioPatch({ ...snapshot, state: status }),
     });
     this.setTimeline(snapshot.lines);
   }

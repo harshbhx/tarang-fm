@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LIVE_PCM_BYTES_PER_MS, type LiveLine, type LiveListener, type LiveServerMessage } from '../../shared/live';
+import {
+  LIVE_AUTO_OFF_MS,
+  LIVE_OFF_AIR_NOTE,
+  LIVE_PCM_BYTES_PER_MS,
+  type LiveLine,
+  type LiveListener,
+  type LiveServerMessage,
+  type LiveSnapshot,
+  type LiveState,
+} from '../../shared/live';
 import { getStation } from '../../shared/stations';
 import type { Line } from '../../shared/types';
 import type { AudioEngine, PlayResult } from '../audio/types';
@@ -177,10 +186,15 @@ function harness() {
     return lines;
   };
 
-  const joined = (you: LiveListener, lines: LiveLine[], state: 'on_air' | 'warming_up' = 'on_air'): LiveServerMessage => ({
+  const joined = (
+    you: LiveListener,
+    lines: LiveLine[],
+    state: LiveState = 'on_air',
+    studio: Partial<LiveSnapshot> = { enabled: true, enabledUntil: server() + LIVE_AUTO_OFF_MS },
+  ): LiveServerMessage => ({
     type: 'joined',
     you,
-    snapshot: { station: 'hi', state, now: server(), listeners: [you], lines: serve(lines) },
+    snapshot: { station: 'hi', state, enabled: false, now: server(), listeners: [you], lines: serve(lines), ...studio },
   });
 
   /** join(name) from a click, the socket opens, and the server answers with a snapshot. */
@@ -276,6 +290,70 @@ describe('LiveController', () => {
     s = h.controller.getSnapshot();
     expect(s.listeners.map((l) => l.name)).toEqual(['Asha K', 'Ravi']);
     expect(s.status).toBe('on_air');
+  });
+
+  it('starts off air before joining and tracks the studio switch from the snapshot', async () => {
+    const h = harness();
+    expect(h.controller.getSnapshot().enabled).toBe(false);
+    const until = server() + LIVE_AUTO_OFF_MS;
+    const p = h.controller.join('Asha');
+    h.socket().open();
+    h.socket().receive(h.joined({ id: 'u1', name: 'Asha', joinedAt: server() }, [], 'warming_up', { enabled: true, enabledUntil: until }));
+    await p;
+    const s = h.controller.getSnapshot();
+    expect(s.enabled).toBe(true);
+    expect(s.enabledUntil).toBe(until);
+    expect(s.note).toBeUndefined();
+  });
+
+  it('an off-air station waits quietly, then picks up the studio starting it', async () => {
+    const h = harness();
+    const p = h.controller.join('Asha');
+    h.socket().open();
+    h.socket().receive(
+      h.joined({ id: 'u1', name: 'Asha', joinedAt: server() }, [], 'sleeping', { enabled: false, note: LIVE_OFF_AIR_NOTE }),
+    );
+    await p;
+    let s = h.controller.getSnapshot();
+    expect(s.status).toBe('sleeping');
+    expect(s.enabled).toBe(false);
+    expect(s.enabledUntil).toBeUndefined();
+    expect(s.note).toBe(LIVE_OFF_AIR_NOTE);
+
+    // A status without the switch fields keeps them
+    h.socket().receive({ type: 'status', now: server(), state: 'sleeping' });
+    s = h.controller.getSnapshot();
+    expect(s.enabled).toBe(false);
+    expect(s.note).toBe(LIVE_OFF_AIR_NOTE);
+
+    // The studio starts the station: warming up, the note clears
+    const until = server() + LIVE_AUTO_OFF_MS;
+    h.socket().receive({ type: 'status', now: server(), state: 'warming_up', enabled: true, enabledUntil: until });
+    s = h.controller.getSnapshot();
+    expect(s.status).toBe('warming_up');
+    expect(s.enabled).toBe(true);
+    expect(s.enabledUntil).toBe(until);
+    expect(s.note).toBeUndefined();
+
+    h.socket().receive({ type: 'status', now: server(), state: 'on_air' });
+    s = h.controller.getSnapshot();
+    expect(s.status).toBe('on_air');
+    expect(s.enabled).toBe(true);
+    expect(s.enabledUntil).toBe(until);
+
+    // Auto-off: back to sleeping with the off-air note
+    h.socket().receive({ type: 'status', now: server(), state: 'sleeping', enabled: false, note: LIVE_OFF_AIR_NOTE });
+    s = h.controller.getSnapshot();
+    expect(s.status).toBe('sleeping');
+    expect(s.enabled).toBe(false);
+    expect(s.enabledUntil).toBeUndefined();
+    expect(s.note).toBe(LIVE_OFF_AIR_NOTE);
+
+    // Leaving forgets the station's switch
+    h.controller.leave();
+    s = h.controller.getSnapshot();
+    expect(s.enabled).toBe(false);
+    expect(s.note).toBeUndefined();
   });
 
   it('keeps the median of the last 5 ping offsets', async () => {
@@ -470,6 +548,7 @@ describe('LiveController', () => {
     expect(s.station).toBe('ta');
     expect(s.status).toBe('connecting');
     expect(s.upcoming).toEqual([]);
+    expect(s.enabled).toBe(false);
     expect(h.socket().url).toBe('ws://localhost:5173/api/live/ta/ws');
     h.socket().open();
     expect(h.socket().sent[0]).toEqual({ type: 'join', name: 'Asha' });
@@ -479,6 +558,7 @@ describe('LiveController', () => {
     h.socket().receive(h.joined({ id: 'u5', name: 'Asha', joinedAt: server() }, []));
     s = h.controller.getSnapshot();
     expect(s.status).toBe('on_air');
+    expect(s.enabled).toBe(true);
     // Nothing from the old station plays
     await flush(10_000);
     expect(h.engine.plays).toHaveLength(0);

@@ -28,6 +28,12 @@ export interface LiveViewState {
   clockOffsetMs: number;
   muted: boolean;
   error?: string;
+  /** Switched on by the studio; false means off air (nothing plays until the studio starts it) */
+  enabled: boolean;
+  /** Server epoch ms when a started station switches itself off */
+  enabledUntil?: number;
+  /** Server note while sleeping, e.g. LIVE_OFF_AIR_NOTE */
+  note?: string;
 }
 
 export interface LiveActions {
