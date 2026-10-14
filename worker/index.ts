@@ -10,6 +10,7 @@ import { audioFile, handleCall } from './call';
 import { getContext, getHeadlines } from './context';
 import { phoneHeadlines, recentCalls, saveCall, toPhoneCall, tokenMatches } from './phone';
 import { createSarvam, SarvamError } from './sarvam';
+import { capStream, maxPcmBytes } from './show';
 import { buildSegment } from './segment';
 import { Timings } from './timing';
 
@@ -127,7 +128,7 @@ app.post('/tts', rateLimit((e) => e.RL_TTS), requireKey, async (c) => {
   if (!body.ok) return apiError(c, 400, 'invalid_json', 'Request body must be JSON.');
   const parsed = TtsRequestSchema.safeParse(body.value);
   if (!parsed.success) return apiError(c, 400, 'invalid_request', issues(parsed.error));
-  const { speaker, text, pace, temperature } = parsed.data;
+  const { speaker, text, pace, temperature, loudness, pitch } = parsed.data;
   const station = stationFor(parsed.data.station);
   if (!station) return apiError(c, 400, 'unknown_station', 'That station is not on the dial yet.');
   if (!CAST_SPEAKERS.has(speaker)) return apiError(c, 400, 'speaker_not_allowed', `Speaker ${speaker} is not in any station cast.`);
@@ -135,11 +136,11 @@ app.post('/tts', rateLimit((e) => e.RL_TTS), requireKey, async (c) => {
   try {
     const sarvam = createSarvam(c.env.SARVAM_API_KEY);
     const audio = await sarvam.ttsStream(
-      { text, language_code: station.language, speaker, pace, temperature },
+      { text, language_code: station.language, speaker, pace, temperature, ...(loudness !== undefined ? { loudness } : {}), ...(pitch !== undefined ? { pitch } : {}) },
       { signal: c.req.raw.signal },
     );
     c.var.timings.add('tts_ttfb', audio.ttfbMs);
-    return new Response(audio.body, {
+    return new Response(capStream(audio.body, maxPcmBytes(text, pace)), {
       status: 200,
       headers: {
         'Content-Type': `audio/pcm;rate=${TTS_SAMPLE_RATE};bits=16;channels=1`,
@@ -175,10 +176,18 @@ app.post('/call', rateLimit((e) => e.RL_CALL), requireKey, async (c) => {
     return apiError(c, 400, 'invalid_request', 'listener: must be a JSON string.');
   }
   const nowPlaying = form.get('nowPlaying');
+  let showLog: unknown;
+  try {
+    const raw = form.get('showLog');
+    showLog = typeof raw === 'string' && raw ? JSON.parse(raw) : undefined;
+  } catch {
+    showLog = undefined;
+  }
   const parsed = CallMetaSchema.safeParse({
     station: form.get('station'),
     listener,
     nowPlaying: typeof nowPlaying === 'string' && nowPlaying.trim() ? nowPlaying.trim() : undefined,
+    showLog,
   });
   if (!parsed.success) return apiError(c, 400, 'invalid_request', issues(parsed.error));
   const station = stationFor(parsed.data.station);
