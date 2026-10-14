@@ -423,7 +423,7 @@ export function callMessages(
     style?.register,
     style?.punctuation,
     style?.gender,
-    'Classify intent: "chat" (small talk or feedback), "dedication" (dedicating a message to someone), "story_request" (asks for a story; set theme to a short story theme in the station language), "news_request" (asks about news), or "other".',
+    'Classify intent: "chat" (small talk or feedback), "dedication" (dedicating a message to someone), "story_request" (asks for a story; set theme to the kind of story they asked for, keeping their own words, e.g. a ghost story, a funny story, a love story, in the station language; never a generic "short story"), "news_request" (asks about news), or "other".',
     'For story_request, promise the story is coming up next in Kahani Corner. For news_request, say the headlines are coming up soon; never state any news facts yourself. For a dedication, read it out warmly. The station plays no songs, so never promise to play one.',
     'If the input is abusive, unsafe or nonsense, set intent "other" and deflect politely with humour. Never repeat personal data such as phone numbers or addresses.',
     'No emojis, markdown, stage directions or brackets. theme is an empty string unless intent is story_request.',

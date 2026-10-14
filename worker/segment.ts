@@ -121,7 +121,17 @@ export function fallbackSegment(station: Station, type: SegmentType): Segment {
 
 /** Replaces the {name} placeholder with the listener's name as typed (or drops it). */
 export function fillName(text: string, name?: string): string {
-  return text.replace(/\{\s*name\s*\}/giu, name?.trim() || '').replace(/\s+([,!?।])/gu, '$1');
+  const who = name?.trim() || '';
+  const isWordChar = (c: string) => /[\p{L}\p{M}\p{N}]/u.test(c);
+  return text
+    .replace(/(\S?)\{\s*name\s*\}(\S?)/giu, (_match, before: string, after: string) => {
+      if (!who) return `${before}${after}`;
+      // The model sometimes glues the placeholder to a neighbouring word ("இதோ{name}").
+      const pre = before && isWordChar(before) ? `${before} ` : before;
+      const post = after && isWordChar(after) ? ` ${after}` : after;
+      return `${pre}${who}${post}`;
+    })
+    .replace(/\s+([,!?।])/gu, '$1');
 }
 
 /** Keeps the opening lines and the closing line (tease, tagline or sign-off) when the model overruns. */
