@@ -352,6 +352,11 @@ Each station has 3 template RJ filler lines, for example "आप सुन र�
   4. Resume from the next line.
 - **Errors:** a failed segment fetch skips to the next clock entry. A failed line TTS shows the caption for 2 s and moves on.
 
+## 9a. Routing (`src/App.tsx`, lead)
+- `/` renders `Landing` (Track L). `/listen` renders the radio app (`RadioApp` + `useRadio`). There's no router library: it uses `history.pushState` plus a `popstate` listener. The Worker's SPA asset fallback serves `index.html` for `/listen`.
+- Landing "Tune in" calls `onTuneIn(stationId)` inside the click. App then runs `actions.setStation(stationId)` and `actions.tuneIn()` in the same gesture, so the AudioContext unlocks, then pushes `/listen`.
+- Dev-only views: `?debug=audio`, `?preview=ui`.
+
 ## 10. Context sources (`worker/context.ts`)
 
 | Data | Source | Cache |

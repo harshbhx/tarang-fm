@@ -30,6 +30,7 @@ Each track edits **only** its owned paths. `shared/` is frozen after P0. A contr
 | **B: Audio engine** | Track B | `src/audio/**` | TECH-SPEC §7 | A test page (`?debug=audio`) plays a streamed `/api/tts` line gaplessly, ducks the music bed, plays the sting and call tone, and records and returns a Blob. Vitest for the PCM converter |
 | **C: UI** | Track C | `src/components/**`, `src/index.css`, `index.html`, `public/**` | TECH-SPEC §4 (`Station`, `Line`) + §9 store shape | All states render with mock store data: idle, tuning, playing (with captions and speaker chip), call recording / thinking / on air, error. Mobile at 360 px. Keyboard reachable |
 | **D: Scheduler + glue** | Track D (or Lead) | `src/radio/**`, `src/App.tsx` | §5 API + §7 engine + §9 | Show clock loops with prefetch. Station switch and call-in flows work against the real API |
+| **L: Landing page** | Track L | `src/landing/**` | PRD M16, shared stations/casts, `src/audio` engine (read-only) | `Landing({ onTuneIn })` renders all sections, plays voice samples via `/api/tts`, mobile 360 px, a11y |
 | **E: Docs + launch** | Lead / Harsh | `README.md`, `docs/**` | n/a | README with live link, GIF/video, architecture, Sarvam models used, setup |
 
 **Lead responsibilities:** P0 scaffold and contracts, merging and integration, deploys, reviewing commits, and keeping the time box.
