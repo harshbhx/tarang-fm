@@ -60,6 +60,14 @@ flowchart LR
 - **Local flavour.** For known cities the RJ gets a local pack (`LOCAL_PACKS`): the city's own greeting, landmarks, food and vibe, such as "केम छो बड़ौदा" and Sursagar lake for Vadodara.
 - **Script checks.** A validator (`worker/validate.ts`) rejects romanized Hindi, stock filler phrases, lines copied from the prompt's examples, overlong lines and any number in the news that isn't in the real headlines. A failed script is retried once at a lower temperature (`worker/segment.ts`). After that, news lines that still carry an invented number are dropped.
 
+## Listen like an app
+
+- **Full-screen radio.** While a show plays, the radio, the programme strip and the live caption fill exactly one screen above the controls. The **Full screen** key on the radio (or <kbd>F</kbd>) goes properly full screen and hides everything else; on iPhone it switches to the same radio-only view.
+- **Lock screen and headphones.** The station and the segment on air show on the lock screen and in the notification shade. Play/pause and next/previous station work from there and from headset buttons (Media Session).
+- **Screen stays on** while the show plays, so captions don't go dark mid-story (Wake Lock).
+- **Keyboard:** <kbd>Space</kbd> pause, <kbd>←</kbd> <kbd>→</kbd> change station, <kbd>F</kbd> full screen, <kbd>C</kbd> English subtitles.
+- **Install it.** Tarang FM has a web app manifest and icons, so "Add to Home Screen" or "Install app" opens it straight onto the radio, without browser bars.
+
 ## Call the RJ from the browser
 
 ```mermaid

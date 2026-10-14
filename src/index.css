@@ -3705,3 +3705,313 @@
     transition: none;
   }
 }
+
+/* =====================================================================================
+ * On-air screen: while a show plays, the radio, the programme strip and the live caption
+ * fill exactly one screen above the dock. Everything else (voices, sources, studio line)
+ * is below the fold. Full screen (or the immersive view on iPhone) hides that too.
+ * ===================================================================================== */
+@layer components {
+  .onair {
+    display: flex;
+    min-height: calc(100dvh - var(--dock-h, 96px) - max(12px, env(safe-area-inset-top)) - 12px);
+    flex-direction: column;
+  }
+
+  @media (min-width: 640px) {
+    .onair {
+      min-height: calc(100dvh - var(--dock-h, 96px) - 36px);
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .onair {
+      min-height: calc(100dvh - var(--dock-h, 96px) - 44px);
+    }
+  }
+
+  .onair > .programme {
+    margin-top: 12px;
+    padding-block: 10px;
+  }
+
+  .onair .stage {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    margin-top: 14px;
+  }
+
+  .onair .stage-body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    justify-content: center;
+    padding-block: 4px 10px;
+  }
+
+  @media (max-width: 639px) {
+    .onair .caption-current {
+      min-height: 11rem;
+    }
+  }
+
+  /* Top-bar key beside the ON AIR lamp */
+  .radio-top-keys {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .top-key {
+    display: inline-flex;
+    min-height: 32px;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--tfm-fg-2);
+    background: linear-gradient(180deg, #24252a, #16171a);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.7);
+    transition: color 150ms, box-shadow 150ms;
+  }
+
+  .top-key:hover,
+  .top-key:focus-visible {
+    color: var(--tfm-fg);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 0 0 1px color-mix(in oklab, var(--accent) 45%, #000);
+  }
+
+  .top-key[aria-pressed='true'] {
+    color: var(--tfm-fg);
+  }
+
+  .top-key-text {
+    display: none;
+  }
+
+  @media (min-width: 640px) {
+    .top-key-text {
+      display: inline;
+    }
+  }
+
+  /* Subtitles toggle inside the programme strip */
+  .prog-tools {
+    display: flex;
+    align-items: center;
+  }
+
+  .prog-cc {
+    min-height: 34px;
+    padding-inline: 10px;
+  }
+
+  .prog-cc[aria-pressed='false'] {
+    opacity: 0.6;
+  }
+
+  .prog-cc-text {
+    display: none;
+  }
+
+  @media (min-width: 640px) {
+    .prog-cc-text {
+      display: inline;
+    }
+  }
+
+  /* Desktop during a show: one deck row (grille, VU, readout, presets, knob) under a shorter dial */
+  @media (min-width: 1024px) {
+    .dial[data-size='compact'] .dial-glass {
+      --glass-h: 118px;
+    }
+
+    .radio-body[data-compact='true'] .radio-controls {
+      grid-template-columns: auto max-content minmax(440px, 1fr) auto;
+      grid-template-areas: 'vu readout presets knob';
+      gap: 12px 22px;
+      margin-top: 14px;
+    }
+
+    .radio-body[data-compact='true'] .radio-grille {
+      display: none;
+    }
+
+    .radio-body[data-compact='true'] .preset-cap {
+      padding-left: 22px;
+    }
+
+    .radio-body[data-compact='true'] .preset {
+      flex-basis: 84px;
+      min-width: 84px;
+    }
+
+    .radio-body[data-compact='true'] .preset-cap {
+      padding-right: 8px;
+    }
+
+    .radio-body[data-compact='true'] .preset-name {
+      font-size: 0.84rem;
+    }
+
+    .radio-body[data-compact='true'] .readout-tagline {
+      display: none;
+    }
+
+    .radio-body[data-compact='true'] .vu {
+      width: 86px;
+    }
+
+    .radio-body[data-compact='true'] .vu-second {
+      display: none;
+    }
+
+    .radio-body[data-compact='true'] .grille {
+      min-height: 0;
+      height: 92px;
+    }
+
+    .radio-body[data-compact='true'] .knob {
+      --size: 82px;
+    }
+
+    .radio-body[data-compact='true'] .vu {
+      width: 96px;
+    }
+
+    .radio-body[data-compact='true'] .preset-native {
+      display: none;
+    }
+
+    .radio-body[data-compact='true'] .preset-cap {
+      min-height: 52px;
+    }
+  }
+
+  /* Wide screens during a show: both VU meters */
+  @media (min-width: 1280px) {
+    .radio-body[data-compact='true'] .vu-second {
+      display: block;
+    }
+  }
+
+  /* Programme strip on the on-air screen: clock, speed and subtitles side by side */
+  @media (min-width: 768px) {
+    .onair .prog-meta {
+      flex-direction: row;
+      align-items: center;
+      gap: 16px;
+    }
+  }
+
+  /* Phones: one tight row (now + subtitles); the queue and the clocks move out of the way */
+  @media (max-width: 639px) {
+    .onair > .programme {
+      grid-template-areas: 'now meta';
+      align-items: center;
+      padding: 10px 12px;
+    }
+
+    .onair .prog-queue,
+    .onair .prog-clock,
+    .onair .prog-ttfa {
+      display: none;
+    }
+
+    .onair .stage {
+      margin-top: 8px;
+    }
+  }
+
+  /* Short laptop screens during a show: shorter dial, one history line, a tighter caption block */
+  @media (min-width: 1024px) and (max-height: 820px) {
+    .dial[data-size='compact'] .dial-glass {
+      --glass-h: 92px;
+    }
+
+    .radio-body[data-compact='true'] .radio-controls {
+      margin-top: 10px;
+    }
+
+    .radio-body[data-compact='true'] .knob {
+      --size: 70px;
+    }
+
+    .onair .history {
+      display: none;
+    }
+
+    .onair .caption-current {
+      min-height: 0;
+      margin-top: 0;
+    }
+
+    .onair > .programme {
+      margin-top: 8px;
+      padding-block: 8px;
+    }
+
+    .onair .caption-text {
+      font-size: clamp(1.5rem, 0.9rem + 1.9vw, 2.3rem);
+    }
+  }
+
+  /* Phones: the live caption alone (earlier lines are in the history below the fold on wider screens) */
+  @media (max-width: 639px) {
+    .onair .history {
+      display: none;
+    }
+  }
+
+  /* Keyboard shortcuts line: only where there is a keyboard and a pointer */
+  .footer-keys {
+    display: none;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .footer-keys {
+      display: block;
+    }
+  }
+
+  .footer-keys kbd {
+    display: inline-block;
+    min-width: 1.6em;
+    padding: 0 0.4em;
+    border-radius: 5px;
+    font-family: var(--tfm-font-mono);
+    font-size: 0.7rem;
+    line-height: 1.6;
+    text-align: center;
+    color: var(--tfm-fg-2);
+    background: rgb(255 255 255 / 0.04);
+    box-shadow: inset 0 0 0 1px var(--tfm-line), 0 1px 0 rgb(0 0 0 / 0.6);
+  }
+
+  /* Immersive / full screen: the radio and the live caption only, with bigger type */
+  .radio[data-immersive='true'] .below,
+  .radio[data-immersive='true'] .shell > footer,
+  .radio[data-immersive='true'] .dialbar {
+    display: none;
+  }
+
+  .radio[data-immersive='true'] .shell {
+    max-width: 1400px;
+  }
+
+  .radio[data-immersive='true'] .caption-text {
+    font-size: clamp(1.9rem, 1.1rem + 3.2vw, 3.6rem);
+  }
+
+  .radio[data-immersive='true'] .caption-text:lang(ta) {
+    font-size: clamp(1.6rem, 1rem + 2.7vw, 3rem);
+  }
+
+  .radio[data-immersive='true'] .caption-en {
+    font-size: clamp(1.05rem, 0.9rem + 0.6vw, 1.45rem);
+  }
+}

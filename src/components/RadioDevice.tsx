@@ -22,6 +22,8 @@ interface RadioDeviceProps {
   compact: boolean;
   /** Behind the dial scale (visualizer) */
   dialChildren?: ReactNode;
+  /** A key on the top bar, beside the ON AIR lamp (the full-screen toggle) */
+  topAction?: ReactNode;
 }
 
 /**
@@ -38,6 +40,7 @@ export default function RadioDevice({
   lit,
   compact,
   dialChildren,
+  topAction,
 }: RadioDeviceProps) {
   const [drag, setDrag] = useState<number | null>(null);
   const [pending, setPending] = useState<StationId | null>(null);
@@ -89,7 +92,10 @@ export default function RadioDevice({
           <WaveMark width={20} height={20} className="nameplate-mark" />
           Tarang<span className="nameplate-fm">FM</span>
         </p>
-        <OnAirLamp on={onAir} warming={tuning} />
+        <div className="radio-top-keys">
+          {topAction}
+          <OnAirLamp on={onAir} warming={tuning} />
+        </div>
       </header>
 
       <TunerDial

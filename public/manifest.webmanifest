@@ -1,0 +1,20 @@
+{
+  "name": "Tarang FM: AI radio in your language",
+  "short_name": "Tarang FM",
+  "description": "A live AI radio station in Hindi, Marathi, Tamil, Bangla and Gujarati, voiced by Sarvam Bulbul v4 Flash. Call in and the RJ answers on air.",
+  "id": "/listen",
+  "start_url": "/listen",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#070605",
+  "theme_color": "#070605",
+  "lang": "en",
+  "categories": ["music", "entertainment", "news"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

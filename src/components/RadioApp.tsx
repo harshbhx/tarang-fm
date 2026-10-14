@@ -29,7 +29,8 @@ import {
   useOutOfView,
   useReducedMotion,
 } from './hooks';
-import { CloseIcon, PauseIcon, PlayIcon, RetryIcon, SubtitlesIcon } from './icons';
+import { CloseIcon, CollapseIcon, ExpandIcon, PauseIcon, PlayIcon, RetryIcon, SubtitlesIcon } from './icons';
+import { useFullscreen, useKeyboardShortcuts, useMediaSession, useWakeLock } from './product';
 
 type Props = {
   state: RadioState;
@@ -86,12 +87,52 @@ function RadioShell({ state, actions, previewOffline }: Required<Props>) {
     actions.tuneIn().catch(() => undefined);
   };
   const setStation = (id: StationId) => actions.setStation(id);
+  const stepStation = (by: 1 | -1) => {
+    const order = [...STATIONS].sort((a, b) => Number(a.frequency) - Number(b.frequency));
+    const at = order.findIndex((s) => s.id === station.id);
+    actions.setStation(order[(at + by + order.length) % order.length].id);
+  };
+  const togglePlay = () => {
+    if (status === 'playing' || status === 'tuning') actions.pause();
+    else if (status === 'paused') actions.resume();
+    else if (status === 'error') tuneIn();
+  };
+
+  const fullscreen = useFullscreen();
+  const segmentName = state.segment && !isCall ? SEGMENT_NAMES[state.segment.type] : isCall ? 'Call-in' : undefined;
+  useMediaSession(
+    idle
+      ? null
+      : {
+          title: state.segment?.title && !isCall ? state.segment.title : (segmentName ?? station.name),
+          artist: `${station.name} · FM ${station.frequency}`,
+          album: segmentName ? `Tarang FM · ${segmentName}` : 'Tarang FM',
+        },
+    onAir,
+    { play: togglePlay, pause: () => actions.pause(), next: () => stepStation(1), previous: () => stepStation(-1) },
+  );
+  useWakeLock(onAir);
+  useKeyboardShortcuts(
+    {
+      togglePlay,
+      nextStation: () => stepStation(1),
+      previousStation: () => stepStation(-1),
+      toggleFullscreen: fullscreen.toggle,
+      toggleSubtitles: () => actions.toggleSubtitles(),
+    },
+    !idle && !isCall,
+  );
+  // Back on the tune-in screen (or after an error), the full-screen view closes.
+  useEffect(() => {
+    if (idle && fullscreen.immersive) fullscreen.exit();
+  }, [idle, fullscreen]);
 
   return (
     <div
       ref={rootRef}
       className="radio"
       data-status={status}
+      data-immersive={fullscreen.immersive && !idle}
       style={{ '--accent': station.accent } as CSSProperties}
     >
       <AmbientBackground accent={station.accent} active={live} />
@@ -114,6 +155,7 @@ function RadioShell({ state, actions, previewOffline }: Required<Props>) {
             </h1>
           )}
 
+          <div className={idle ? undefined : 'onair'}>
           <div ref={deviceRef}>
             <RadioDevice
               stations={STATIONS}
@@ -123,6 +165,21 @@ function RadioShell({ state, actions, previewOffline }: Required<Props>) {
               tuning={status === 'tuning'}
               lit={lit}
               compact={!idle}
+              topAction={
+                idle ? null : (
+                  <button
+                    type="button"
+                    className="top-key"
+                    aria-pressed={fullscreen.immersive}
+                    aria-label={fullscreen.immersive ? 'Exit full screen' : 'Full screen'}
+                    title={fullscreen.immersive ? 'Exit full screen (F)' : 'Full screen (F)'}
+                    onClick={fullscreen.toggle}
+                  >
+                    {fullscreen.immersive ? <CollapseIcon width={16} height={16} /> : <ExpandIcon width={16} height={16} />}
+                    <span className="top-key-text">{fullscreen.immersive ? 'Exit' : 'Full screen'}</span>
+                  </button>
+                )
+              }
               dialChildren={
                 <div className="dial-viz">
                   <Visualizer
@@ -138,6 +195,19 @@ function RadioShell({ state, actions, previewOffline }: Required<Props>) {
             />
           </div>
 
+          {idle ? null : (
+            <ShowScreen
+              state={state}
+              station={station}
+              isCall={isCall}
+              online={online}
+              secondsLeft={secondsLeft}
+              onToggleSubtitles={() => actions.toggleSubtitles()}
+              onRetry={tuneIn}
+            />
+          )}
+          </div>
+
           {idle ? (
             <TunePanel
               station={station}
@@ -147,20 +217,11 @@ function RadioShell({ state, actions, previewOffline }: Required<Props>) {
               onTuneIn={tuneIn}
             />
           ) : (
-            <Show
-              state={state}
-              station={station}
-              isCall={isCall}
-              online={online}
-              secondsLeft={secondsLeft}
-              heard={heard}
-              onToggleSubtitles={() => actions.toggleSubtitles()}
-              onRetry={tuneIn}
-            />
+            <ShowBelow state={state} station={station} heard={heard} />
           )}
         </main>
 
-        <Footer />
+        <Footer showKeys={!idle} />
       </div>
 
       {idle ? null : <Dock state={state} station={station} actions={actions} secondsLeft={secondsLeft} onRetry={tuneIn} />}
@@ -253,13 +314,13 @@ function TunePanel({
   );
 }
 
-function Show({
+/** The on-air screen under the radio: programme strip and the live caption stage, sized to fit one screen. */
+function ShowScreen({
   state,
   station,
   isCall,
   online,
   secondsLeft,
-  heard,
   onToggleSubtitles,
   onRetry,
 }: {
@@ -268,7 +329,6 @@ function Show({
   isCall: boolean;
   online: boolean;
   secondsLeft: number;
-  heard: ReadonlySet<string>;
   onToggleSubtitles: () => void;
   onRetry: () => void;
 }) {
@@ -332,29 +392,40 @@ function Show({
         upNext={state.upNext}
         ttfaMs={state.ttfaMs}
         clockKey={station.id}
+        tools={
+          <button
+            type="button"
+            className="pill pill-sm prog-cc"
+            aria-pressed={state.showSubtitles}
+            aria-label="English subtitles"
+            title="English subtitles (C)"
+            onClick={onToggleSubtitles}
+          >
+            <SubtitlesIcon width={16} height={16} />
+            <span className="prog-cc-text">English</span>
+          </button>
+        }
       />
 
       {state.helpline ? <CareBanner key={state.helpline.number} helpline={state.helpline} /> : null}
 
       <section aria-labelledby="now-title" className="stage">
-        <div className="stage-head">
-          <h2 id="now-title" className="stage-title">
-            {isCall ? 'Call-in' : 'Live captions'}
-          </h2>
-          <button
-            type="button"
-            className="pill pill-sm"
-            aria-pressed={state.showSubtitles}
-            onClick={onToggleSubtitles}
-          >
-            <SubtitlesIcon width={16} height={16} />
-            English subtitles
-          </button>
-        </div>
+        <h2 id="now-title" className="sr-only">
+          {isCall ? 'Call-in' : 'Live captions'}
+        </h2>
         {note}
-        <div className="mt-4">{stage}</div>
+        <div className="stage-body">{stage}</div>
       </section>
+    </>
+  );
+}
 
+/** Below the on-air screen: who's on air, the news sources and the studio phone line. */
+function ShowBelow({ state, station, heard }: { state: RadioState; station: Station; heard: ReadonlySet<string> }) {
+  const { segment } = state;
+  const tuning = state.status === 'tuning';
+  return (
+    <>
       <div className="below">
         <VoicesOnAir station={station} heard={heard} current={state.caption?.speaker} />
         {segment?.type === 'news' && segment.sources?.length && !tuning ? (
