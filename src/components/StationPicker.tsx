@@ -54,7 +54,7 @@ export default function StationPicker({ stations, value, onChange, variant, clas
           type: 'button' as const,
           role: 'radio',
           'aria-checked': on,
-          'aria-label': `${station.languageName}, ${station.frequency} MHz`,
+          'aria-label': `${station.languageName} ${station.frequency} MHz`,
           tabIndex: on ? 0 : -1,
           onClick: () => select(station.id),
         };

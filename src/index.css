@@ -2376,6 +2376,150 @@
     outline-offset: 4px;
   }
 
+  .call-detail-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Small phones: keep the label on one line and let the status wrap to two instead of clipping */
+  @media (max-width: 399.98px) {
+    .dock-inner {
+      gap: 8px;
+    }
+
+    .dock .icon-btn {
+      min-width: 54px;
+    }
+
+    .call-btn {
+      gap: 0.6rem;
+      padding: 0.35rem 0.75rem 0.35rem 0.35rem;
+    }
+
+    .call-btn .call-mic {
+      width: 44px;
+      height: 44px;
+    }
+
+    .call-btn .call-label {
+      overflow: hidden;
+      font-size: 0.875rem;
+      letter-spacing: -0.01em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .call-detail {
+      align-items: flex-start;
+      font-size: 0.74rem;
+      line-height: 1.3;
+      white-space: normal;
+    }
+
+    .call-detail .call-led {
+      margin-top: 0.36em;
+    }
+
+    .call-detail-text {
+      display: -webkit-box;
+      white-space: normal;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+    }
+  }
+
+  /* Care note: a quiet slip of warm dial light, never an alarm */
+  .care {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 12px;
+    margin-top: 16px;
+    padding: 14px 8px 14px 16px;
+    border-radius: 16px;
+    color: var(--tfm-fg-2);
+    background:
+      radial-gradient(120% 140% at 0% 0%, rgb(247 212 143 / 0.09), transparent 60%),
+      rgb(255 255 255 / 0.025);
+    box-shadow: inset 0 0 0 1px rgb(247 212 143 / 0.18);
+    animation: fade-in 400ms ease both;
+  }
+
+  .care-glow {
+    width: 8px;
+    height: 8px;
+    margin-top: 0.45rem;
+    border-radius: 50%;
+    background: var(--tfm-glass);
+    box-shadow: 0 0 10px var(--tfm-glass-lo);
+  }
+
+  .care-body {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .care-title {
+    font-family: var(--tfm-font-display);
+    font-size: 1.05rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--tfm-glass-hi);
+  }
+
+  .care-text {
+    font-size: 0.9rem;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .care-call {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    margin-top: 8px;
+    padding: 0 1.1rem;
+    border-radius: 999px;
+    font-size: 0.92rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--tfm-ink);
+    background: linear-gradient(180deg, var(--tfm-glass-hi), var(--tfm-glass));
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5), 0 8px 22px -12px rgb(247 212 143 / 0.6);
+    transition: filter 160ms;
+  }
+
+  .care-call:hover {
+    filter: brightness(1.05);
+  }
+
+  .care-call:focus-visible,
+  .care-close:focus-visible {
+    outline: 2px solid var(--tfm-glass);
+    outline-offset: 3px;
+  }
+
+  .care-close {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    place-items: center;
+    border-radius: 10px;
+    color: var(--tfm-fg-3);
+  }
+
+  .care-close:hover {
+    color: var(--tfm-fg);
+    background: rgb(255 255 255 / 0.06);
+  }
+
   /* One-time hint above the call button: a slip of lit dial glass */
   .coach {
     position: absolute;
@@ -2407,8 +2551,8 @@
 
   .coach-close {
     display: grid;
-    width: 32px;
-    height: 32px;
+    min-width: 44px;
+    min-height: 44px;
     flex-shrink: 0;
     place-items: center;
     border-radius: 8px;
@@ -2746,7 +2890,7 @@
     display: inline-flex;
     flex-shrink: 0;
     align-items: center;
-    min-height: 36px;
+    min-height: 44px;
     padding: 0 12px;
     border-radius: 999px;
     font-size: 0.8rem;

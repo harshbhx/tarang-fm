@@ -139,7 +139,7 @@ export default function CallButton({ status, secondsLeft, rjName, onStart, onEnd
           <span className="call-label">{label}</span>
           <span className="call-detail">
             <span className="call-led" aria-hidden="true" />
-            <span className="truncate">{detail}</span>
+            <span className="call-detail-text">{detail}</span>
           </span>
         </span>
       </button>
