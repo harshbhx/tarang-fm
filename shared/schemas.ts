@@ -1,6 +1,6 @@
 /** zod schemas for API request bodies and LLM output. See docs/TECH-SPEC.md §5 and §8. */
 import { z } from 'zod';
-import { LISTENER_NAME_MAX, TTS_MAX_CHARS } from './constants';
+import { DELIVERIES, LISTENER_NAME_MAX, TTS_MAX_CHARS } from './constants';
 
 export const StationIdSchema = z.enum(['hi', 'ta', 'bn', 'mr', 'en', 'te', 'kn', 'pa', 'gu']);
 export const SegmentTypeSchema = z.enum(['station_id', 'rj_link', 'news', 'ad_break', 'kahani']);
@@ -16,6 +16,8 @@ export const RoleSchema = z.enum([
   'char_kid',
 ]);
 export const DaypartSchema = z.enum(['morning', 'afternoon', 'evening', 'night']);
+export const DeliverySchema = z.enum(DELIVERIES);
+export const MoodSchema = z.enum(['light', 'heavy']);
 
 export const SourceSchema = z.object({
   title: z.string().min(1).max(300),
@@ -34,6 +36,13 @@ export const ListenerContextSchema = z.object({
   city: z.string().trim().max(80).optional(),
   localTime: z.string().regex(/^\d{2}:\d{2}$/),
   daypart: DaypartSchema,
+  /** Browser-local date 'YYYY-MM-DD' (occasions) and weekday 0 = Sunday */
+  localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  weekday: z.number().int().min(0).max(6).optional(),
+  /** State or region, e.g. 'Gujarat' (from the edge) */
+  region: z.string().trim().max(60).optional(),
+  /** Session nickname the RJ gave this listener on a call */
+  nickname: z.string().trim().max(40).optional(),
 });
 
 export const SegmentRequestSchema = z.object({
@@ -47,6 +56,23 @@ export const SegmentRequestSchema = z.object({
   upNext: SegmentTypeSchema.optional(),
   /** Current weather in the listener's city (rj_link mentions it) */
   weather: WeatherSchema.optional(),
+  /** What aired so far this session, oldest first (max 4) */
+  showLog: z.array(z.object({ type: SegmentTypeSchema, summary: z.string().trim().max(200) })).max(4).optional(),
+  /** The segment this RJ link introduces (generated first, so the tease is true) */
+  next: z.object({ type: SegmentTypeSchema, summary: z.string().trim().max(200) }).optional(),
+  /** Producer settings for rj_link, decided in code */
+  producer: z
+    .object({
+      firstLink: z.boolean(),
+      greetListener: z.boolean(),
+      useCatchphrase: z.boolean(),
+      bit: z.string().trim().max(24),
+    })
+    .optional(),
+  /** Mood of the segment that just aired */
+  moodAfterPrevious: MoodSchema.optional(),
+  /** One line about the last caller, e.g. '"चाय-chief" (Harsh, Vadodara) asked for a haunted haveli story.' */
+  lastCaller: z.string().trim().max(240).optional(),
 });
 
 export const TtsRequestSchema = z.object({
@@ -55,6 +81,8 @@ export const TtsRequestSchema = z.object({
   text: z.string().trim().min(1).max(TTS_MAX_CHARS),
   pace: z.number().min(0.5).max(2),
   temperature: z.number().min(0.01).max(1),
+  loudness: z.number().min(0.1).max(2.5).optional(),
+  pitch: z.number().min(-0.5).max(0.5).optional(),
 });
 
 /** Non-file fields of the multipart /api/call body (listener arrives as a JSON string). */
@@ -62,23 +90,27 @@ export const CallMetaSchema = z.object({
   station: StationIdSchema,
   listener: ListenerContextSchema,
   nowPlaying: z.string().max(120).optional(),
+  showLog: z.array(z.object({ type: SegmentTypeSchema, summary: z.string().trim().max(200) })).max(4).optional(),
 });
 
 /** Raw LLM output for a segment, before role → voice mapping and cleaning. */
 export const LlmSegmentSchema = z.object({
   title: z.string().min(1).max(120),
   lines: z
-    .array(z.object({ role: RoleSchema, text: z.string().min(1).max(600) }))
+    .array(z.object({ role: RoleSchema, text: z.string().min(1).max(600), delivery: z.string().max(20).optional() }))
     .max(16),
+  summary_en: z.string().max(400).optional(),
+  mood: z.string().max(10).optional(),
 });
 
-export const CallIntentSchema = z.enum(['chat', 'dedication', 'story_request', 'news_request', 'other']);
+export const CallIntentSchema = z.enum(['chat', 'dedication', 'story_request', 'news_request', 'retry', 'deflect', 'care', 'other']);
 
 /** Raw LLM output for a call-in reply. */
 export const LlmCallSchema = z.object({
   intent: CallIntentSchema,
-  reply: z.string().min(1).max(400),
-  theme: z.string().max(120).nullable().optional(),
+  lines: z.array(z.object({ text: z.string().min(1).max(600), delivery: z.string().max(20).optional() })).min(1).max(4),
+  nickname: z.string().max(60).nullable().optional(),
+  story_theme: z.string().max(120).nullable().optional(),
 });
 
 export type SegmentRequest = z.infer<typeof SegmentRequestSchema>;

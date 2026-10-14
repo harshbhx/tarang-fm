@@ -1,5 +1,5 @@
 /** Station configs and voice casts. Source of truth: docs/VOICE-CASTING.md (IDs verified live 2026-10-14). */
-import type { GrammaticalGender, Role, Station, StationId, Voice } from './types';
+import type { GrammaticalGender, Role, Show, Station, StationId, Voice } from './types';
 
 const F: GrammaticalGender = 'feminine';
 const M: GrammaticalGender = 'masculine';
@@ -28,7 +28,7 @@ const hindi: Station = {
   cast: {
     station_id: voice('ishita_hi_ads', 1.0, 0.7, F),
     rj: voice('sunny_hi_reels', 1.05, 0.8, M),
-    news: voice('simran_hi_news_breaking', 1.05, 0.4, F),
+    news: voice('simran_hi_news', 1.0, 0.4, F),
     ad_announcer: voice('mukul_hi_ads', 1.1, 0.8, M),
     ad_customer: voice('ritu_hi_ads_informal', 1.0, 0.8, F),
     narrator: voice('shubh_hi_stories_dramatic', 0.95, 0.8, M),
@@ -36,6 +36,12 @@ const hindi: Station = {
     char_b: voice('sanchita_hi_romantic', 1.0, 0.85, F),
     char_kid: voice('chhavi_hi_kids', 1.05, 0.8, F),
   },
+  shows: [
+    { from: 6, to: 11, name: 'सुबह की चाय', rjName: 'सनी', rj: voice('sunny_hi_reels', 1.05, 0.8, M) },
+    { from: 11, to: 16, name: 'दोपहर की गपशप', rjName: 'रितु', rj: voice('ritu_hi_social_lively', 1.0, 0.8, F) },
+    { from: 16, to: 21, name: 'घर वापसी', rjName: 'सनी', rj: voice('sunny_hi_reels', 1.05, 0.8, M) },
+    { from: 21, to: 6, name: 'रात की बात', rjName: 'रतन', rj: voice('ratan_hi_latenight_warm', 0.95, 0.7, M) },
+  ],
 };
 
 const tamil: Station = {
@@ -157,8 +163,18 @@ export function getStation(id: StationId): Station {
 
 /** Every speaker in any station cast: the /api/tts allowlist. */
 export const CAST_SPEAKERS: ReadonlySet<string> = new Set(
-  STATIONS.flatMap((s) => Object.values(s.cast).map((v) => v.speaker)),
+  STATIONS.flatMap((s) => [...Object.values(s.cast), ...(s.shows ?? []).map((show) => show.rj)].map((v) => v.speaker)),
 );
+
+/** The show on air at a local hour, if the station runs daypart shows. */
+export function showAt(station: Station, hour: number): Show | undefined {
+  return station.shows?.find((show) => (show.from < show.to ? hour >= show.from && hour < show.to : hour >= show.from || hour < show.to));
+}
+
+/** The RJ voice on air at a local hour (the daypart show's RJ, or the station's default RJ). */
+export function rjVoiceAt(station: Station, hour: number): Voice {
+  return showAt(station, hour)?.rj ?? station.cast.rj;
+}
 
 export const ROLES: Role[] = [
   'station_id',

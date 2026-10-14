@@ -1,3 +1,5 @@
+import type { DELIVERIES } from './constants';
+
 /** Contracts shared by the browser app and the Worker. See docs/TECH-SPEC.md §4. */
 
 export type StationId = 'hi' | 'ta' | 'bn' | 'mr' | 'en' | 'te' | 'kn' | 'pa' | 'gu';
@@ -18,6 +20,8 @@ export type Role =
 export type SegmentType = 'station_id' | 'rj_link' | 'news' | 'ad_break' | 'kahani';
 export type Daypart = 'morning' | 'afternoon' | 'evening' | 'night';
 export type GrammaticalGender = 'feminine' | 'masculine';
+export type Delivery = (typeof DELIVERIES)[number];
+export type Mood = 'light' | 'heavy';
 
 export interface Voice {
   /** bulbul:v4-flash persona ID, e.g. 'mukul_hi_suspense' */
@@ -50,6 +54,19 @@ export interface Station {
   /** English version of the jingle line (subtitle) */
   stationIdEn: string;
   cast: Record<Role, Voice>;
+  /** Daypart shows with their own RJ (local hours, [from, to)); the cast rj is used outside them */
+  shows?: Show[];
+}
+
+export interface Show {
+  /** Local hour the show starts (inclusive) and ends (exclusive); wraps past midnight when from > to */
+  from: number;
+  to: number;
+  /** Show name in the station language, e.g. 'सुबह की चाय' */
+  name: string;
+  /** RJ name in the station language, e.g. 'सनी' */
+  rjName: string;
+  rj: Voice;
 }
 
 export interface Line {
@@ -61,6 +78,12 @@ export interface Line {
   en?: string;
   pace: number;
   temperature: number;
+  /** Acting direction; pace, loudness and pitch already include it */
+  delivery?: Delivery;
+  /** Bulbul loudness (0.1–2.5) */
+  loudness?: number;
+  /** Bulbul pitch (−0.5–0.5) */
+  pitch?: number;
   /** Silence after this line */
   pauseAfterMs: number;
 }
@@ -89,6 +112,10 @@ export interface Segment {
   sources?: Source[];
   /** True if template content was used */
   fallback?: boolean;
+  /** One English sentence on what aired (feeds the show log and the next RJ link's tease) */
+  summary?: string;
+  /** News only: heavy when the bulletin was dominated by death, disaster or violence */
+  mood?: Mood;
 }
 
 export interface ListenerContext {
@@ -98,6 +125,14 @@ export interface ListenerContext {
   /** 'HH:mm' */
   localTime: string;
   daypart: Daypart;
+  /** Browser-local date 'YYYY-MM-DD' (occasions) */
+  localDate?: string;
+  /** 0 = Sunday */
+  weekday?: number;
+  /** State or region from the edge, e.g. 'Gujarat' */
+  region?: string;
+  /** Session nickname the RJ gave this listener on a call */
+  nickname?: string;
 }
 
 export interface ContextResponse {
@@ -110,7 +145,7 @@ export interface ContextResponse {
   weather?: Weather;
 }
 
-export type CallIntent = 'chat' | 'dedication' | 'story_request' | 'news_request' | 'other';
+export type CallIntent = 'chat' | 'dedication' | 'story_request' | 'news_request' | 'retry' | 'deflect' | 'care' | 'other';
 
 export interface CallResponse {
   transcript: string;
@@ -123,6 +158,8 @@ export interface CallResponse {
   theme?: string;
   /** RJ line to synthesize via /api/tts */
   reply: Line;
+  /** Kind, funny nickname the RJ gave the caller (kept for the session) */
+  nickname?: string;
 }
 
 export interface ApiError {
