@@ -3,6 +3,9 @@ import { m } from 'motion/react';
 import { STATIONS } from '../../shared/stations';
 import type { StationId } from '../../shared/types';
 import { onAppLink } from '../live/ui/navigate';
+import Magnet from '../components/bits/Magnet';
+import ProximityText from '../components/bits/ProximityText';
+import Tilt from '../components/bits/Tilt';
 import { STATION_COUNT_WORD, VOICE_COUNT, stationIdVoice } from './data';
 import RadioSet, { HERO_SAMPLE_PREFIX } from './RadioSet';
 import { TextSwap } from './TextSwap';
@@ -25,7 +28,8 @@ export function HeroHeadline({ language }: { language: string | null }) {
     <h1 id="hero-title" className="lp-h1">
       <span className="lp-sr">AI radio, in your language.</span>
       <span aria-hidden="true">
-        AI radio, in <TextSwap className="lp-swap" text={`${language ?? 'your language'}.`} />
+        <ProximityText text="AI radio, in" radius={120} from={{ wght: 650, wdth: 86 }} to={{ wght: 800, wdth: 110 }} />{' '}
+        <TextSwap className="lp-swap" text={`${language ?? 'your language'}.`} />
       </span>
     </h1>
   );
@@ -62,7 +66,9 @@ export default function Hero({ onTuneIn, player }: { onTuneIn: (id: StationId) =
           Call in, and the RJ answers.
         </m.p>
         <m.div className="lp-hero-actions" {...rise(0.16)}>
-          <TuneButton onClick={() => onTuneIn('hi')} />
+          <Magnet>
+            <TuneButton onClick={() => onTuneIn('hi')} />
+          </Magnet>
           <button
             type="button"
             className="lp-ghost lp-ghost--sample"
@@ -90,7 +96,9 @@ export default function Hero({ onTuneIn, player }: { onTuneIn: (id: StationId) =
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.7, delay: 0.1, ease: EASE }}
       >
-        <RadioSet dial={dial} onDial={setDial} onTuneIn={onTuneIn} player={player} onPresent={setPresented} />
+        <Tilt max={3.5}>
+          <RadioSet dial={dial} onDial={setDial} onTuneIn={onTuneIn} player={player} onPresent={setPresented} />
+        </Tilt>
       </m.div>
       <p className="lp-sr" aria-live="polite">
         {phase === 'loading'

@@ -3035,6 +3035,23 @@
     color: var(--tfm-fg-2);
   }
 
+  /* A call that just came in: a short amber flare, then it settles with the rest */
+  .studio-call[data-fresh] {
+    animation: studio-fresh 6s var(--tfm-ease-out) both;
+  }
+
+  @keyframes studio-fresh {
+    0%,
+    30% {
+      box-shadow:
+        inset 0 0 0 1px color-mix(in oklab, var(--tfm-led-amber) 70%, var(--tfm-line)),
+        0 0 40px -10px var(--tfm-led-amber);
+    }
+    100% {
+      box-shadow: inset 0 0 0 1px var(--tfm-line);
+    }
+  }
+
   .studio-avatar {
     display: grid;
     place-items: center;

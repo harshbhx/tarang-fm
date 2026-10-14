@@ -2,8 +2,9 @@
  * CurvedLoop: adapted from React Bits (https://reactbits.dev, github.com/DavidHDev/react-bits).
  * Copyright (c) 2026 David Haz. MIT + Commons Clause License Condition v1.0.
  * Changes for Tarang FM: the offset lives in a ref (no React render per frame), the loop pauses while
- * off screen or in a hidden tab, reduced motion holds it still, and the text is hidden from screen readers
- * (pass `label` for the accessible name).
+ * off screen or in a hidden tab, reduced motion holds it still, the text is hidden from screen readers
+ * (pass `label` for the accessible name), and `scrollBoost` makes the band race with the page's scroll
+ * velocity (the idea of Scroll Velocity, also React Bits), like a dial spun by a flick.
  */
 import { useEffect, useId, useMemo, useRef, useState, type PointerEvent } from 'react';
 import './CurvedLoop.css';
@@ -17,6 +18,10 @@ interface CurvedLoopProps {
   curveAmount?: number;
   direction?: 'left' | 'right';
   interactive?: boolean;
+  /** Extra speed per px/frame of page scroll (0 = steady) */
+  scrollBoost?: number;
+  /** Cap on the extra speed */
+  maxBoost?: number;
 }
 
 export default function CurvedLoop({
@@ -27,6 +32,8 @@ export default function CurvedLoop({
   curveAmount = 300,
   direction = 'left',
   interactive = true,
+  scrollBoost = 0,
+  maxBoost = 9,
 }: CurvedLoopProps) {
   const text = useMemo(() => `${marqueeText.replace(/\s+$/, '')} `, [marqueeText]);
   const measureRef = useRef<SVGTextElement | null>(null);
@@ -71,10 +78,17 @@ export default function CurvedLoop({
     if (reduce) return;
     let frame = 0;
     let visible = true;
+    let lastY = window.scrollY;
+    let boost = 0;
     const step = () => {
       frame = 0;
       if (!visible || document.hidden) return;
-      if (!dragRef.current) place(offsetRef.current + (dirRef.current === 'right' ? speed : -speed));
+      if (scrollBoost) {
+        const y = window.scrollY;
+        boost = boost * 0.86 + Math.min(maxBoost, Math.abs(y - lastY) * scrollBoost) * 0.14;
+        lastY = y;
+      }
+      if (!dragRef.current) place(offsetRef.current + (dirRef.current === 'right' ? speed + boost : -(speed + boost)));
       frame = requestAnimationFrame(step);
     };
     const wake = () => {
@@ -93,7 +107,7 @@ export default function CurvedLoop({
       document.removeEventListener('visibilitychange', wake);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spacing, speed]);
+  }, [spacing, speed, scrollBoost, maxBoost]);
 
   const onPointerDown = (e: PointerEvent) => {
     if (!interactive) return;

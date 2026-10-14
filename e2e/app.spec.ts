@@ -67,9 +67,70 @@ test('landing page signature pieces: radio waves, the dial band and readable hea
   await band.scrollIntoViewIfNeeded();
   await expect(band).toBeVisible();
   // Blur-in headings keep their accessible names
-  for (const name of ['Hear every voice', 'Call the RJ', 'Built on Sarvam', 'Dil se suniye.']) {
+  for (const name of ['One evening on Tarang FM', 'Hear every voice', 'Call the RJ', 'Built on Sarvam', 'Dil se suniye.']) {
     await expect(page.getByRole('heading', { level: 2, name })).toBeAttached();
   }
+  await noHorizontalScroll(page);
+  expect(errors).toEqual([]);
+});
+
+/** Scrolls so a story beat sits on the reading line (mid-viewport, or mid of what's below a stage pinned on top). */
+async function readBeat(page: Page, index: number) {
+  await page.locator('.lp-beat').nth(index).scrollIntoViewIfNeeded();
+  await page.evaluate((i) => {
+    const beat = document.querySelectorAll('.lp-beat')[i].getBoundingClientRect();
+    const stage = document.querySelector('.lp-stage')!.getBoundingClientRect();
+    const pinned = stage.width >= window.innerWidth * 0.85 ? Math.max(0, stage.bottom) : 0;
+    const line = pinned + (window.innerHeight - pinned) * 0.5;
+    window.scrollBy({ top: beat.top + beat.height / 2 - line, behavior: 'instant' });
+  }, index);
+}
+
+test('the evening story: scrolling the beats changes what the on-air stage shows', async ({ page }) => {
+  const errors = trackErrors(page);
+  await page.goto('/');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveAccessibleName(/AI radio, in your language/);
+  const beats = page.locator('.lp-beat');
+  await expect(beats).toHaveCount(7);
+  const stage = page.locator('.lp-stage');
+  // Reading the Kahani beat puts the Kahani on the stage
+  await readBeat(page, 4);
+  await expect(stage.locator('.lp-stage-kicker')).toContainText('Kahani Corner');
+  await expect(stage.locator('.lp-stage-lamps li[data-on="true"]')).toHaveText('Kahani');
+  await expect(stage.getByText('shubh_hi_stories_dramatic')).toBeVisible();
+  // The studio-line beat shows the caller's card, number masked
+  await readBeat(page, 6);
+  await expect(stage.locator('.lp-stage-kicker')).toContainText('Studio line');
+  await expect(stage.getByText('Priya · Vadodara')).toBeVisible();
+  await expect(stage.getByText(/\+91 ••••• 4148/)).toBeVisible();
+  await noHorizontalScroll(page);
+  expect(errors).toEqual([]);
+});
+
+test('hold to talk: the caller is heard while held and the pipeline lights up on release', async ({ page }) => {
+  const errors = trackErrors(page);
+  await page.goto('/');
+  const hold = page.getByRole('button', { name: /Hold to talk/ });
+  await hold.scrollIntoViewIfNeeded();
+  const box = (await hold.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await expect(hold).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.lp-pipe-step').nth(1)).toHaveAttribute('data-on', 'true');
+  await page.waitForTimeout(900);
+  // Words arrive while the button is held, English only once Saaras has the whole thing
+  const you = page.locator('.lp-bubble--you .lp-native');
+  await expect(you).toContainText('आज');
+  await page.mouse.up();
+  await expect(page.locator('.lp-pipe-step').nth(2)).toHaveAttribute('data-on', 'true');
+  await expect(you).toContainText('special बोल दो ना!');
+  // The reply stage lights, then the sample reply plays (or, without a Sarvam key here, reports no signal)
+  await expect(page.locator('.lp-pipe-step').nth(3)).toHaveAttribute('data-on', 'true', { timeout: 5000 });
+  await expect(page.locator('.lp-demo-hint')).not.toHaveText(/Press and hold/);
+  // Too short a press is told so
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(page.locator('.lp-demo-hint')).toContainText('too short');
   await noHorizontalScroll(page);
   expect(errors).toEqual([]);
 });

@@ -4,14 +4,16 @@ import type { AudioEngine } from '../audio';
 import type { StationId } from '../../shared/types';
 import './fonts';
 import CurvedLoop from '../components/bits/CurvedLoop';
+import ScrollProgress from '../components/bits/ScrollProgress';
+import TextReveal from '../components/bits/TextReveal';
 import { STATIONS } from '../../shared/stations';
 import BuiltOnSarvam from './BuiltOnSarvam';
 import CallIn from './CallIn';
-import { GITHUB_URL } from './data';
+import { GITHUB_URL, MANIFESTO, MANIFESTO_ACCENT } from './data';
 import FinalCta from './FinalCta';
 import Hero from './Hero';
 import { GitHubIcon, WaveMark } from './icons';
-import Rundown from './Rundown';
+import OnAirStory from './OnAirStory';
 import { useVoicePlayer } from './useVoicePlayer';
 import VoiceTuner from './VoiceTuner';
 import './landing.css';
@@ -41,6 +43,7 @@ export default function Landing({ onTuneIn, engine }: LandingProps) {
     <MotionConfig reducedMotion="user">
       <LazyMotion features={domAnimation} strict>
         <div className="lp">
+          <ScrollProgress color="#f2b25c" />
           <div className="lp-room" aria-hidden="true" />
           <header className="lp-wrap lp-top">
             <a className="lp-brand" href="#top" aria-label="Tarang FM, back to top">
@@ -85,12 +88,16 @@ export default function Landing({ onTuneIn, engine }: LandingProps) {
                 className="lp-dial-band-text"
                 speed={0.7}
                 curveAmount={120}
+                scrollBoost={0.12}
               />
             </div>
+            <OnAirStory player={player} />
             <VoiceTuner player={player} />
-            <Rundown />
             <CallIn player={player} />
             <BuiltOnSarvam />
+            <TextReveal className="lp-manifesto" text={MANIFESTO} accent={MANIFESTO_ACCENT} run={1.7}>
+              <span className="lp-manifesto-lamp" aria-hidden="true" />
+            </TextReveal>
             <FinalCta onTuneIn={tune} />
           </main>
 

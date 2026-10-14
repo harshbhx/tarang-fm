@@ -1,0 +1,44 @@
+.text-reveal {
+  position: relative;
+  height: var(--text-reveal-run, 180vh);
+}
+
+.text-reveal-frame {
+  position: sticky;
+  top: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 18px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.text-reveal-text {
+  max-width: 22ch;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.text-reveal-word {
+  display: inline;
+  will-change: opacity;
+}
+
+.text-reveal-word[data-accent] {
+  color: var(--text-reveal-accent, #ffd08a);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .text-reveal {
+    height: auto;
+  }
+
+  .text-reveal-frame {
+    position: static;
+    min-height: 0;
+    padding: 72px 0;
+  }
+}
