@@ -8,6 +8,14 @@ const NEWS_LIMIT = 4;
 /** Per-isolate cache; the Cache API is a no-op on workers.dev, so this keeps feeds warm there too. */
 const memory = new Map<string, { at: number; headlines: Source[] }>();
 
+/** Grim stories (murder, sexual violence, suicide, bodies) make poor light radio; skip them in every station language. */
+const GRIM =
+  /murder|rape|suicide|dead body|beheaded|lynch|हत्या|हत्याकांड|मर्डर|बलात्कार|रेप|आत्महत्या|लाश|शव|कत्ल|கொலை|தற்கொலை|பாலியல் வன்|சடலம்|খুন|হত্যা|ধর্ষণ|আত্মহত্যা|মৃতদেহ/i;
+
+export function isGrim(title: string): boolean {
+  return GRIM.test(title);
+}
+
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 
 export function decodeXml(text: string): string {
@@ -48,7 +56,7 @@ export function parseRss(xml: string, limit = NEWS_LIMIT): Source[] {
         title = title.slice(0, cut).trim();
       }
     }
-    if (seen.has(title)) continue;
+    if (seen.has(title) || isGrim(title)) continue;
 
     const parsed = SourceSchema.safeParse({ title: title.slice(0, 300), url, source: source?.slice(0, 120) || undefined });
     if (!parsed.success) continue;
