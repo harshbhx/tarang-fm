@@ -1,28 +1,58 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import type { StationId } from '../shared/types';
 import RadioApp from './components/RadioApp';
-import { useRadio } from './radio/useRadio';
+import Landing from './landing/Landing';
+import { getSharedEngine, useRadio } from './radio/useRadio';
 
 const AudioDebug = lazy(() => import('./audio/AudioDebug'));
 const Preview = lazy(() => import('./components/Preview'));
 
-type View = 'radio' | 'audio-debug' | 'preview';
+type View = 'landing' | 'listen' | 'audio-debug' | 'preview';
+
+const LISTEN_PATH = '/listen';
 
 function viewFromUrl(): View {
   const params = new URLSearchParams(window.location.search);
   if (params.get('debug') === 'audio') return 'audio-debug';
   if (params.get('preview') === 'ui') return 'preview';
-  return 'radio';
+  return window.location.pathname.startsWith(LISTEN_PATH) ? 'listen' : 'landing';
 }
 
-function Radio() {
+function Station({ view, onNavigate }: { view: 'landing' | 'listen'; onNavigate: (view: View) => void }) {
   const [state, actions] = useRadio();
+
+  // Tune in from the landing page: start audio inside the same click, then show the radio.
+  const tuneIn = useCallback(
+    (station: StationId) => {
+      actions.setStation(station);
+      void actions.tuneIn();
+      window.history.pushState(null, '', LISTEN_PATH);
+      window.scrollTo(0, 0);
+      onNavigate('listen');
+    },
+    [actions, onNavigate],
+  );
+
+  // Going back to the landing page pauses the show.
+  useEffect(() => {
+    if (view === 'landing' && (state.status === 'playing' || state.status === 'tuning')) actions.pause();
+  }, [view, state.status, actions]);
+
+  if (view === 'landing') return <Landing onTuneIn={tuneIn} engine={getSharedEngine()} />;
   return <RadioApp state={state} actions={actions} />;
 }
 
 export default function App() {
-  const [view] = useState(viewFromUrl);
-  if (view === 'radio') return <Radio />;
-  return (
-    <Suspense fallback={null}>{view === 'audio-debug' ? <AudioDebug /> : <Preview />}</Suspense>
-  );
+  const [view, setView] = useState(viewFromUrl);
+
+  useEffect(() => {
+    const onPop = () => setView(viewFromUrl());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  if (view === 'audio-debug' || view === 'preview') {
+    return <Suspense fallback={null}>{view === 'audio-debug' ? <AudioDebug /> : <Preview />}</Suspense>;
+  }
+  return <Station view={view} onNavigate={setView} />;
 }
