@@ -4,7 +4,7 @@ import { getStation } from '../../shared/stations';
 import type { CallResponse, Line, PhoneCall, PhoneRecentResponse, Segment, StationId } from '../../shared/types';
 import type { AudioEngine, PlayResult, Recorder } from '../audio/types';
 import { readCallStream, type LiveCallResponse } from './api';
-import { RadioController, producerPlan, toDedication, type RadioApi } from './controller';
+import { RadioController, producerPlan, toDedication, type RadioApi, type RadioTimings } from './controller';
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const abortError = () => new DOMException('Aborted', 'AbortError');
@@ -113,7 +113,7 @@ function rjLine(station: StationId, text: string): Line {
   return { role: 'rj', speaker: voice.speaker, text, en: `${text} (en)`, pace: 1, temperature: 0.5, pauseAfterMs: 0 };
 }
 
-function harness() {
+function harness(extraTimings: Partial<RadioTimings> = {}) {
   const engine = new FakeEngine();
   const recorder = new FakeRecorder();
   const requests: SegmentRequest[] = [];
@@ -199,6 +199,7 @@ function harness() {
       callLingerMs: 30,
       staticMs: 1,
       phonePollMs: 20,
+      ...extraTimings,
     },
   });
   return {
@@ -223,8 +224,8 @@ const HI_ID = getStation('hi').stationIdText;
 const TA_ID = getStation('ta').stationIdText;
 
 let active: ReturnType<typeof harness> | null = null;
-function setup() {
-  active = harness();
+function setup(extraTimings: Partial<RadioTimings> = {}) {
+  active = harness(extraTimings);
   return active;
 }
 
@@ -340,6 +341,21 @@ describe('RadioController programme', () => {
     h.c.resume();
     await waitFor(() => expect(h.engine.played.length).toBeGreaterThanOrEqual(pausedAt + 2));
     expect(h.engine.played.slice(pausedAt, pausedAt + 2)).toEqual(['hi:rj_link:0', 'hi:rj_link:1']);
+  });
+
+  it('pauses a show nobody touched and asks "Still listening?"', async () => {
+    const h = setup({ listenCapMs: 120 });
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.c.getSnapshot().status).toBe('paused'));
+    expect(h.c.getSnapshot().capped).toBe(true);
+    const played = h.engine.played.length;
+    const requested = h.requests.length;
+    await delay(60);
+    expect(h.engine.played.length).toBe(played);
+    expect(h.requests.length).toBe(requested);
+    h.c.resume();
+    expect(h.c.getSnapshot().capped).toBe(false);
+    expect(h.c.getSnapshot().status).toBe('playing');
   });
 
   it('shows the caption and moves on when a line fails to synthesise', async () => {

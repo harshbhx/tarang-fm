@@ -10,6 +10,7 @@ import AmbientBackground from './AmbientBackground';
 import CallButton from './CallButton';
 import CallPanel from './CallPanel';
 import CareBanner from './CareBanner';
+import StillListening from './StillListening';
 import CaptionStage, { ErrorNotice, OnAirSoon, StageNote, TuningNotice } from './CaptionStage';
 import CompactDialBar from './CompactDialBar';
 import Footer from './Footer';
@@ -156,6 +157,7 @@ function RadioShell({ state, actions, previewOffline }: Required<Props>) {
               heard={heard}
               onToggleSubtitles={() => actions.toggleSubtitles()}
               onRetry={tuneIn}
+              onResume={() => actions.resume()}
             />
           )}
         </main>
@@ -262,6 +264,7 @@ function Show({
   heard,
   onToggleSubtitles,
   onRetry,
+  onResume,
 }: {
   state: RadioState;
   station: Station;
@@ -271,6 +274,7 @@ function Show({
   heard: ReadonlySet<string>;
   onToggleSubtitles: () => void;
   onRetry: () => void;
+  onResume: () => void;
 }) {
   const { status, segment } = state;
   const tuning = status === 'tuning';
@@ -335,6 +339,7 @@ function Show({
       />
 
       {state.helpline ? <CareBanner key={state.helpline.number} helpline={state.helpline} /> : null}
+      {state.capped && state.status === 'paused' ? <StillListening onResume={onResume} /> : null}
 
       <section aria-labelledby="now-title" className="stage">
         <div className="stage-head">

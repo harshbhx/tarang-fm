@@ -63,6 +63,8 @@ export interface RadioState {
   phoneStatus: Record<string, PhoneAirStatus>;
   /** Support line shown after a call that sounded like distress; cleared on a new call or station */
   helpline?: { name: string; number: string };
+  /** True when the listening cap paused a show nobody touched for a while ("Still listening?") */
+  capped?: boolean;
 }
 
 export interface RadioActions {

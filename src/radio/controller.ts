@@ -57,6 +57,8 @@ export interface RadioTimings {
   staticMs: number;
   /** How often the studio phone line is polled while tuned in */
   phonePollMs: number;
+  /** A show nobody touches for this long pauses itself and asks "Still listening?" (0 = never) */
+  listenCapMs: number;
 }
 
 export const DEFAULT_TIMINGS: RadioTimings = {
@@ -70,6 +72,7 @@ export const DEFAULT_TIMINGS: RadioTimings = {
   callStopFadeMs: 200,
   staticMs: 600,
   phonePollMs: 45_000,
+  listenCapMs: 6 * 60_000,
 };
 
 export interface RadioControllerOptions {
@@ -365,10 +368,36 @@ export class RadioController implements RadioActions {
     this.set({ ...patch, caption, history });
   }
 
+  // ---- listening cap -----------------------------------------------------
+
+  private capTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** The listener did something: restart the cap clock and clear a "Still listening?" prompt. */
+  private touch(): void {
+    if (this.capTimer) clearTimeout(this.capTimer);
+    this.capTimer = this.timings.listenCapMs > 0 ? setTimeout(() => this.capReached(), this.timings.listenCapMs) : undefined;
+    if (this.state.capped) this.set({ capped: false });
+  }
+
+  /** Pauses a show nobody has touched for listenCapMs, so a forgotten tab stops writing and voicing new segments. */
+  private capReached(): void {
+    this.capTimer = undefined;
+    const status = this.state.status;
+    if (CALL_STATUSES.has(status)) {
+      // Never cut a caller off: check again after the call
+      this.touch();
+      return;
+    }
+    if (status !== 'playing' && status !== 'tuning') return;
+    this.pause();
+    this.set({ capped: true });
+  }
+
   // ---- actions -----------------------------------------------------------
 
   tuneIn = async (): Promise<void> => {
     const status = this.state.status;
+    this.touch();
     if (status === 'paused') {
       this.resume();
       return;
@@ -401,6 +430,7 @@ export class RadioController implements RadioActions {
 
   resume = (): void => {
     const status = this.state.status;
+    this.touch();
     if (CALL_STATUSES.has(status)) {
       this.callResume = 'playing';
       return;
@@ -421,6 +451,7 @@ export class RadioController implements RadioActions {
   setStation = (id: StationId): void => {
     if (!STATION_BY_ID[id] || id === this.state.stationId) return;
     const status = this.state.status;
+    if (status !== 'idle' && status !== 'error') this.touch();
     if (status === 'idle' || status === 'error') {
       this.set({ stationId: id });
       return;
@@ -459,6 +490,7 @@ export class RadioController implements RadioActions {
   startCall = async (): Promise<void> => {
     const status = this.state.status;
     if (status !== 'playing' && status !== 'paused' && status !== 'tuning') return;
+    this.touch();
     if (status !== 'paused') this.resumeAt = this.positionAfterCurrentLine();
     this.callResume = status === 'paused' ? 'paused' : 'playing';
     const gen = this.interrupt();
