@@ -67,7 +67,7 @@ export default function Hero({ onTuneIn, player }: { onTuneIn: (id: StationId) =
             className="lp-ghost lp-ghost--sample"
             data-phase={phase}
             onClick={playSample}
-            aria-label={busy ? `Stop the ${station.languageName} sample` : `Hear a ${station.languageName} ${station.frequency} sample`}
+            aria-label={busy ? 'Stop sample' : `Hear a sample, ${station.languageName} ${station.frequency}`}
           >
             <PlayGlyph phase={phase} size={16} />
             {busy ? 'Stop sample' : 'Hear a sample'}
