@@ -11,6 +11,9 @@ type View = 'landing' | 'listen' | 'audio-debug' | 'preview';
 
 const LISTEN_PATH = '/listen';
 
+// Every view starts at the top; restoring an old scroll position drops visitors mid-page on the landing page.
+if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual';
+
 function viewFromUrl(): View {
   const params = new URLSearchParams(window.location.search);
   if (params.get('debug') === 'audio') return 'audio-debug';
