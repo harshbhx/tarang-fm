@@ -52,7 +52,13 @@ export interface RadioState {
   /** Recent captions, newest last (max 6) */
   history: Caption[];
   call?: CallState;
+  /** English subtitles (off until the listener turns them on; scripts only carry them when asked) */
   showSubtitles: boolean;
+  /**
+   * Subtitles were just turned on and no line with one has aired since: the segment on air was written
+   * without them, so the captions say they start with the next segment
+   */
+  subtitlesSoon?: boolean;
   /** TTFA of the most recent line */
   ttfaMs?: number;
   upNext?: SegmentType;
@@ -91,6 +97,6 @@ export const INITIAL_STATE: RadioState = {
   listener: {},
   lineIndex: 0,
   history: [],
-  showSubtitles: true,
+  showSubtitles: false,
   phoneStatus: {},
 };

@@ -120,7 +120,7 @@ export function audioFilename(mime: string): string {
   return 'call.webm';
 }
 
-/** English subtitles for a call; they arrive after the reply on a streamed response. */
+/** English subtitles for a call (only when asked for); they arrive after the reply on a streamed response. */
 export interface CallSubtitles {
   transcriptEn?: string;
   replyEn?: string;
@@ -138,6 +138,7 @@ export async function postCall(blob: Blob, meta: CallMeta, signal?: AbortSignal)
   form.append('listener', JSON.stringify(meta.listener));
   if (meta.nowPlaying) form.append('nowPlaying', meta.nowPlaying);
   if (meta.showLog?.length) form.append('showLog', JSON.stringify(meta.showLog));
+  form.append('subtitles', meta.subtitles ? 'true' : 'false');
   const res = await send('/api/call', { method: 'POST', body: form, signal, headers: { accept: `${NDJSON}, application/json` } });
   if (!res.headers.get('content-type')?.includes(NDJSON) || !res.body) return (await res.json()) as CallResponse;
   return readCallStream(res.body);

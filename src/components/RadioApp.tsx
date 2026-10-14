@@ -362,6 +362,7 @@ function ShowScreen({
         caption={tuning ? undefined : state.caption}
         history={tuning ? [] : state.history}
         showSubtitles={state.showSubtitles}
+        subtitlesSoon={state.subtitlesSoon}
         lang={station.language}
         paused={status === 'paused'}
         live={status === 'playing'}

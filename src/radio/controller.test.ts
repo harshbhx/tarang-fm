@@ -3,8 +3,9 @@ import type { CallMeta, PhoneAired, SegmentRequest } from '../../shared/schemas'
 import { getStation } from '../../shared/stations';
 import type { CallResponse, Line, PhoneCall, PhoneRecentResponse, Segment, StationId } from '../../shared/types';
 import type { AudioEngine, PlayResult, Recorder } from '../audio/types';
-import { readCallStream, type LiveCallResponse } from './api';
+import { postCall, readCallStream, type LiveCallResponse } from './api';
 import { RadioController, producerPlan, toDedication, type RadioApi, type RadioTimings } from './controller';
+import { INITIAL_STATE } from './state';
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const abortError = () => new DOMException('Aborted', 'AbortError');
@@ -171,7 +172,12 @@ function harness(timings: Partial<RadioTimings> = {}) {
         station: req.station,
         type: req.type,
         title: `${req.type} ${n}`,
-        lines: [0, 1].map((i) => rjLine(req.station, `${tag}:${i}`)),
+        // Like the worker, scripts only carry English subtitles when asked
+        lines: [0, 1].map((i) => {
+          const line = rjLine(req.station, `${tag}:${i}`);
+          if (!req.subtitles) delete line.en;
+          return line;
+        }),
         summary: `${req.type} ${n} aired`,
         ...(req.type === 'news' ? { mood: 'heavy' as const } : {}),
         ...(req.dedications?.length ? { dedicated: req.dedications.map((d) => d.id).filter((id) => !skipDedications.has(id)) } : {}),
@@ -468,7 +474,7 @@ describe('RadioController call-in', () => {
     const story = h.requests.find((r) => r.type === 'kahani');
     expect(story?.theme).toBe('tiger');
     expect(story?.recentCalls).toEqual(['ek sher ki kahani sunao']);
-    expect(h.calls[0]).toMatchObject({ station: 'hi', nowPlaying: 'rj_link 1' });
+    expect(h.calls[0]).toMatchObject({ station: 'hi', nowPlaying: 'rj_link 1', subtitles: false });
 
     const s = h.c.getSnapshot();
     const caller = [...s.history, s.caption].find((cap) => cap?.role === 'caller');
@@ -613,14 +619,18 @@ describe('RadioController call-in races', () => {
 });
 
 describe('RadioController settings', () => {
-  it('keeps the raw listener name and toggles subtitles', () => {
+  it('keeps the raw listener name and toggles subtitles, which start off', () => {
     const h = setup();
     h.c.setListenerName('Harsh ');
     expect(h.c.getSnapshot().listener.name).toBe('Harsh ');
     h.c.setListenerName('');
     expect(h.c.getSnapshot().listener.name).toBeUndefined();
-    h.c.toggleSubtitles();
+    expect(INITIAL_STATE.showSubtitles).toBe(false);
     expect(h.c.getSnapshot().showSubtitles).toBe(false);
+    h.c.toggleSubtitles();
+    expect(h.c.getSnapshot()).toMatchObject({ showSubtitles: true, subtitlesSoon: true });
+    h.c.toggleSubtitles();
+    expect(h.c.getSnapshot()).toMatchObject({ showSubtitles: false, subtitlesSoon: false });
   });
 
   it('notifies subscribers with immutable snapshots', () => {
@@ -633,7 +643,146 @@ describe('RadioController settings', () => {
     h.c.toggleSubtitles();
     expect(calls).toBe(1);
     expect(h.c.getSnapshot()).not.toBe(before);
-    expect(before.showSubtitles).toBe(true);
+    expect(before.showSubtitles).toBe(false);
+  });
+});
+
+describe('RadioController subtitles', () => {
+  /** The English subtitle on screen as each line started, by line text */
+  function captionsAsPlayed(h: ReturnType<typeof harness>, onPlay?: (text: string) => void) {
+    const en = new Map<string, string | undefined>();
+    h.engine.onPlay = (text) => {
+      if (!en.has(text)) en.set(text, h.c.getSnapshot().caption?.en);
+      onPlay?.(text);
+    };
+    return en;
+  }
+
+  it('asks for no subtitles while they are off, and shows none', async () => {
+    const h = setup();
+    const en = captionsAsPlayed(h);
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.engine.played).toContain('hi:news:1'));
+    expect(h.requests.length).toBeGreaterThanOrEqual(3);
+    expect(h.requests.every((r) => r.subtitles === false)).toBe(true);
+    expect(en.get('hi:rj_link:0')).toBeUndefined();
+    expect(h.c.getSnapshot()).toMatchObject({ showSubtitles: false });
+  });
+
+  it('rewrites the segments still to come when turned on, without cutting the line on air', async () => {
+    const h = setup();
+    let soon: boolean | undefined;
+    const en = captionsAsPlayed(h, (text) => {
+      if (text === 'hi:rj_link:0') h.c.toggleSubtitles();
+      if (text === 'hi:rj_link:1') soon = h.c.getSnapshot().subtitlesSoon;
+    });
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.engine.played).toContain('hi:ad_break:0'));
+
+    // The link on air plays to its end as written, then the news airs from its rewrite
+    expect(h.engine.played.slice(0, 5)).toEqual([HI_ID, 'hi:rj_link:0', 'hi:rj_link:1', 'hi:news:0', 'hi:news:1']);
+    expect(rjLinks(h)[0].subtitles).toBe(false);
+    expect(h.requests.filter((r) => r.type === 'news').map((r) => r.subtitles)).toEqual([false, true]);
+    expect(en.get('hi:rj_link:1')).toBeUndefined();
+    expect(en.get('hi:news:0')).toBe('hi:news:0 (en)');
+    // "Subtitles start with the next segment" until a line with one aired
+    expect(soon).toBe(true);
+    expect(h.c.getSnapshot().subtitlesSoon).toBe(false);
+    expect(h.requests.filter((r) => r.type === 'ad_break').every((r) => r.subtitles === true)).toBe(true);
+  });
+
+  it('waits for the rewrite of the segment the show is already waiting on, instead of skipping it', async () => {
+    const h = setup();
+    h.setSegDelay(150);
+    let waiting = false;
+    h.engine.silence = async () => {
+      await delay(5);
+      // The station ID is done and the first link is still being written
+      if (h.engine.played.length === 1) waiting = true;
+    };
+    const en = captionsAsPlayed(h);
+    await h.c.tuneIn();
+    await waitFor(() => expect(waiting).toBe(true));
+    expect(h.engine.played).toEqual([HI_ID]);
+    h.c.toggleSubtitles();
+    await waitFor(() => expect(h.engine.played).toContain('hi:rj_link:1'));
+    expect(h.engine.played.slice(0, 3)).toEqual([HI_ID, 'hi:rj_link:0', 'hi:rj_link:1']);
+    expect(rjLinks(h).map((r) => r.subtitles)).toEqual([false, true]);
+    expect(h.aborted).toContain('rj_link');
+    expect(en.get('hi:rj_link:0')).toBe('hi:rj_link:0 (en)');
+  });
+
+  it('needs no rewrite to turn them off', async () => {
+    const h = setup();
+    h.c.toggleSubtitles();
+    captionsAsPlayed(h, (text) => {
+      if (text === 'hi:rj_link:0') h.c.toggleSubtitles();
+    });
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.engine.played).toContain('hi:ad_break:0'));
+    expect(h.requests.filter((r) => r.type === 'news').map((r) => r.subtitles)).toEqual([true]);
+    expect(h.aborted).toEqual([]);
+    expect(h.requests.filter((r) => r.type === 'ad_break').every((r) => r.subtitles === false)).toBe(true);
+    expect(h.c.getSnapshot()).toMatchObject({ showSubtitles: false, subtitlesSoon: false });
+  });
+
+  it('rewrites an RJ link holding a studio call: the call is read once, the first link still greets', async () => {
+    const h = setup();
+    h.engine.playMs = 40;
+    h.setSegDelay(10);
+    h.phone.calls = [phoneCall('call-1')];
+    const ids = (r: SegmentRequest) => (r.dedications ?? []).map((d) => d.id);
+    await h.c.tuneIn();
+    await waitFor(() => expect(rjLinks(h)).toHaveLength(1));
+    h.c.toggleSubtitles();
+    await waitFor(() => expect(h.c.getSnapshot().phoneStatus['call-1']).toBe('aired'));
+
+    const [first, rewrite] = rjLinks(h);
+    expect(first).toMatchObject({ subtitles: false, producer: { firstLink: true, greetListener: true } });
+    expect(rewrite).toMatchObject({ subtitles: true, producer: first.producer });
+    expect(ids(first)).toEqual(['call-1']);
+    expect(ids(rewrite)).toEqual(['call-1']);
+    expect(h.aborted).toContain('rj_link');
+    expect(h.phone.aired).toEqual([{ station: 'hi', holder: rewrite.holder, ids: ['call-1'] }]);
+    await waitFor(() => expect(rjLinks(h).length).toBeGreaterThanOrEqual(3));
+    expect(rjLinks(h)[2].producer?.firstLink).toBe(false);
+    expect(ids(rjLinks(h)[2])).toEqual([]);
+  });
+
+  it('tells the call-in to write subtitles once they are on', async () => {
+    const h = setup();
+    h.c.toggleSubtitles();
+    let called = false;
+    h.engine.onPlay = (text) => {
+      if (text === 'hi:rj_link:0' && !called) {
+        called = true;
+        void h.c.startCall();
+      }
+    };
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.c.getSnapshot().status).toBe('call_recording'));
+    await delay(25);
+    await h.c.endCall();
+    expect(h.calls[0].subtitles).toBe(true);
+  });
+
+  it("sends the call's subtitles choice as a form field", async () => {
+    const forms: FormData[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      forms.push(init.body as FormData);
+      return new Response(JSON.stringify({ transcript: '', intent: 'retry', reply: rjLine('hi', 'x') }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    try {
+      const blob = new Blob([new Uint8Array(4)], { type: 'audio/webm' });
+      const listener = { localTime: '10:00', daypart: 'morning' as const };
+      await postCall(blob, { station: 'hi', listener, subtitles: true });
+      await postCall(blob, { station: 'hi', listener });
+      expect(forms.map((f) => f.get('subtitles'))).toEqual(['true', 'false']);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

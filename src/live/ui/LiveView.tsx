@@ -69,7 +69,8 @@ function LiveShell({
   const analyserRef = useRef(getAnalyser);
   const reduced = useReducedMotion();
   const online = useOnline() && !previewOffline;
-  const [showSubtitles, setShowSubtitles] = useState(true);
+  // Off until the listener turns them on; the shared show always carries them, so they appear at once
+  const [showSubtitles, setShowSubtitles] = useState(false);
   // The name you joined with, so "Try again" can rejoin from the same click.
   const [joinedAs, setJoinedAs] = useState('');
 

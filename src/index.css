@@ -1951,6 +1951,12 @@
     text-wrap: pretty;
   }
 
+  /* Subtitles were just turned on; the segment on air was written without them */
+  .caption-en-soon {
+    font-size: 0.875rem;
+    color: var(--tfm-fg-3);
+  }
+
   .fade-in {
     animation: fade-in 360ms ease both;
   }
@@ -4013,5 +4019,9 @@
 
   .radio[data-immersive='true'] .caption-en {
     font-size: clamp(1.05rem, 0.9rem + 0.6vw, 1.45rem);
+  }
+
+  .radio[data-immersive='true'] .caption-en-soon {
+    font-size: clamp(0.9rem, 0.85rem + 0.25vw, 1.05rem);
   }
 }

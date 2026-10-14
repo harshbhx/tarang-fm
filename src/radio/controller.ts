@@ -95,10 +95,19 @@ interface Cursor {
 }
 
 interface PendingSegment {
+  entry: ClockEntry;
   promise: Promise<Segment | null>;
   controller: AbortController;
+  /** Whether the script was asked to carry English subtitles */
+  subtitles: boolean;
+  /** Studio calls this segment holds: taken while it is written, then the ones its script reads */
+  claimed: string[];
+  /** The request as sent, once built (a rewrite keeps its producer settings and story theme) */
+  req?: SegmentRequest;
   /** Set once the request settles */
   segment?: Segment | null;
+  /** Written again in its place (subtitles were turned on before it aired); whoever waits gets that one */
+  rewrite?: PendingSegment;
 }
 
 interface Aired {
@@ -567,6 +576,7 @@ export class RadioController implements RadioActions {
         station: station.id,
         listener: this.listener(),
         nowPlaying: this.state.segment?.title.slice(0, NOW_PLAYING_CHARS) || undefined,
+        subtitles: this.state.showSubtitles,
       };
       const showLog = this.showLog();
       if (showLog.length) meta.showLog = showLog;
@@ -606,7 +616,10 @@ export class RadioController implements RadioActions {
   };
 
   toggleSubtitles = (): void => {
-    this.set({ showSubtitles: !this.state.showSubtitles });
+    const on = !this.state.showSubtitles;
+    this.set({ showSubtitles: on, subtitlesSoon: on });
+    // Scripts only carry subtitles when asked: the ones written without them are written again
+    if (on) this.rewriteForSubtitles();
   };
 
   getMicLevel = (): number => {
@@ -877,6 +890,7 @@ export class RadioController implements RadioActions {
     if (cursor && cursor.segment === segment && cursor.lineIndex === index) cursor.started = true;
     const patch: Partial<RadioState> = { lineIndex: index, error: undefined };
     if (this.state.status === 'tuning') patch.status = 'playing';
+    if (this.state.subtitlesSoon && segment.lines[index].en) patch.subtitlesSoon = false;
     if (pending) patch.ttfaMs = Math.round((pending.timing.firstChunkAt ?? now()) - pending.startedAt);
     this.showCaption(lineCaption(segment.lines[index], station), patch);
     this.ensureTts(segment, index + 1, station.id);
@@ -905,17 +919,59 @@ export class RadioController implements RadioActions {
   // ---- segments ----------------------------------------------------------
 
   private loadSegment(entry: ClockEntry, station: StationId): Promise<Segment | null> {
+    return this.settled(this.requestSegment(entry, station));
+  }
+
+  /** The segment for `entry`: already requested, or requested now. `carry` is the request a rewrite replaces. */
+  private requestSegment(entry: ClockEntry, station: StationId, carry?: SegmentRequest): PendingSegment {
     const key = entryKey(entry);
     const hit = this.segments.get(key);
-    if (hit) return hit.promise;
-    const controller = linkedController(this.stationAbort.signal);
-    const promise = this.fetchSegment(entry, station, controller.signal);
-    const pending: PendingSegment = { promise, controller };
-    void promise.then((segment) => {
+    if (hit) return hit;
+    const ticket: Omit<PendingSegment, 'promise'> = {
+      entry,
+      controller: linkedController(this.stationAbort.signal),
+      subtitles: this.state.showSubtitles,
+      claimed: [],
+    };
+    const pending: PendingSegment = Object.assign(ticket, { promise: this.fetchSegment(ticket, station, carry) });
+    void pending.promise.then((segment) => {
       pending.segment = segment;
     });
     this.segments.set(key, pending);
-    return promise;
+    return pending;
+  }
+
+  /** A segment once written; one that was written again in the meantime hands over to its rewrite. */
+  private async settled(pending: PendingSegment): Promise<Segment | null> {
+    const segment = await pending.promise;
+    return pending.rewrite ? this.settled(pending.rewrite) : segment;
+  }
+
+  /**
+   * Subtitles were turned on: every segment written without them that hasn't started yet is written again
+   * with them, so they start with the next segment. The line on air (and the rest of its segment) plays on.
+   */
+  private rewriteForSubtitles(): void {
+    const at = this.resumeAt ?? this.cursor;
+    if (!at) return;
+    // Paused (or stopped): just drop them, and the show asks for fresh ones when it plays on
+    const rewrite = PHONE_STATUSES.has(this.state.status);
+    const station = this.state.stationId;
+    for (const [key, pending] of [...this.segments]) {
+      const { entry } = pending;
+      // Station IDs are voiced from the station's own copy; a failed request has nothing to rewrite
+      if (pending.subtitles || entry.type === 'station_id' || pending.segment === null) continue;
+      const upcoming = entry.seq > at.entry.seq || (entry.seq === at.entry.seq && !at.segment);
+      if (!upcoming) continue;
+      pending.controller.abort();
+      this.segments.delete(key);
+      // Its studio calls go back in the queue, and the rewrite (an RJ link) takes them again
+      const held = pending.segment
+        ? (pending.segment.dedicated ?? []).filter((id) => this.phoneTaken.get(id) === 'up_next')
+        : pending.claimed.splice(0);
+      this.releaseCalls(held);
+      if (rewrite) pending.rewrite = this.requestSegment(entry, station, pending.req);
+    }
   }
 
   /** Prefetches an upcoming segment; if it fails, warms the one after it instead. */
@@ -940,15 +996,26 @@ export class RadioController implements RadioActions {
     }
   }
 
-  private async fetchSegment(entry: ClockEntry, station: StationId, signal: AbortSignal): Promise<Segment | null> {
+  private async fetchSegment(
+    pending: Omit<PendingSegment, 'promise'>,
+    station: StationId,
+    carry?: SegmentRequest,
+  ): Promise<Segment | null> {
+    const { entry, claimed } = pending;
+    const signal = pending.controller.signal;
     try {
       if (entry.type === 'station_id') {
         this.localSegments += 1;
         return stationIdSegment(getStation(station), this.localSegments);
       }
-      const { req, phoneIds } = await this.segmentRequest(entry, station);
-      // A studio call that never makes it into a script (failed, aborted or template segment) goes back in the queue
-      const release = () => this.releaseCalls(phoneIds);
+      const built = await this.segmentRequest(entry, station, pending.subtitles, signal, carry);
+      if (!built) return null;
+      const { req, phoneIds } = built;
+      pending.req = req;
+      claimed.push(...phoneIds);
+      // A studio call that never makes it into a script (failed, aborted or template segment) goes back in the
+      // queue; a segment dropped for a rewrite has already handed its calls back, so this releases nothing then
+      const release = () => this.releaseCalls(claimed.splice(0));
       for (let attemptNo = 0; ; attemptNo++) {
         if (signal.aborted) {
           release();
@@ -961,8 +1028,10 @@ export class RadioController implements RadioActions {
             return null;
           }
           const read = new Set(segment.fallback ? [] : (segment.dedicated ?? []));
-          this.releaseCalls(phoneIds.filter((id) => !read.has(id)));
-          this.markCalls([...read].filter((id) => phoneIds.includes(id)), 'up_next');
+          const kept = claimed.filter((id) => read.has(id));
+          this.releaseCalls(claimed.filter((id) => !read.has(id)));
+          claimed.splice(0, claimed.length, ...kept);
+          this.markCalls(kept, 'up_next');
           return segment;
         } catch (err) {
           if (signal.aborted || attemptNo >= 1) {
@@ -978,23 +1047,39 @@ export class RadioController implements RadioActions {
     }
   }
 
-  private async segmentRequest(entry: ClockEntry, station: StationId): Promise<{ req: SegmentRequest; phoneIds: string[] }> {
+  /**
+   * The /api/segment request for `entry`, or null when it was dropped while waiting for the context (then it
+   * takes no link number, story theme or studio call). `carry` is the request a subtitle rewrite replaces.
+   */
+  private async segmentRequest(
+    entry: ClockEntry,
+    station: StationId,
+    subtitles: boolean,
+    signal: AbortSignal,
+    carry?: SegmentRequest,
+  ): Promise<{ req: SegmentRequest; phoneIds: string[] } | null> {
     const context = this.context ?? this.fetchContext(station);
     // The first RJ link also waits for the first phone-line poll, so a waiting dedication makes it in
     const phone = entry.type === 'rj_link' ? this.phonePoll?.first : undefined;
     await Promise.race([Promise.all([context, phone]), delay(this.timings.contextWaitMs)]);
+    if (signal.aborted) return null;
     const req: SegmentRequest = {
       station,
       type: entry.type,
       listener: this.listener(),
       upNext: this.following(entry).type,
+      subtitles,
     };
     if (entry.type === 'news') req.headlines = this.headlines;
     if (entry.type === 'rj_link' && this.weather) req.weather = this.weather;
     if (entry.type === 'rj_link') {
-      const producer = producerPlan(this.links, this.lastCatchphrase, this.random);
-      this.links += 1;
-      this.lastCatchphrase = producer.useCatchphrase;
+      // A rewrite is the same link: it keeps its place in the producer's rotation (the first link still greets)
+      let producer = carry?.producer;
+      if (!producer) {
+        producer = producerPlan(this.links, this.lastCatchphrase, this.random);
+        this.links += 1;
+        this.lastCatchphrase = producer.useCatchphrase;
+      }
       req.producer = producer;
       // Only tease the next segment when it is already written, so the tease is true
       const upcoming = this.segments.get(entryKey(this.following(entry)))?.segment;
@@ -1007,6 +1092,7 @@ export class RadioController implements RadioActions {
     if (previous?.mood) req.moodAfterPrevious = previous.mood;
     if (entry.type === 'kahani' && this.storyLog.length) req.recentStories = this.storyLog.slice(-MAX_STORY_LOG);
     if (entry.type === 'kahani' && entry.theme) req.theme = entry.theme;
+    else if (entry.type === 'kahani' && carry?.theme) req.theme = carry.theme;
     else if (entry.type === 'kahani' && this.phoneTheme) {
       req.theme = this.phoneTheme;
       this.phoneTheme = undefined;
@@ -1107,7 +1193,8 @@ export class RadioController implements RadioActions {
     const inserted: ClockEntry = { seq: current.seq + 1, index: current.index, type: 'rj_link', inserted: true };
     if (pending) {
       this.segments.delete(key);
-      this.segments.set(entryKey(nextEntry(inserted)), pending);
+      pending.entry = nextEntry(inserted);
+      this.segments.set(entryKey(pending.entry), pending);
     }
     this.plannedNext = { afterSeq: current.seq, entry: inserted };
     this.prefetchSegment(inserted, station);

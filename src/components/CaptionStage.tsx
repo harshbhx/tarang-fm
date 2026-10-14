@@ -15,6 +15,8 @@ interface CaptionStageProps {
   /** Recent captions, newest last */
   history: Caption[];
   showSubtitles: boolean;
+  /** Subtitles were just turned on: a line without one says they start with the next segment */
+  subtitlesSoon?: boolean;
   /** Station language (BCP-47) */
   lang: string;
   paused?: boolean;
@@ -26,13 +28,14 @@ interface CaptionStageProps {
 
 /**
  * Broadcast captions: the line being spoken, large, in native script with the speaker and
- * their V4 voice ID, an English subtitle, and a short fading history above. Both areas
+ * their V4 voice ID, an English subtitle (when turned on), and a short fading history above. Both areas
  * reserve their height so new lines never shift the layout.
  */
 export default function CaptionStage({
   caption,
   history,
   showSubtitles,
+  subtitlesSoon = false,
   lang,
   paused = false,
   live = false,
@@ -41,7 +44,8 @@ export default function CaptionStage({
   const earlier = (caption ? history.filter((c) => !sameCaption(c, caption)) : history).slice(-3);
   const lineRef = useRef<HTMLDivElement>(null);
   const reduced = useReducedMotion();
-  useKeepInView(lineRef, caption ? `${caption.speaker}:${caption.text}:${showSubtitles}` : '', reduced);
+  const hint = showSubtitles && subtitlesSoon;
+  useKeepInView(lineRef, caption ? `${caption.speaker}:${caption.text}:${showSubtitles}:${hint}` : '', reduced);
 
   return (
     <div>
@@ -72,6 +76,7 @@ export default function CaptionStage({
               caption={caption}
               lang={lang}
               showSubtitles={showSubtitles}
+              subtitlesSoon={hint}
               live={live && !paused}
             />
           ) : (
@@ -87,11 +92,13 @@ function CaptionLine({
   caption,
   lang,
   showSubtitles,
+  subtitlesSoon,
   live,
 }: {
   caption: Caption;
   lang: string;
   showSubtitles: boolean;
+  subtitlesSoon: boolean;
   live: boolean;
 }) {
   const isCaller = caption.role === 'caller';
@@ -108,6 +115,8 @@ function CaptionLine({
         <p lang="en" className="caption-en fade-in">
           {caption.en}
         </p>
+      ) : subtitlesSoon ? (
+        <p className="caption-en caption-en-soon fade-in">Subtitles start with the next segment</p>
       ) : null}
     </article>
   );

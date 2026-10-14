@@ -215,7 +215,7 @@ export default function Preview() {
   const [station, setStation] = useState<LiveId>('hi');
   const [index, setIndex] = useState(3);
   const [autoplay, setAutoplay] = useState(true);
-  const [showSubtitles, setShowSubtitles] = useState(true);
+  const [showSubtitles, setShowSubtitles] = useState(false);
   const keyRef = useRef(key);
   const stationRef = useRef(station);
   const timers = useRef<number[]>([]);
