@@ -2,6 +2,7 @@ import { STATIONS } from '../../shared/stations';
 import type { StationId } from '../../shared/types';
 import BlurText from '../components/bits/BlurText';
 import Magnet from '../components/bits/Magnet';
+import StarBorder from '../components/bits/StarBorder';
 import { TuneButton, type Vars } from './ui';
 
 export default function FinalCta({ onTuneIn }: { onTuneIn: (id: StationId) => void }) {
@@ -11,7 +12,9 @@ export default function FinalCta({ onTuneIn }: { onTuneIn: (id: StationId) => vo
         <BlurText as="h2" id="final-title" className="lp-h2 lp-final-title" text="Dil se suniye." delay={120} />
         <p className="lp-sub">Listen with your heart. Pick a station and the show starts right away.</p>
         <Magnet>
-          <TuneButton onClick={() => onTuneIn('hi')} />
+          <StarBorder radius={14} duration={5}>
+            <TuneButton onClick={() => onTuneIn('hi')} />
+          </StarBorder>
         </Magnet>
         <div className="lp-final-stations" role="group" aria-label="Or tune in to a station">
           {STATIONS.map((s) => (

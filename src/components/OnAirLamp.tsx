@@ -10,7 +10,7 @@ export default function OnAirLamp({
 }) {
   return (
     <span className="lamp" data-on={on} data-warming={warming && !on} data-size={size}>
-      <span className="lamp-glow" aria-hidden="true" />
+      <span className="lamp-glow" data-pulse="level" aria-hidden="true" />
       <span className="lamp-text" aria-hidden="true">
         On air
       </span>

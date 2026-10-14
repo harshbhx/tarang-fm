@@ -1,5 +1,5 @@
 import { getStation, ROLES, STATIONS } from '../../shared/stations';
-import type { Role, Station, StationId } from '../../shared/types';
+import type { PhoneCall, Role, Source, Station, StationId } from '../../shared/types';
 import { STUDIO_NUMBER_DISPLAY } from '../../shared/constants';
 
 export interface SampleLine {
@@ -265,7 +265,10 @@ export interface StoryBeat {
   /** What the caller said (call-in beat) */
   caller?: SampleLine;
   /** The studio-line card the RJ is reading from (phone beat) */
-  studio?: { name: string; city: string; number: string; type: string };
+  studio?: { name: string; city: string; number: string; type: string; live?: boolean };
+  /** Live headlines shown on the stage (news beat) */
+  headlines?: Source[];
+  city?: string;
 }
 
 export const STORY_LAMPS: { key: StoryLamp; label: string }[] = [
@@ -375,3 +378,71 @@ export const STORY_BEATS: StoryBeat[] = [
 export const MANIFESTO =
   'Radio was always one voice, talking to everyone. Tonight it knows your name, speaks your language, and answers when you call.';
 export const MANIFESTO_ACCENT = ['name', 'language', 'answers'];
+
+/** The stories a listener can pick on the Kahani beat: each opens in a different voice from the cast. */
+export const KAHANI_THEMES: { key: string; label: string; labelEn: string; role: Role; text: string; en: string }[] = [
+  {
+    key: 'haveli',
+    label: 'भूतिया हवेली',
+    labelEn: 'Haunted haveli',
+    role: 'narrator',
+    text: 'उस रात पूरी हवेली सो चुकी थी… सिवाय एक जलती हुई लालटेन के।',
+    en: 'That night the whole haveli was asleep… except for one burning lantern.',
+  },
+  {
+    key: 'monsoon',
+    label: 'मानसून की मोहब्बत',
+    labelEn: 'Monsoon romance',
+    role: 'char_b',
+    text: 'बारिश की पहली बूँद गिरी, और छत पर खड़ी मीरा ने सोचा… आज वो ज़रूर आएगा।',
+    en: 'The first raindrop fell, and Meera, standing on the terrace, thought… today he will surely come.',
+  },
+  {
+    key: 'elephant',
+    label: 'उड़ने वाला हाथी',
+    labelEn: 'A flying elephant',
+    role: 'char_kid',
+    text: 'दीदी, दीदी! मैंने छत पर एक उड़ने वाला हाथी देखा! सच्ची, उसके कान पतंग जैसे थे!',
+    en: 'Didi, didi! I saw a flying elephant on the roof! Honestly, its ears were like kites!',
+  },
+];
+
+export function kahaniLine(theme: (typeof KAHANI_THEMES)[number]): StoryLine {
+  return castLine(theme.role, theme.text, theme.en);
+}
+
+const squeeze = (text: string, max: number) => {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max - 1).trim()}…` : clean;
+};
+
+/** The news beat read with a real headline from right now (the static line when there is none). */
+export function newsLine(city: string | undefined, headline: Source | undefined): StoryLine {
+  if (!headline) return STORY_BEATS.find((b) => b.key === 'news')!.lines[0];
+  const title = squeeze(headline.title, 110);
+  const where = city?.trim();
+  return castLine(
+    'news',
+    `अब समय है ताज़ा खबरों का। ${where ? `${where} और देश की` : 'देश की'} बड़ी सुर्खियाँ, सबसे पहले तरंग पर। आज की एक बड़ी खबर: ${title}`,
+    `Time for the latest news. The big headlines from ${where ? `${where} and ` : ''}the country, first on Tarang. One big story today: ${title}`,
+  );
+}
+
+/** The studio beat read from a real call on the line (number already masked by the Worker). */
+export function studioLine(call: Pick<PhoneCall, 'name' | 'city' | 'message'>): StoryLine {
+  const name = call.name?.trim();
+  const city = call.city?.trim();
+  const message = squeeze(call.message, 140);
+  return castLine(
+    'rj',
+    `और अभी-अभी studio line पर ${city ? `${city} से ` : ''}${name || 'एक श्रोता'} का फ़ोन आया। संदेश है: ${message}`,
+    `And just now ${name || 'a listener'} called the studio line${city ? ` from ${city}` : ''}. The message: ${message}`,
+  );
+}
+
+export const CALL_TYPE_LABEL: Record<string, string> = {
+  dedication: 'Dedication',
+  story_request: 'Story request',
+  news_request: 'News request',
+  chat: 'Just a chat',
+};

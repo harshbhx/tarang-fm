@@ -82,6 +82,7 @@ export default function RadioDevice({
 
   return (
     <section aria-label="Radio" className="radio-body" data-compact={compact} data-lit={lit}>
+      <span className="radio-body-glow" data-pulse="level" aria-hidden="true" />
       <span className="screw screw-tl" aria-hidden="true" />
       <span className="screw screw-tr" aria-hidden="true" />
       <span className="screw screw-bl" aria-hidden="true" />

@@ -23,8 +23,10 @@ export type AudioFrameListener = (data: Uint8Array | null, now: number) => void;
 /**
  * The single analyser loop. While `active`, reads the master analyser each frame
  * (fftSize 256, byte frequency data), writes the smoothed voice-band level to `--level`
- * and two VU-ballistic channels (`--vu-l` low band, `--vu-r` presence band) on `target`
- * (never React state), and hands the frame to subscribers such as the visualizer.
+ * and two VU-ballistic channels (`--vu-l` low band, `--vu-r` presence band) onto the elements
+ * under `target` marked `data-pulse="level" | "vu-l" | "vu-r"` (never React state, and never
+ * the root: an inherited custom property changing on the root restyled the whole radio every
+ * frame), and hands the frame to subscribers such as the visualizer.
  * Stops while the tab is hidden; ~10 fps and no level pulse under reduced motion.
  */
 export function useAudioPulse(
@@ -50,10 +52,25 @@ export function useAudioPulse(
   useEffect(() => {
     const el = target.current;
     if (!el) return;
+    // The few elements that pulse; re-found now and then since lamps and meters mount and unmount
+    let sinks: Record<'level' | 'vu-l' | 'vu-r', HTMLElement[]> = { level: [], 'vu-l': [], 'vu-r': [] };
+    let sinksAge = Infinity;
+    const findSinks = () => {
+      sinks = { level: [], 'vu-l': [], 'vu-r': [] };
+      el.querySelectorAll<HTMLElement>('[data-pulse]').forEach((node) => {
+        const kind = node.dataset.pulse as keyof typeof sinks;
+        if (sinks[kind]) sinks[kind].push(node);
+      });
+      sinksAge = 0;
+    };
+    const write = (kind: keyof typeof sinks, value: string) => {
+      for (const node of sinks[kind]) node.style.setProperty(`--${kind}`, value);
+    };
     const rest = () => {
-      el.style.setProperty('--level', '0');
-      el.style.setProperty('--vu-l', '0');
-      el.style.setProperty('--vu-r', '0');
+      findSinks();
+      write('level', '0');
+      write('vu-l', '0');
+      write('vu-r', '0');
     };
     if (!active) {
       rest();
@@ -86,6 +103,7 @@ export function useAudioPulse(
       raf = requestAnimationFrame(tick);
       if (minGap && now - lastTick < minGap) return;
       lastTick = now;
+      if (++sinksAge > 30) findSinks();
       const analyser = getAnalyserRef.current();
       let frame: Uint8Array | null = null;
       if (analyser) {
@@ -108,17 +126,17 @@ export function useAudioPulse(
       const rounded = reduced ? 0 : Math.round(level * 100) / 100;
       if (rounded !== shown) {
         shown = rounded;
-        el.style.setProperty('--level', String(rounded));
+        write('level', String(rounded));
       }
       const l = reduced ? 0 : Math.round(vuL * 100) / 100;
       const r = reduced ? 0 : Math.round(vuR * 100) / 100;
       if (l !== shownL) {
         shownL = l;
-        el.style.setProperty('--vu-l', String(l));
+        write('vu-l', String(l));
       }
       if (r !== shownR) {
         shownR = r;
-        el.style.setProperty('--vu-r', String(r));
+        write('vu-r', String(r));
       }
       listeners.current.forEach((listener) => listener(frame, now));
     };

@@ -69,7 +69,7 @@ export default function VuMeter({ channel, lit, className = '' }: VuMeterProps) 
           VU
         </text>
       </svg>
-      <span className="vu-needle" />
+      <span className="vu-needle" data-pulse={`vu-${channel}`} />
       <span className="vu-pivot" />
       <span className="vu-glare" />
     </div>

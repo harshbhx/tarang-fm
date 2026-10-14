@@ -193,7 +193,7 @@ export default function TunerDial({
             ))}
         <span className="dial-static" />
         <span className="needle-track">
-          <span className="needle-spill" />
+          <span className="needle-spill" data-pulse="level" />
           <span className="needle" />
         </span>
         <span className="dial-glare" />

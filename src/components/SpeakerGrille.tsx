@@ -2,7 +2,7 @@
 export default function SpeakerGrille({ className = '' }: { className?: string }) {
   return (
     <div className={`grille ${className}`} aria-hidden="true">
-      <span className="grille-cone" />
+      <span className="grille-cone" data-pulse="level" />
       <span className="grille-holes" />
       <span className="grille-badge">Tarang</span>
     </div>

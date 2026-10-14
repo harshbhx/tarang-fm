@@ -2087,28 +2087,33 @@
   }
 }
 
-/* The dial band: station names in their own scripts on a curved scale */
-.lp-dial-band {
+/* The dial band: station names in their own scripts, scrolling past like a printed scale */
+.lp-band {
   position: relative;
-  margin: 8px 0 -8px;
+  margin: 10px 0 -6px;
+  padding: 10px 0 14px;
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+  transform: rotate(-1.6deg);
 }
 
-.lp-dial-band-text {
+.lp-band-track {
+  display: flex;
+  width: max-content;
+  will-change: transform;
+}
+
+.lp-band-unit {
+  flex: none;
+  padding-right: 0.6em;
   font-family: 'Anek Latin', 'Anek Devanagari', 'Anek Tamil', 'Anek Bangla', 'Anek Gujarati', sans-serif;
-  font-size: 46px;
+  font-size: clamp(2rem, 1.4rem + 2.6vw, 3.2rem);
   font-weight: 560;
+  line-height: 1.25;
   letter-spacing: 0.01em;
-  fill: var(--lp-amber, #f2b25c);
-  fill-opacity: 0.72;
-}
-
-@media (max-width: 640px) {
-  .lp-dial-band-text {
-    font-size: 72px;
-  }
+  white-space: nowrap;
+  color: color-mix(in oklab, var(--lp-amber) 74%, transparent);
 }
 
 /* ClickSpark wraps each Tune in button without changing its layout */
@@ -2200,6 +2205,11 @@
     overflow: hidden;
     font-size: 0.6rem;
     letter-spacing: 0.05em;
+  }
+
+  /* The kicker already carries the time on a phone */
+  .lp-story-stage-col .lp-stage-clock {
+    display: none;
   }
 
   .lp-story-stage-col .lp-stage-body {
@@ -2495,6 +2505,170 @@
 .lp-stage-meter[data-active='true'] span {
   opacity: 1;
   box-shadow: 0 0 8px rgb(242 178 92 / 0.5);
+}
+
+/* What the reader can change on the stage */
+
+.lp-stage-clock {
+  flex: none;
+  margin-left: 2px;
+  margin-right: auto;
+  white-space: nowrap;
+  font-family: var(--lp-font-mono);
+  font-size: var(--lp-fs-xs);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--lp-amber);
+}
+
+.lp-stage-pill {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--lp-lamp);
+  color: #fff;
+  font-family: var(--lp-font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+.lp-stage-field {
+  display: grid;
+  gap: 6px;
+  font-size: var(--lp-fs-sm);
+  color: var(--lp-fg-2);
+}
+
+.lp-stage-field input {
+  width: min(100%, 26ch);
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--lp-line-2);
+  border-radius: 10px;
+  background: rgb(0 0 0 / 0.3);
+  color: var(--lp-fg);
+  font: inherit;
+  font-size: var(--lp-fs-md);
+}
+
+.lp-stage-field input::placeholder {
+  color: var(--lp-fg-3);
+}
+
+.lp-stage-field input:focus-visible {
+  border-color: var(--lp-amber);
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(242 178 92 / 0.18);
+}
+
+.lp-stage-news {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--lp-line);
+  background: rgb(255 240 220 / 0.03);
+}
+
+.lp-stage-news-head {
+  font-family: var(--lp-font-mono);
+  font-size: var(--lp-fs-xs);
+  color: var(--lp-fg-3);
+}
+
+.lp-stage-news ul {
+  display: grid;
+  gap: 6px;
+}
+
+.lp-stage-news li {
+  display: grid;
+  gap: 1px;
+  font-size: var(--lp-fs-sm);
+  line-height: 1.4;
+}
+
+.lp-stage-news-source {
+  font-family: var(--lp-font-mono);
+  font-size: 0.68rem;
+  color: var(--lp-amber);
+}
+
+.lp-stage-news-title {
+  color: var(--lp-fg);
+  text-wrap: pretty;
+}
+
+.lp-stage-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lp-stage-chip {
+  display: inline-grid;
+  gap: 1px;
+  padding: 7px 12px;
+  border: 1px solid var(--lp-line-2);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #1b1a19, #131211);
+  color: var(--lp-fg);
+  font-size: var(--lp-fs-md);
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.lp-stage-chip span {
+  font-family: var(--lp-font-ui);
+  font-size: var(--lp-fs-xs);
+  color: var(--lp-fg-3);
+}
+
+.lp-stage-chip[data-on='true'] {
+  border-color: var(--lp-amber);
+  box-shadow: 0 0 0 1px rgb(242 178 92 / 0.25), 0 0 18px rgb(242 178 92 / 0.2);
+}
+
+.lp-stage-chip[data-on='true'] span {
+  color: var(--lp-amber-hi);
+}
+
+@media (hover: hover) {
+  .lp-stage-chip:hover {
+    border-color: color-mix(in oklab, var(--lp-amber) 60%, var(--lp-line-2));
+  }
+}
+
+@media (max-width: 999px) {
+  .lp-story-stage-col .lp-stage-news li:nth-child(n + 3) {
+    display: none;
+  }
+
+  .lp-story-stage-col .lp-stage-news-title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .lp-story-stage-col .lp-stage-chip {
+    padding: 5px 10px;
+    font-size: var(--lp-fs-sm);
+  }
+
+  .lp-story-stage-col .lp-stage-chip span {
+    display: none;
+  }
+
+  .lp-story-stage-col .lp-stage-field input {
+    min-height: 36px;
+  }
 }
 
 /* The beats, with a beam that fills as you read */
@@ -2857,17 +3031,9 @@
   height: 100%;
   border-radius: 2px;
   background: var(--lp-amber-hi);
-  animation: lp-eq 720ms ease-in-out infinite alternate;
-  animation-delay: calc(var(--i) * -140ms);
-}
-
-@keyframes lp-eq {
-  from {
-    transform: scaleY(0.25);
-  }
-  to {
-    transform: scaleY(1);
-  }
+  transform: scaleY(0.12);
+  transform-origin: center;
+  transition: transform 60ms linear;
 }
 
 .lp-hold-time {
@@ -2877,11 +3043,32 @@
   color: var(--lp-amber-hi);
 }
 
+.lp-demo-hints {
+  display: grid;
+  gap: 4px;
+}
+
 .lp-demo-hint {
   max-width: 52ch;
   font-size: var(--lp-fs-sm);
   color: var(--lp-fg-2);
   text-wrap: pretty;
+}
+
+.lp-demo-note {
+  font-size: var(--lp-fs-xs);
+  color: var(--lp-fg-3);
+}
+
+.lp-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--lp-amber);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
 }
 
 .lp-demo-hint[data-kind='error'] {
@@ -2976,19 +3163,10 @@
   border: 0;
 }
 
-.prox-letter {
-  transition: font-variation-settings 60ms linear;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .lp-hold[data-holding='true'] .lp-hold-fill {
     animation: none;
     transform: translateY(0);
-  }
-
-  .lp-hold-eq span {
-    animation: none;
-    transform: scaleY(0.7);
   }
 
   .lp-caret {
@@ -2998,4 +3176,253 @@
   .lp-beat {
     transition: none;
   }
+}
+
+/* ---------- Five stations, one dial: the scroll stack ---------- */
+
+.lp-stack {
+  --stack-top: clamp(72px, 12vh, 120px);
+  --stack-step: 14px;
+  display: grid;
+}
+
+.lp-scard-slot {
+  position: sticky;
+  top: calc(var(--stack-top) + var(--i) * var(--stack-step));
+  height: 72vh;
+  min-height: 460px;
+  padding-bottom: 6vh;
+}
+
+.lp-scard-slot:last-child {
+  height: auto;
+  min-height: 0;
+  padding-bottom: 0;
+}
+
+.lp-scard {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  gap: 14px;
+  padding: 22px 22px 20px;
+  border: 1px solid color-mix(in oklab, var(--st) 28%, var(--lp-line));
+  border-radius: 24px;
+  background:
+    radial-gradient(90% 60% at 100% 0%, color-mix(in oklab, var(--st) 16%, transparent), transparent 70%),
+    linear-gradient(180deg, #181716, #0e0d0c);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 40px 80px -30px rgb(0 0 0 / 0.9);
+  transform-origin: 50% 0%;
+  will-change: transform;
+}
+
+@media (min-width: 640px) {
+  .lp-scard {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    grid-template-areas:
+      'head head'
+      'name facts'
+      'tag facts'
+      'scale scale'
+      'actions actions';
+    column-gap: 32px;
+    padding: 28px 30px 26px;
+  }
+
+  .lp-scard-head {
+    grid-area: head;
+  }
+
+  .lp-scard-name {
+    grid-area: name;
+  }
+
+  .lp-scard-tag {
+    grid-area: tag;
+  }
+
+  .lp-scard-facts {
+    grid-area: facts;
+    align-self: start;
+  }
+
+  .lp-scard-scale {
+    grid-area: scale;
+  }
+
+  .lp-scard-actions {
+    grid-area: actions;
+  }
+}
+
+.lp-scard-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lp-scard-freq {
+  font-family: var(--lp-font-mono);
+  font-size: clamp(1.6rem, 1.2rem + 1.6vw, 2.4rem);
+  font-weight: 500;
+  color: var(--lp-glass-hi);
+  letter-spacing: -0.02em;
+}
+
+.lp-scard-freq small {
+  margin-left: 6px;
+  font-size: 0.75rem;
+  color: var(--lp-fg-3);
+  letter-spacing: 0.04em;
+}
+
+.lp-scard-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--lp-fs-sm);
+  color: var(--lp-fg-2);
+}
+
+.lp-scard-lamp {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st);
+  box-shadow: 0 0 10px var(--st);
+}
+
+.lp-scard-name {
+  font-family: var(--lp-font-display);
+  font-size: clamp(2.6rem, 1.6rem + 4vw, 5rem);
+  font-weight: 640;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--lp-fg);
+}
+
+.lp-scard-tag {
+  display: grid;
+  gap: 2px;
+  font-size: var(--lp-fs-lg);
+  color: var(--lp-glass);
+}
+
+.lp-scard-tag-en {
+  font-size: var(--lp-fs-sm);
+  color: var(--lp-fg-3);
+}
+
+.lp-scard-scale {
+  position: relative;
+  height: 34px;
+  margin-top: 4px;
+  border-top: 1px solid var(--lp-line-2);
+}
+
+.lp-scard-tick {
+  position: absolute;
+  top: 6px;
+  transform: translateX(-50%);
+  font-family: var(--lp-font-mono);
+  font-size: 0.66rem;
+  color: var(--lp-fg-3);
+}
+
+.lp-scard-tick::before {
+  content: '';
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  width: 1px;
+  height: 5px;
+  background: var(--lp-line-2);
+}
+
+.lp-scard-needle {
+  position: absolute;
+  top: -1px;
+  width: 2px;
+  height: 100%;
+  margin-left: -1px;
+  background: var(--st);
+  box-shadow: 0 0 10px 1px var(--st);
+}
+
+.lp-scard-facts {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--lp-line);
+  background: rgb(0 0 0 / 0.22);
+}
+
+.lp-scard-facts div {
+  display: grid;
+  gap: 2px;
+}
+
+.lp-scard-facts dt {
+  font-family: var(--lp-font-mono);
+  font-size: var(--lp-fs-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lp-fg-3);
+}
+
+.lp-scard-facts dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--lp-fs-md);
+  font-weight: 600;
+}
+
+.lp-scard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.lp-scard-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  background: #070605;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (max-width: 639px) {
+  .lp-stack {
+    --stack-top: 56px;
+    --stack-step: 10px;
+  }
+
+  .lp-scard-slot {
+    height: 78vh;
+    min-height: 520px;
+  }
+
+  .lp-scard {
+    padding: 18px 16px 16px;
+    gap: 12px;
+  }
+
+  .lp-scard-actions .lp-spark,
+  .lp-scard-actions .lp-cta {
+    width: 100%;
+  }
+}
+
+/* Star border on the last Tune in: the sparks ride outside the button, the button itself is untouched */
+.lp-final-inner .star-border {
+  border-radius: 14px;
 }

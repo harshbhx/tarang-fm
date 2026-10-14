@@ -186,7 +186,8 @@ void main() {
   outColor = vec4(color * pow(alpha, uCurve), alpha) * mask;
 }`;
 
-const MAX_RENDER_DIM = 1920;
+/* Soft waves don't need full resolution: a 1280px-wide buffer at ≤1.25× looks the same and costs a quarter of the fill. */
+const MAX_RENDER_DIM = 1280;
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -398,7 +399,7 @@ const Threads = ({
     const resize = () => {
       const width = Math.max(1, container.clientWidth);
       const height = Math.max(1, container.clientHeight);
-      const baseDpr = Math.min(window.devicePixelRatio || 1, 2);
+      const baseDpr = Math.min(window.devicePixelRatio || 1, 1.25);
       const longest = Math.max(width, height) * baseDpr;
       const dpr = longest > MAX_RENDER_DIM ? (baseDpr * MAX_RENDER_DIM) / longest : baseDpr;
       canvas.width = Math.max(1, Math.round(width * dpr));
@@ -479,6 +480,11 @@ const Threads = ({
     const frame = (now: number) => {
       raf = 0;
       if (!alive || !visible || document.hidden) return;
+      // Slow waves read the same at 30 fps, for half the GPU work
+      if (last && now - last < 30) {
+        raf = requestAnimationFrame(frame);
+        return;
+      }
       const s = settingsRef.current;
       const dt = last ? Math.min(0.05, (now - last) / 1000) : 1 / 60;
       last = now;

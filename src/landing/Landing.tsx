@@ -3,17 +3,18 @@ import { lazy, Suspense } from 'react';
 import type { AudioEngine } from '../audio';
 import type { StationId } from '../../shared/types';
 import './fonts';
-import CurvedLoop from '../components/bits/CurvedLoop';
 import ScrollProgress from '../components/bits/ScrollProgress';
 import TextReveal from '../components/bits/TextReveal';
 import { STATIONS } from '../../shared/stations';
 import BuiltOnSarvam from './BuiltOnSarvam';
+import DialBand from './DialBand';
 import CallIn from './CallIn';
 import { GITHUB_URL, MANIFESTO, MANIFESTO_ACCENT } from './data';
 import FinalCta from './FinalCta';
 import Hero from './Hero';
 import { GitHubIcon, WaveMark } from './icons';
 import OnAirStory from './OnAirStory';
+import StationStack from './StationStack';
 import { useVoicePlayer } from './useVoicePlayer';
 import VoiceTuner from './VoiceTuner';
 import './landing.css';
@@ -66,7 +67,7 @@ export default function Landing({ onTuneIn, engine }: LandingProps) {
                   <Threads
                     color="#f2b25c"
                     accentColor="#ff6b2c"
-                    lineCount={46}
+                    lineCount={30}
                     amplitude={1.1}
                     distance={0.32}
                     thickness={0.5}
@@ -81,17 +82,9 @@ export default function Landing({ onTuneIn, engine }: LandingProps) {
               </div>
               <Hero onTuneIn={tune} player={player} />
             </div>
-            <div className="lp-dial-band">
-              <CurvedLoop
-                marqueeText={STATION_BAND}
-                label={`Five stations: ${STATIONS.map((s) => `${s.languageName} ${s.frequency}`).join(', ')}`}
-                className="lp-dial-band-text"
-                speed={0.7}
-                curveAmount={120}
-                scrollBoost={0.12}
-              />
-            </div>
+            <DialBand text={STATION_BAND} label={`Five stations: ${STATIONS.map((s) => `${s.languageName} ${s.frequency}`).join(', ')}`} speed={0.6} scrollBoost={0.12} />
             <OnAirStory player={player} />
+            <StationStack player={player} onTuneIn={tune} />
             <VoiceTuner player={player} />
             <CallIn player={player} />
             <BuiltOnSarvam />

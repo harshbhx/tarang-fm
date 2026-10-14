@@ -74,14 +74,13 @@ test('landing page signature pieces: radio waves, the dial band and readable hea
   expect(errors).toEqual([]);
 });
 
-/** Scrolls so a story beat sits on the reading line (mid-viewport, or mid of what's below a stage pinned on top). */
+/** Scrolls so a story beat sits on the reading line (mid-viewport, or 72% down when the stage is pinned on top). */
 async function readBeat(page: Page, index: number) {
   await page.locator('.lp-beat').nth(index).scrollIntoViewIfNeeded();
   await page.evaluate((i) => {
     const beat = document.querySelectorAll('.lp-beat')[i].getBoundingClientRect();
     const stage = document.querySelector('.lp-stage')!.getBoundingClientRect();
-    const pinned = stage.width >= window.innerWidth * 0.85 ? Math.max(0, stage.bottom) : 0;
-    const line = pinned + (window.innerHeight - pinned) * 0.5;
+    const line = window.innerHeight * (stage.width >= window.innerWidth * 0.85 ? 0.72 : 0.5);
     window.scrollBy({ top: beat.top + beat.height / 2 - line, behavior: 'instant' });
   }, index);
 }
@@ -98,11 +97,37 @@ test('the evening story: scrolling the beats changes what the on-air stage shows
   await expect(stage.locator('.lp-stage-kicker')).toContainText('Kahani Corner');
   await expect(stage.locator('.lp-stage-lamps li[data-on="true"]')).toHaveText('Kahani');
   await expect(stage.getByText('shubh_hi_stories_dramatic')).toBeVisible();
-  // The studio-line beat shows the caller's card, number masked
+  // Picking another story changes the voice that opens it
+  await expect(beats.nth(4)).toHaveAttribute('data-active', 'true');
+  const monsoon = stage.getByRole('button', { name: /Monsoon romance/ });
+  await monsoon.click();
+  await expect(monsoon).toHaveAttribute('aria-pressed', 'true');
+  await expect(stage.getByText('sanchita_hi_romantic')).toBeVisible();
+  // Typing a name on the RJ beat puts it in the greeting (and keeps it for the radio)
+  await readBeat(page, 1);
+  await stage.getByPlaceholder('Your first name').fill('Harsh');
+  await expect(stage.locator('.lp-stage-line .lp-native')).toContainText('नमस्ते Harsh!');
+  expect(await page.evaluate(() => localStorage.getItem('tarang.listenerName'))).toBe('Harsh');
+  // The studio-line beat shows a caller's card, number masked
   await readBeat(page, 6);
   await expect(stage.locator('.lp-stage-kicker')).toContainText('Studio line');
-  await expect(stage.getByText('Priya · Vadodara')).toBeVisible();
-  await expect(stage.getByText(/\+91 ••••• 4148/)).toBeVisible();
+  await expect(stage.locator('.lp-stage-studio')).toBeVisible();
+  await expect(stage.getByText(/\+91 ••••• \d{4}/)).toBeVisible();
+  await noHorizontalScroll(page);
+  expect(errors).toEqual([]);
+});
+
+test('five stations stack as you scroll, each with its own voices', async ({ page }) => {
+  const errors = trackErrors(page);
+  await page.goto('/');
+  await expect(page.getByRole('heading', { level: 2, name: 'Five stations, one dial' })).toBeAttached();
+  const cards = page.locator('.lp-scard');
+  await expect(cards).toHaveCount(5);
+  await expect(cards.nth(2).getByRole('heading', { level: 3 })).toHaveText('தரங் தமிழ்');
+  await expect(cards.nth(2).getByRole('button', { name: /Tune in to Tamil/ })).toBeAttached();
+  await expect(cards.nth(2).getByRole('button', { name: /Hear the Tamil station ID/ })).toBeAttached();
+  // The sign-off button wears its star
+  await expect(page.locator('.lp-final .star-border-star')).toBeAttached();
   await noHorizontalScroll(page);
   expect(errors).toEqual([]);
 });
