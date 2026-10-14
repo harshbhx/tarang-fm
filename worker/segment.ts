@@ -7,6 +7,7 @@ import { randomFiller } from './fallbacks';
 import { MAX_LINES, NEWS_HEADLINES, rjOnAir, SEGMENT_PLAN, SEGMENT_ROLES, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
 import type { Sarvam } from './sarvam';
 import { gapAfter, isDelivery, timePhrase, voiceFor } from './show';
+import { cleanSubtitle } from './subtitle';
 import { cleanText, processLines, type RawLine } from './text';
 import type { Timings } from './timing';
 import { copiesExample, dropInventedNumbers, validateScript } from './validate';
@@ -129,7 +130,7 @@ async function convertAll(
   return out;
 }
 
-/** Fills each line's `en` subtitle via Sarvam Translate, in parallel and best-effort. */
+/** Fills each line's `en` subtitle via Sarvam Translate, in parallel and best-effort. Profane translations are dropped. */
 export async function annotate(
   sarvam: Sarvam,
   lines: Line[],
@@ -143,7 +144,8 @@ export async function annotate(
     convertAll(texts, `en:${language}`, (t) => sarvam.translate(t, language), opts.cache ?? false),
   );
   lines.forEach((line, i) => {
-    if (en[i]) line.en = en[i];
+    const subtitle = cleanSubtitle(en[i]);
+    if (subtitle) line.en = subtitle;
   });
 }
 

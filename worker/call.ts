@@ -9,6 +9,7 @@ import type { Sarvam } from './sarvam';
 import { annotate, fillName, latinBrand, nativeListenerName, toLine } from './segment';
 import { careReply, careReplyEn, soundsLikeCrisis } from './care';
 import { isDelivery } from './show';
+import { cleanSubtitle } from './subtitle';
 import { cleanText, splitLine } from './text';
 import type { Timings } from './timing';
 
@@ -122,7 +123,7 @@ export async function handleCall(
   const [transcriptEn] = await Promise.all([
     source === 'en-IN'
       ? Promise.resolve(undefined)
-      : timings.measure('translate_caller', () => sarvam.translate(latinBrand(transcript), source).catch(() => undefined)),
+      : timings.measure('translate_caller', () => sarvam.translate(latinBrand(transcript), source).then(cleanSubtitle, () => undefined)),
     annotate(sarvam, [reply], station.language, timings),
   ]);
 
