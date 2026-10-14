@@ -17,7 +17,7 @@ const SEGMENT_BUDGET_MS = 19_000;
 const MIN_ATTEMPT_MS = 4000;
 const CONVERT_CONCURRENCY = 6;
 
-const MIN_LINES: Record<LlmSegmentType, number> = { rj_link: 2, news: 3, ad_break: 3, kahani: 6 };
+const MIN_LINES: Record<LlmSegmentType, number> = { rj_link: 2, news: 3, ad_break: 3, kahani: 8 };
 
 /** Accepts slightly oversized model output and leaves the trimming to post-processing. */
 const LenientSegmentSchema = z.preprocess((value) => {

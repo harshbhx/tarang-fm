@@ -4,6 +4,7 @@ import type { Dedication, SegmentRequest } from '../shared/schemas';
 import { showAt } from '../shared/stations';
 import type { Daypart, ListenerContext, Role, SegmentType, Source, Station, TtsLanguage, Voice } from '../shared/types';
 import type { ChatMessage } from './sarvam';
+import { adBrief, rjDevice, STORY_CLICHES, storyBrief } from './story';
 import {
   conditionFor,
   defaultProducer,
@@ -37,8 +38,8 @@ export interface LlmPlan {
 export const SEGMENT_PLAN: Record<LlmSegmentType, LlmPlan> = {
   rj_link: { temperature: 0.7, maxTokens: 1400, reasoningEffort: null, timeoutMs: 10_000 },
   news: { temperature: 0.3, maxTokens: 1800, reasoningEffort: null, timeoutMs: 10_000 },
-  ad_break: { temperature: 0.8, maxTokens: 1600, reasoningEffort: null, timeoutMs: 10_000 },
-  kahani: { temperature: 0.7, maxTokens: 2400, reasoningEffort: null, timeoutMs: 13_000 },
+  ad_break: { temperature: 0.85, maxTokens: 1600, reasoningEffort: null, timeoutMs: 10_000 },
+  kahani: { temperature: 0.85, maxTokens: 3000, reasoningEffort: null, timeoutMs: 15_000 },
 };
 
 export const CALL_PLAN: LlmPlan = { temperature: 0.7, maxTokens: 600, reasoningEffort: null, timeoutMs: 8000 };
@@ -47,7 +48,7 @@ export const CALL_PLAN: LlmPlan = { temperature: 0.7, maxTokens: 600, reasoningE
 export const NEWS_HEADLINES = 4;
 
 /** Most lines the model may write per type (lines can still be split later). */
-export const MAX_LINES: Record<LlmSegmentType, number> = { rj_link: 5, news: NEWS_HEADLINES * 2 + 2, ad_break: 7, kahani: 12 };
+export const MAX_LINES: Record<LlmSegmentType, number> = { rj_link: 5, news: NEWS_HEADLINES * 2 + 2, ad_break: 7, kahani: 14 };
 
 /**
  * The pack's "plan" object, flattened: sarvam-105b loops on whitespace until max_tokens when the response
@@ -57,8 +58,8 @@ export const MAX_LINES: Record<LlmSegmentType, number> = { rj_link: 5, news: NEW
 const PLAN_FIELDS: Record<LlmSegmentType, string[]> = {
   rj_link: ['plan_react', 'plan_one_thing', 'plan_target', 'plan_tease_hook'],
   news: [],
-  ad_break: ['plan_product', 'plan_brand_pun', 'plan_problem', 'plan_absurd_claim', 'plan_tagline', 'plan_tc_joke'],
-  kahani: ['plan_title', 'plan_cast', 'plan_clue', 'plan_twist', 'plan_sounds_spoken'],
+  ad_break: ['plan_product', 'plan_brand_pun', 'plan_problem', 'plan_absurd_claim', 'plan_tagline', 'plan_format_beats'],
+  kahani: ['plan_title', 'plan_brief_use', 'plan_cast', 'plan_want', 'plan_clue', 'plan_turns', 'plan_twist', 'plan_last_image'],
 };
 
 export function segmentJsonSchema(type: LlmSegmentType): Record<string, unknown> {
@@ -202,31 +203,7 @@ const DAYPART_SPARKS: Record<Daypart, string[]> = {
   night: ['late-night cravings', 'scrolling the phone in bed', 'the quiet of the night', 'tomorrow\'s to-do list', 'stargazing from the terrace', 'the neighbour\'s barking dog'],
 };
 
-const AD_CATEGORIES = [
-  'a kitchen gadget',
-  'a monsoon accessory',
-  'a wedding-season service',
-  'an exam-stress remedy',
-  'an auto-rickshaw accessory',
-  'a gadget for joint families',
-  'a phone app for parents who forward too many messages',
-  'a pet product',
-  'a traffic-jam survival kit',
-  'a hair oil with ridiculous claims',
-  'a pressure-cooker accessory',
-  'a crunchy snack',
-  'smart footwear',
-  'a festive house-cleaning service',
-  'a neighbour-gossip blocker',
-  'an alarm clock for heavy sleepers',
-];
 
-const KAHANI_GENRES: Record<Daypart, string[]> = {
-  morning: ['a heart-warming slice-of-life story', 'a funny village tale', 'a clever-kid adventure', 'an inspiring underdog story'],
-  afternoon: ['a comedy of errors', 'a light detective mystery', 'a funny office or school story', 'a quirky neighbourhood comedy'],
-  evening: ['a family drama with a sweet twist', 'a romantic misunderstanding', 'a mystery in the neighbourhood', 'a funny wedding story'],
-  night: ['a mildly spooky ghost story (no gore)', 'a suspense story on a night train', 'a mystery in an old house', 'a strange encounter on an empty road at night'],
-};
 
 
 function voiceName(voice: Voice): string {
@@ -524,7 +501,7 @@ function rjLinkPrompt(station: Station, req: SegmentRequest): string {
   const callCount = req.dedications?.length ?? 0;
   const stepThree = calls
     ? 'Read the STUDIO CALLS above, one line each, in the order given. Nothing else in this step.'
-    : 'Do ONE small thing: the bit, a spark joke, a callback to PREVIOUSLY ON AIR, a shout-out to LAST CALLER by nickname, or the OCCASION. One, not several.';
+    : 'Do ONE small thing: the bit, a spark joke, the device, a callback to PREVIOUSLY ON AIR, a shout-out to LAST CALLER by nickname, or the OCCASION. One, not several, and not the same kind of thing as the last RJ link in PREVIOUSLY ON AIR.';
   return `${calls ? `${calls}\n\n` : ''}Write the RJ link that airs AFTER: ${prev ? TYPE_LABEL[prev.type] : 'nothing'} ("${prev?.summary ?? 'the show is just starting'}") and BEFORE: ${TYPE_LABEL[next.type]} ("${next.summary}").
 
 Producer settings (follow exactly):
@@ -533,6 +510,7 @@ Producer settings (follow exactly):
 - use_catchphrase: ${producer.useCatchphrase && mood === 'light' ? 'yes' : 'no'}
 - bit: ${bit ? `${bit.id} (${bit.text})` : 'none'}
 - spark: ${pick(DAYPART_SPARKS[req.listener.daypart])}   (a topic you MAY use for one joke)
+- device: ${rjDevice()}   (a format you MAY use for step 3 instead)
 - mood_after_previous: ${mood}
 - read_studio_calls: ${callCount ? `yes (${callCount})` : 'no'}
 
@@ -545,7 +523,7 @@ Write ${callCount ? `${3 + callCount}–${4 + callCount}` : '3–5'} lines, all 
 
 If mood_after_previous is "heavy": no joke, no bit, no catchphrase. One calm, kind line that acknowledges the news without repeating it${calls ? ', then the STUDIO CALLS read warmly' : ''}, then a gentle tease. Delivery "warm".
 
-plan (English, fill first): plan_react, plan_one_thing (studio_calls|bit|spark|callback|caller|occasion), plan_target, plan_tease_hook.
+plan (English, fill first): plan_react, plan_one_thing (studio_calls|bit|spark|device|callback|caller|occasion), plan_target, plan_tease_hook.
 summary_en: one sentence on what the RJ said.
 title: a short catchy caption for this link in the station language.
 The quoted example lines above only show the style: never copy them. Write a fresh hook that is true to NEXT_SUMMARY.${station.language === 'hi-IN' ? '' : `\n(The examples above are Hindi; write everything in ${languageName(station)}.)`}`;
@@ -595,25 +573,24 @@ title: a short bulletin name in the station language.`;
 function adPrompt(station: Station, req: SegmentRequest): string {
   const customer = genderWord(station.cast.ad_customer);
   const announcer = genderWord(station.cast.ad_announcer);
-  return `Write a 20–30 second comedy radio ad for an invented product: 5–7 lines, under 450 characters total.
+  const { category, format } = adBrief();
+  const earlier = (req.showLog ?? []).filter((e) => e.type === 'ad_break').map((e) => e.summary);
+  return `Write a 20–30 second comedy radio ad for an invented product: 4–7 lines, under 450 characters total.
 
-Category: ${pick(AD_CATEGORIES)}
+Category: ${category}
+Format: ${format.id}
 Cast: customer (${customer}), announcer (${announcer}), happy_customer (${customer})
 (Role values: customer and happy_customer are both "ad_customer"; announcer is "ad_announcer".)
+${earlier.length ? `Earlier ads tonight (make this one completely different in product, joke and shape): ${earlier.join(' | ')}\n` : ''}
+Shape for the "${format.id}" format, played straight-faced and over the top:
+${format.shape}
 
-Shape (a classic Indian radio ad, played straight-faced and over the top):
-1. customer: a relatable comic problem, in one line, mid-scene.
-2. announcer crashes in: ${station.language === 'hi-IN' ? '"चिंता छोड़िए! पेश है…"' : `the ${languageName(station)} for "Stop worrying! Presenting…"`} plus the brand name. delivery "excited".
-3. announcer: one absurd claim that is specific and easy to picture.
-4. announcer: the price ladder, ${station.language === 'hi-IN' ? '"₹X नहीं, ₹Y भी नहीं, सिर्फ़ ₹Z!"' : `"not ₹X, not even ₹Y, just ₹Z!" in ${languageName(station)}`} with new numbers each time. delivery "shout".
-5. happy_customer: a one-line testimonial that is slightly too emotional.
-6. announcer: a rhyming ${languageName(station)} tagline of 5–9 words, catchy enough to hum. delivery "excited".
-7. announcer: a super-fast, absurd "T&C apply" line that hides one more joke. delivery "fast".
+Brand name: invented, a ${languageName(station)} or English-mixed pun on the product. Never a real brand, person or politician.
+Comedy: one absurd idea, pushed further each line. Specific beats generic ("it folds into a samosa shape", not "it is very useful"). No medical, legal or money claims.
+${station.language === 'hi-IN' ? '' : `Write every line in ${languageName(station)}.\n`}Don't reuse any example wording from these instructions.
 
-Brand name: invented, a ${languageName(station)} or English-mixed pun on the product. Never a real brand. Don't reuse examples from these instructions.
-
-plan (English, fill first): plan_product, plan_brand_pun, plan_problem, plan_absurd_claim, plan_tagline, plan_tc_joke.
-summary_en: product and brand in one sentence (so the RJ can joke about it later).
+plan (English, fill first): plan_product, plan_brand_pun, plan_problem, plan_absurd_claim, plan_tagline, plan_format_beats.
+summary_en: product, brand and format in one sentence (so the RJ can joke about it later).
 title: the product name in the station language.
 Time of day for flavour: ${req.listener.daypart}.`;
 }
@@ -621,35 +598,53 @@ Time of day for flavour: ${req.listener.daypart}.`;
 // ---- §9 kahaniPrompt ------------------------------------------------------------------------
 
 function kahaniPrompt(station: Station, req: SegmentRequest): string {
-  const genre = pick(KAHANI_GENRES[req.listener.daypart]);
-  const theme = req.theme ?? genre;
+  const brief = storyBrief(station.id, req.listener.daypart);
   const cast = `narrator (${genderWord(station.cast.narrator)}), char_a (${personNoun('char_a', station.cast.char_a)}), char_b (${personNoun('char_b', station.cast.char_b)}), char_kid (${personNoun('char_kid', station.cast.char_kid)})`;
   const hi = station.language === 'hi-IN';
   const kahani = KAHANI_NAMES[station.language] ?? 'Kahani Corner';
   const open = hi ? `"तरंग कहानी… आज की कहानी: <title>।"` : `"${kahani}… today's story: <title>." (in ${languageName(station)})`;
-  const scene = hi ? `("रात के बारह बजे थे, और हवेली की पुरानी घड़ी अचानक रुक गई।")` : '(for example: it was midnight, and the old clock in the mansion suddenly stopped)';
-  const sound = hi ? `"सुना? ऊपर सीढ़ियों पे कोई है।"` : '"Did you hear that? Someone is on the stairs."';
-  const tics = hi ? `(the kid keeps asking "पर क्यों?", the old caretaker says "बिटिया…")` : '(the kid keeps asking "but why?", the old caretaker has a pet word for everyone)';
-  const reacts = hi ? `"क्या?!", "रुको!"` : '"What?!", "Wait!"';
-  return `Write tonight's ${hi ? 'तरंग कहानी' : kahani}: an 8–12 line radio play on the theme "${theme}" (${genre}).
+  const cliches = [...STORY_CLICHES.any, ...(STORY_CLICHES[station.id] ?? [])].join('; ');
+  const earlier = req.recentStories?.length ? req.recentStories.map((t) => `- ${t}`).join('\n') : '- none yet';
+  const theme = req.theme
+    ? `- A listener asked for: "${req.theme}". This is the heart of the story; bend the brief to serve it and keep any brief element that fits.\n`
+    : '';
+  return `Write tonight's ${hi ? 'तरंग कहानी' : kahani}: a complete 10–14 line radio play that nobody has heard before.
+
+STORY BRIEF (build the story from this; every element must be audible in the script):
+${theme}- Genre: ${brief.genre}
+- Where: ${brief.setting}. Add one detail only someone from there would know.
+- At the centre: ${brief.hook}
+- How it's told: ${brief.telling}
+- Twist type: ${brief.twist}
+- The ending should feel: ${brief.ending}
+- Character names (pick 2–3 that match each role's gender): masculine ${brief.names.masculine.join(', ')}; feminine ${brief.names.feminine.join(', ')}. Names may be adapted to the station script.
+
+EARLIER STORIES TONIGHT (this one must differ in premise, place, names and twist):
+${earlier}
 
 Cast available (use 3–4, by role id, with these genders): ${cast}
 
-Radio-play craft (the listener can only hear, never see):
-1. Line 1, narrator: announce it like an old radio play: ${open} The title is 1–4 words. delivery "dramatic".
-2. Line 2, narrator: set the scene with a time, a place and one sound ${scene}.
-3. Characters say each other's names early so the listener knows who's who.
-4. There are no sound effects. Actions and sounds are spoken in dialogue: ${sound}
-5. Give each character one way of talking ${tics}.
-6. Short exchanges beat speeches. At most 2 sentences per line. Characters react to each other: ${reacts}.
-7. Plant one clue between lines 3 and 6 that seems unimportant. The twist (lines 9–11) pays it off. It should be fair, surprising, and preferably warm or funny rather than grim.
-8. The narrator gets at most 4 lines in total. The last line lands the twist in one sentence. No cliffhanger, no moral lecture.
-9. Spooky is fine; gore is not. Nobody dies on air, and the kid is safe at the end.
+Beats (the listener can only hear, never see):
+1. narrator: the opener ${open}. The title is 2–5 words and intriguing; generic titles like "the mystery" or "the ghost" are not allowed. delivery "dramatic".
+2. narrator: drop us into the middle of a moment: the place, the time, one concrete sound or smell.
+3–4. Someone wants something specific, right now, and something stands in the way. We learn who people are from how they talk and what they want.
+5–9. Each line changes the situation: a discovery, a lie, a mistake, a deadline. Plant the clue casually in this stretch, so it is easy to miss.
+10–12. The turn: the twist, paid off by the clue. Fair, surprising, and it changes the meaning of what we heard.
+13–14. Land it: one reaction, then a last line with a specific image or a callback that makes the listener smile or shiver.
 
-Delivery: narrator mostly "dramatic"; secrets and ghosts "hushed"; scares "shout" (at most 2); panic "fast".
+Writing rules:
+- Dialogue carries the story; the narrator has at most 4 lines, and characters speak at least 6 lines.
+- Every character sounds different: a verbal habit, a pet word or a rhythm of their own.
+- Specific beats generic: "a steel tiffin with a dent shaped like Sri Lanka", never "an old box".
+- No sound effects: sounds are spoken by the characters ("did you hear the shutter rattle?").
+- Humour and fear come from character and situation, not from announcing them.
+- Never use: ${cliches}.
+- Family-safe: spooky is fine, gore is not; nobody dies on air; the kid is safe at the end.
 
-plan (English, fill first): plan_title, plan_cast (each role: name and tic), plan_clue, plan_twist, plan_sounds_spoken.
-summary_en: title and twist in one sentence.
+Delivery: narrator "dramatic" or "warm"; secrets "hushed"; scares "shout" (at most 2); panic "fast"; tender moments "sad" or "warm".
+
+plan (English, fill first): plan_title, plan_brief_use (one phrase per brief element), plan_cast (name, role, verbal habit), plan_want, plan_clue, plan_turns (what changes in lines 5–9), plan_twist, plan_last_image.
+summary_en: title, place and twist in one sentence (used to keep later stories different).
 title: the story title in the station language.`;
 }
 

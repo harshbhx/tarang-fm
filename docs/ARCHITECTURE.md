@@ -145,8 +145,8 @@ flowchart LR
 | `station_id` | 1 | `station_id` | n/a | n/a | Fixed text, built in the browser |
 | `rj_link` | 2–5 | `rj` (the daypart's RJ on Hindi) | 0.7 | 10 s | Greets by name, reads phone dedications, teases what's next only if it's already written |
 | `news` | up to 10 | `news` | 0.3 | 10 s | Rephrases up to 4 real headlines; invented numbers are dropped |
-| `ad_break` | 3–7 | `ad_announcer`, `ad_customer` | 0.8 | 10 s | A fictional desi product |
-| `kahani` | 6–12 | `narrator`, `char_a`, `char_b`, `char_kid` | 0.7 | 13 s | Uses a caller's theme if there is one |
+| `ad_break` | 4–7 | `ad_announcer`, `ad_customer` | 0.85 | 10 s | A fictional desi product, in one of 8 ad formats |
+| `kahani` | 8–14 | `narrator`, `char_a`, `char_b`, `char_kid` | 0.85 | 15 s | Built from a fresh story brief; uses a caller's theme if there is one |
 
 Source: `src/radio/clock.ts`, `worker/prompts.ts` (`SEGMENT_PLAN`, `MAX_LINES`), `worker/segment.ts` (`MIN_LINES`).
 
@@ -244,6 +244,27 @@ flowchart TD
 
 **What the model never decides.** The voice, pace and loudness of each line; whether a news line keeps a number that isn't in the headlines; the listener's name spelling (`{name}` is filled by the server); and anything said to a caller in distress.
 
+### Story briefs: why no two Kahanis sound alike
+
+Before the model writes a word, `storyBrief()` (`worker/story.ts`) draws a premise from large pools: a genre for the time of day, a specific place (60 % from the station's own region, such as a Kolkata tram depot or a Kutch full-moon night), a hook object, a way of telling it, a twist type, the ending's feeling, and regional character names. That's about 3 million combinations per station and time of day. The prompt lists the night's earlier stories (`recentStories`) and bans stock openings and endings, and a quality gate retries a script that is mostly narration, has fewer than two speaking characters, or opens with a cliché.
+
+```mermaid
+flowchart LR
+  G["genre × 10<br/>per daypart"] --> B(("brief"))
+  S["setting<br/>10 regional + 12 pan-India"] --> B
+  H["hook × 24"] --> B
+  T["telling × 8"] --> B
+  W["twist × 12"] --> B
+  E["ending × 6"] --> B
+  N["regional names"] --> B
+  B --> P["Kahani prompt<br/>+ earlier stories tonight<br/>+ banned clichés"]
+  P --> M["Sarvam-105B"] --> Q{"quality gate"}
+  Q -->|fails| M
+  Q -->|passes| OUT["10–14 line radio play"]
+```
+
+Ads draw a category and one of 8 formats (infomercial, breaking-news parody, helpline call, movie trailer, balcony gossip, cricket commentary, sad-violin, jingle), and RJ links can use one of several on-air devices (a listener poll, a mock traffic report for the kitchen…), so no two breaks share a shape.
+
 ## 7. How a line gets acted
 
 Bulbul has no SSML. Each line instead gets a **delivery** from the script, and `voiceFor()` (`worker/show.ts`) turns the voice's base settings plus that delivery into API parameters.
@@ -337,14 +358,15 @@ sequenceDiagram
     else crisis words (care.ts)
       W-->>C: intent care · fixed warm reply + Tele-MANAS 14416
     else normal
-      W->>LLM: intent + on-air reply (8 s timeout)
-      LLM-->>W: {intent, lines, nickname, story_theme}
       par
         W->>TR: caller transcript → English
       and
-        W->>TR: RJ reply → English
+        W->>LLM: intent + on-air reply (8 s timeout)
+        LLM-->>W: {intent, lines, nickname, story_theme}
       end
-      W-->>C: CallResponse
+      W-->>C: NDJSON line 1: CallResponse (no subtitles yet)
+      W->>TR: RJ reply → English
+      W-->>C: NDJSON line 2: {subtitles}, filled in on screen
     end
     C->>C: status = call_on_air · ring tone
     C->>W: POST /api/tts (RJ reply)

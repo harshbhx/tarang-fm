@@ -143,6 +143,8 @@ const PHONE_STATUSES: ReadonlySet<RadioStatus> = new Set<RadioStatus>([
 const NOW_PLAYING_CHARS = 120;
 /** SegmentRequest.showLog / CallMeta.showLog limit */
 const SHOW_LOG_MAX = 4;
+/** Earlier stories sent with each Kahani request (kept across station switches) */
+const MAX_STORY_LOG = 8;
 const SUMMARY_CHARS = 200;
 /** The RJ greets the listener on the first link and every 4th link after it */
 const GREET_EVERY = 4;
@@ -318,6 +320,8 @@ export class RadioController implements RadioActions {
    * on-air status. A call is read on air once; one whose link never airs goes back in the queue.
    */
   private readonly phoneTaken = new Map<string, 'writing' | PhoneAirStatus>();
+  /** Summaries of the Kahanis aired this session, oldest first, so each new story is different */
+  private storyLog: string[] = [];
   /** Story theme a studio caller asked for; the next unthemed Kahani uses it */
   private phoneTheme: string | undefined;
 
@@ -594,6 +598,9 @@ export class RadioController implements RadioActions {
   private recordAired(segment: Segment): void {
     if (this.aired.some((a) => a.id === segment.id)) return;
     const summary = segment.summary?.trim();
+    if (segment.type === 'kahani' && !segment.fallback && summary) {
+      this.storyLog = [...this.storyLog, summary.slice(0, SUMMARY_CHARS)].slice(-MAX_STORY_LOG);
+    }
     const aired: Aired = { id: segment.id, type: segment.type };
     if (summary) aired.summary = summary;
     if (segment.mood) aired.mood = segment.mood;
@@ -949,6 +956,7 @@ export class RadioController implements RadioActions {
     if (showLog.length) req.showLog = showLog;
     const previous = this.aired[this.aired.length - 1];
     if (previous?.mood) req.moodAfterPrevious = previous.mood;
+    if (entry.type === 'kahani' && this.storyLog.length) req.recentStories = this.storyLog.slice(-MAX_STORY_LOG);
     if (entry.type === 'kahani' && entry.theme) req.theme = entry.theme;
     else if (entry.type === 'kahani' && this.phoneTheme) {
       req.theme = this.phoneTheme;

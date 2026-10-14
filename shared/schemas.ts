@@ -83,6 +83,8 @@ export const SegmentRequestSchema = z.object({
   moodAfterPrevious: MoodSchema.optional(),
   /** One line about the last caller, e.g. '"चाय-chief" (Harsh, Vadodara) asked for a haunted haveli story.' */
   lastCaller: z.string().trim().max(240).optional(),
+  /** kahani only: one-line summaries of the stories already aired this session, so the next one differs */
+  recentStories: z.array(z.string().trim().max(200)).max(8).optional(),
   /** rj_link only: studio phone calls to read on air, oldest first (max 2) */
   dedications: z.array(DedicationSchema).max(2).optional(),
 });

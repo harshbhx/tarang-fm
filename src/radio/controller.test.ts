@@ -751,6 +751,17 @@ describe('RadioController studio phone line', () => {
 });
 
 describe('RadioController producer and show log', () => {
+  it("sends the night's earlier stories with each Kahani request, so none repeats", async () => {
+    const h = setup();
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.requests.filter((r) => r.type === 'kahani').length).toBeGreaterThanOrEqual(3));
+    const kahanis = h.requests.filter((r) => r.type === 'kahani');
+    expect(kahanis[0].recentStories).toBeUndefined();
+    // Prefetch writes the next story while the current one plays, so the log can trail by one
+    const later = kahanis.slice(2).map((r) => r.recentStories ?? []);
+    expect(later.every((log) => log.length >= 1 && log.every((s) => /^kahani \d+ aired$/.test(s)))).toBe(true);
+  });
+
   it('rotates producer settings without back-to-back catchphrases', () => {
     const always = () => 0;
     const never = () => 0.99;

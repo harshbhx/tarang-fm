@@ -1,5 +1,6 @@
 /** Script validators from the prompt pack: a failed check triggers one retry at a lower temperature. */
 import type { Station } from '../shared/types';
+import { STORY_BANNED } from './story';
 import type { LlmSegmentType } from './prompts';
 
 export interface ScriptLine {
@@ -58,6 +59,7 @@ export function validateScript(
   if (type === 'rj_link' && opts.greet && opts.listenerName && !lines.some((l) => /\{\s*name\s*\}/i.test(l.text))) {
     problems.push('greet_listener was yes but no {name}');
   }
+  if (type === 'kahani') problems.push(...storyProblems(station, lines));
   if (type === 'news' && opts.headlinesText !== undefined) {
     const allowed = new Set([...digitsIn(opts.headlinesText), ...digitsIn(opts.timePhrase ?? ''), ...digitsIn(station.frequency)]);
     for (const line of lines) {
@@ -65,6 +67,21 @@ export function validateScript(
         if (!allowed.has(d)) problems.push(`news number not in input: ${d}`);
       }
     }
+  }
+  return problems;
+}
+
+/** A Kahani must be a radio play, not a narrated summary, and must not open or close the tired way. */
+export function storyProblems(station: Station, lines: ScriptLine[]): string[] {
+  const problems: string[] = [];
+  const roles = lines.map((l) => l.role);
+  const narrator = roles.filter((r) => r === 'narrator').length;
+  const characters = new Set(roles.filter((r) => r && r !== 'narrator'));
+  if (lines.length >= 4 && narrator > Math.max(5, Math.ceil(lines.length / 2))) problems.push(`story is mostly narration (${narrator} of ${lines.length} lines)`);
+  if (characters.size < 2) problems.push('story needs at least two speaking characters');
+  const banned = STORY_BANNED[station.id];
+  for (const line of lines) {
+    if (banned?.test(line.text)) problems.push(`stock story phrase: "${line.text.slice(0, 60)}"`);
   }
   return problems;
 }
