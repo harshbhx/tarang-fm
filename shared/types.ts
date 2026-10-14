@@ -69,6 +69,13 @@ export interface Source {
   title: string;
   url: string;
   source?: string;
+  /** From the listener's own city feed */
+  local?: boolean;
+}
+
+export interface Weather {
+  tempC: number;
+  description: string;
 }
 
 export interface Segment {
@@ -100,7 +107,7 @@ export interface ContextResponse {
   timezone?: string;
   /** May be empty */
   headlines: Source[];
-  weather?: { tempC: number; description: string };
+  weather?: Weather;
 }
 
 export type CallIntent = 'chat' | 'dedication' | 'story_request' | 'news_request' | 'other';

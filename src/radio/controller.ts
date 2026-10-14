@@ -2,7 +2,7 @@
 import { CALL_MAX_SECONDS, LISTENER_NAME_MAX, PAUSE_AFTER_MS } from '../../shared/constants';
 import type { SegmentRequest } from '../../shared/schemas';
 import { getStation, STATION_BY_ID } from '../../shared/stations';
-import type { CallResponse, Line, Segment, Source, Station, StationId } from '../../shared/types';
+import type { CallResponse, Line, Segment, Source, Station, StationId, Weather } from '../../shared/types';
 import type { AudioEngine, Recorder } from '../audio/types';
 import * as defaultApi from './api';
 import { readAhead } from './api';
@@ -173,6 +173,7 @@ function cleanHeadlines(list: Source[] | undefined): Source[] {
     if (!title || !/^https?:\/\//i.test(url) || url.length > 2000) continue;
     const source: Source = { title, url };
     if (typeof h.source === 'string' && h.source.trim()) source.source = h.source.trim().slice(0, 120);
+    if (h.local === true) source.local = true;
     out.push(source);
     if (out.length === 8) break;
   }
@@ -209,6 +210,7 @@ export class RadioController implements RadioActions {
   private readonly tts = new Map<string, PendingTts>();
   private context: Promise<void> | null = null;
   private headlines: Source[] = [];
+  private weather: Weather | undefined;
   private recentCalls: string[] = [];
   private localSegments = 0;
 
@@ -509,6 +511,7 @@ export class RadioController implements RadioActions {
     this.plannedNext = null;
     this.context = null;
     this.headlines = [];
+    this.weather = undefined;
   }
 
   private startProgramme(gen: number): void {
@@ -525,6 +528,7 @@ export class RadioController implements RadioActions {
     const p = this.api.getContext(station, signal).then((ctx) => {
       if (signal.aborted) return;
       this.headlines = cleanHeadlines(ctx.headlines);
+      this.weather = ctx.weather && Number.isFinite(ctx.weather.tempC) ? ctx.weather : undefined;
       const city = ctx.city?.trim();
       if (city && city !== this.state.listener.city) {
         this.set({ listener: { ...this.state.listener, city } });
@@ -771,6 +775,7 @@ export class RadioController implements RadioActions {
       upNext: this.following(entry).type,
     };
     if (entry.type === 'news') req.headlines = this.headlines;
+    if (entry.type === 'rj_link' && this.weather) req.weather = this.weather;
     if (entry.type === 'kahani' && entry.theme) req.theme = entry.theme;
     if (this.recentCalls.length) req.recentCalls = this.recentCalls.slice(-MAX_RECENT_CALLS);
     return req;

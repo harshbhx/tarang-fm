@@ -299,6 +299,9 @@ function rjLinkPrompt(station: Station, req: SegmentRequest): string {
     `Coming up right after this link: ${upNext(station, req)}.`,
     `Topic for one joke: ${pick(DAYPART_SPARKS[req.listener.daypart])}. Make it a specific, relatable observation, like a stand-up comic would, with a local touch for the city if known. Not a generic statement.`,
   ];
+  if (req.weather && req.listener.city) {
+    lines.push(`Weather right now in ${req.listener.city}: ${req.weather.tempC}°C, ${req.weather.description}. Mention it naturally in one short phrase (temperature as a number with degrees).`);
+  }
   if (req.recentCalls?.length) {
     lines.push(`Recent callers said: ${req.recentCalls.map((c) => `"${c}"`).join('; ')}. Give one of them a quick, warm shout-out.`);
   }
@@ -314,15 +317,20 @@ function rjLinkPrompt(station: Station, req: SegmentRequest): string {
 function newsPrompt(station: Station, req: SegmentRequest, headlines: Source[]): string {
   return [
     `Write a short news bulletin read by the news reader, ${headlines.length + 2} lines in total:`,
-    `- Line 1: a crisp intro on ${onAirName(station)} saying these are the latest headlines.`,
+    `- Line 1: a crisp intro on ${onAirName(station)} saying these are the latest headlines${headlines.some((h) => h.local) && req.listener.city ? `, starting with news from the listener's own city, ${req.listener.city}` : ''}.`,
     `- Then exactly one line per headline below, in the same order (${headlines.length} lines).`,
     '- Last line: a short, polite sign-off that hands back to the station.',
     'News integrity rules (strict): rephrase each headline as one clear, natural spoken news sentence in the station language. Use ONLY facts stated in that headline. Do not add any new fact, number, name, place, cause, quote, prediction or opinion. If a headline is a teaser question or clickbait, state only what it actually reports, as a statement. If a headline is in another language, translate it faithfully. Keep names exactly as given.',
     `Local time: ${spokenTime(req.listener, station.language)}.`,
+    headlines.some((h) => h.local)
+      ? `Headlines marked [LOCAL] are from the listener's city${req.listener.city ? ` (${req.listener.city})` : ''}: introduce the first of them as local news from that city (for example "and now from your city ..." in the station language).`
+      : '',
     'Headlines:',
-    ...headlines.map((h, i) => `${i + 1}. ${h.title}${h.source ? ` (source: ${h.source})` : ''}`),
+    ...headlines.map((h, i) => `${i + 1}. ${h.local ? '[LOCAL] ' : ''}${h.title}${h.source ? ` (source: ${h.source})` : ''}`),
     'title: a short bulletin name in the station language.',
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function adPrompt(station: Station, req: SegmentRequest): string {

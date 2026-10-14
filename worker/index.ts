@@ -116,7 +116,7 @@ app.post('/segment', rateLimit((e) => e.RL_SEGMENT), requireKey, async (c) => {
   const sarvam = createSarvam(c.env.SARVAM_API_KEY);
   const origin = new URL(c.req.url).origin;
   const segment = await buildSegment(sarvam, station, parsed.data, c.var.timings, {
-    fetchHeadlines: () => getHeadlines(station, origin, waitUntil(c)),
+    fetchHeadlines: () => getHeadlines(station, origin, waitUntil(c), parsed.data.listener.city),
   });
   return c.json(segment, 200, { 'Cache-Control': 'no-store' });
 });

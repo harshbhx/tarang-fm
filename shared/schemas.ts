@@ -21,6 +21,12 @@ export const SourceSchema = z.object({
   title: z.string().min(1).max(300),
   url: z.string().url().max(2000),
   source: z.string().max(120).optional(),
+  local: z.boolean().optional(),
+});
+
+export const WeatherSchema = z.object({
+  tempC: z.number().min(-60).max(70),
+  description: z.string().trim().min(1).max(60),
 });
 
 export const ListenerContextSchema = z.object({
@@ -39,6 +45,8 @@ export const SegmentRequestSchema = z.object({
   recentCalls: z.array(z.string().max(300)).max(5).optional(),
   /** Segment type that follows (rj_link teases it) */
   upNext: SegmentTypeSchema.optional(),
+  /** Current weather in the listener's city (rj_link mentions it) */
+  weather: WeatherSchema.optional(),
 });
 
 export const TtsRequestSchema = z.object({
