@@ -6,13 +6,16 @@
 
 Every voice is [Sarvam **Bulbul v4 Flash**](https://docs.sarvam.ai/api/api-guides-tutorials/text-to-speech/best-practice-guide-for-bulbul-v-4-flash). Each line on screen shows exactly which of its personas is speaking.
 
-**▶ Live:** https://tarang-fm.dualmindlab.tech (the landing page, with a playable voice gallery for all five stations) · **Straight to the radio:** https://tarang-fm.dualmindlab.tech/listen · Works on any phone or laptop, with no install or login.
+**▶ Live:** https://tarang-fm.dualmindlab.tech (the landing page: scroll through an evening on the station, hear every voice, and hold the button to call the RJ) · **Straight to the radio:** https://tarang-fm.dualmindlab.tech/listen · Works on any phone or laptop, with no install or login.
 
 > 🎬 Demo video: _recording in progress; the shot list is in [docs/BUILD-PLAN.md §6](./docs/BUILD-PLAN.md#6-demo-video-7590-s-shot-list)_
 
 <p align="center">
-  <img src="docs/images/landing.jpg" alt="The Tarang FM landing page: an amber-dial radio tuned to Tamil 98.3, with Tune in and Call the studio" width="66%" />
+  <img src="docs/images/landing.jpg" alt="The Tarang FM landing page: an amber-dial radio tuned to Hindi 91.1, with Tune in and Call the studio" width="66%" />
   <img src="docs/images/radio-phone.jpg" alt="The radio on a phone: Hindi 91.1 playing a Kahani, with the speaker's Bulbul voice ID and an English subtitle under the Hindi caption" width="24%" />
+</p>
+<p align="center">
+  <img src="docs/images/evening.jpg" alt="One evening on Tarang FM: the ad break beat on the left, and the pinned on-air stage on the right showing Mukul and Ritu's lines with Hear it" width="90%" />
 </p>
 <p align="center">
   <img src="docs/images/studio-line.jpg" alt="The studio line panel: how to call, and three recent calls marked On air now, Up next and Read on air" width="90%" />
@@ -298,5 +301,5 @@ Tests sit next to the code they cover (`*.test.ts`).
 
 - Hosts, ads and stories are AI-generated and fictional. News lines rephrase real headlines, and the original sources are linked on screen.
 - Caller audio is sent to Sarvam for transcription and is never stored.
-- UI effects adapted from [React Bits](https://reactbits.dev) (Threads, CurvedLoop, BlurText, SpotlightCard, ClickSpark, DecryptedText, ShinyText; MIT + Commons Clause), [Magic UI](https://magicui.design) (BorderBeam, Ripple, NumberTicker; MIT) and [motion-primitives](https://motion-primitives.com) (TextLoop; MIT). Each adapted file names its source and what changed.
+- UI effects adapted from [React Bits](https://reactbits.dev) (Threads, CurvedLoop, BlurText, SpotlightCard, ClickSpark, DecryptedText, ShinyText; MIT + Commons Clause), [Magic UI](https://magicui.design) (BorderBeam, Ripple, NumberTicker; MIT) and [motion-primitives](https://motion-primitives.com) (TextLoop; MIT). Written fresh for Tarang FM on Motion after the ideas in React Bits (Variable Proximity, Magnet, Tilted Card, Scroll Velocity) and Magic UI (Scroll Progress, Text Reveal, Animated Beam, Animated List): `src/components/bits/`. Each file names its source and what changed.
 - Headlines via BBC, Bing News and Google News. Weather by [Open-Meteo](https://open-meteo.com). Voices, transcription, translation and scripts by [Sarvam AI](https://www.sarvam.ai).

@@ -1,3 +1,4 @@
+import { m, useReducedMotion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { STUDIO_NUMBER, STUDIO_NUMBER_DISPLAY } from '../../shared/constants';
 import type { PhoneCall, PhoneRequestType } from '../../shared/types';
@@ -132,11 +133,23 @@ function initials(name: string | undefined): string {
     .toUpperCase();
 }
 
-function CallRow({ call, now, status, radio }: { call: PhoneCall; now: number; status?: PhoneAirStatus; radio: RadioMode }) {
+/**
+ * One call on the line. A call that arrives while you watch slides in and glows for a moment (the idea of
+ * Animated List from Magic UI, MIT); the ones already there on first paint just sit still.
+ */
+function CallRow({ call, now, status, radio, fresh }: { call: PhoneCall; now: number; status?: PhoneAirStatus; radio: RadioMode; fresh: boolean }) {
   const who = call.name?.trim() || 'A listener';
   const tag = airTag(status, radio);
+  const reduce = useReducedMotion() ?? false;
   return (
-    <li className="studio-call" data-tone={tag.tone}>
+    <m.li
+      className="studio-call"
+      data-tone={tag.tone}
+      data-fresh={fresh || undefined}
+      initial={fresh && !reduce ? { opacity: 0, y: -14, scale: 0.98 } : false}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
+    >
       <span className="studio-avatar" aria-hidden="true">
         {initials(call.name)}
       </span>
@@ -164,7 +177,7 @@ function CallRow({ call, now, status, radio }: { call: PhoneCall; now: number; s
           </span>
         </p>
       </div>
-    </li>
+    </m.li>
   );
 }
 
@@ -189,6 +202,13 @@ export function StudioLinePanel({
   const now = useNow(30_000);
   const { tel, display } = studioNumber(phone);
   const calls = phone?.calls ?? [];
+  // Calls on the list at first paint are old news; anything that arrives after is announced
+  const seen = useRef<Set<string> | null>(null);
+  if (seen.current === null) seen.current = new Set(calls.map((c) => c.id));
+  const fresh = new Set(calls.filter((c) => !seen.current!.has(c.id)).map((c) => c.id));
+  useEffect(() => {
+    for (const c of calls) seen.current!.add(c.id);
+  });
   // A call any listener's RJ has read is done for everyone (the studio line keeps one shared record)
   const statusOf = (c: PhoneCall): PhoneAirStatus | undefined => phoneStatus[c.id] ?? (c.airedAt ? 'aired' : undefined);
   const live = radio === 'live' ? calls.find((c) => statusOf(c) === 'on_air') : undefined;
@@ -249,7 +269,7 @@ export function StudioLinePanel({
         {calls.length ? (
           <ul className="studio-calls" aria-label="Recent calls">
             {calls.map((call) => (
-              <CallRow key={call.id} call={call} now={now} status={statusOf(call)} radio={radio} />
+              <CallRow key={call.id} call={call} now={now} status={statusOf(call)} radio={radio} fresh={fresh.has(call.id)} />
             ))}
           </ul>
         ) : (
