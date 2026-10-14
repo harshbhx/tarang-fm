@@ -33,6 +33,15 @@ function Station({ view, onNavigate }: { view: 'landing' | 'listen'; onNavigate:
     [actions, onNavigate],
   );
 
+  // While the landing page is open, warm the Worker's news and weather caches so the first RJ link starts sooner.
+  useEffect(() => {
+    if (view !== 'landing') return;
+    const timer = window.setTimeout(() => {
+      void fetch(`/api/context?station=${state.stationId}`, { priority: 'low' } as RequestInit).catch(() => undefined);
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [view, state.stationId]);
+
   // Going back to the landing page pauses the show.
   useEffect(() => {
     if (view === 'landing' && (state.status === 'playing' || state.status === 'tuning')) actions.pause();
