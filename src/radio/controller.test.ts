@@ -3,7 +3,7 @@ import type { CallMeta, SegmentRequest } from '../../shared/schemas';
 import { getStation } from '../../shared/stations';
 import type { CallResponse, Line, PhoneCall, PhoneRecentResponse, Segment, StationId } from '../../shared/types';
 import type { AudioEngine, PlayResult, Recorder } from '../audio/types';
-import { RadioController, phoneCallLine, type RadioApi } from './controller';
+import { RadioController, phoneCallLine, producerPlan, type RadioApi } from './controller';
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const abortError = () => new DOMException('Aborted', 'AbortError');
@@ -163,6 +163,8 @@ function harness() {
         type: req.type,
         title: `${req.type} ${n}`,
         lines: [0, 1].map((i) => rjLine(req.station, `${tag}:${i}`)),
+        summary: `${req.type} ${n} aired`,
+        ...(req.type === 'news' ? { mood: 'heavy' as const } : {}),
       };
     },
     ttsFetch: async (line, _station, signal) => {
@@ -646,5 +648,56 @@ describe('RadioController studio phone line', () => {
     const lines = rjLinks(h).map((r) => r.recentCalls?.[0]);
     expect(lines.length).toBeGreaterThanOrEqual(3);
     expect(lines.every((l) => l?.startsWith('Phone call from Priya'))).toBe(true);
+  });
+});
+
+describe('RadioController producer and show log', () => {
+  it('rotates producer settings without back-to-back catchphrases', () => {
+    const always = () => 0;
+    const never = () => 0.99;
+    expect(producerPlan(0, false, always)).toEqual({ firstLink: true, greetListener: true, useCatchphrase: true, bit: 'any' });
+    expect(producerPlan(1, true, always)).toEqual({ firstLink: false, greetListener: false, useCatchphrase: false, bit: 'any' });
+    expect(producerPlan(4, false, never)).toEqual({ firstLink: false, greetListener: true, useCatchphrase: false, bit: 'none' });
+    expect(producerPlan(3, false, never).greetListener).toBe(false);
+  });
+
+  it('sends the show log, producer and previous mood with each RJ link', async () => {
+    const h = setup();
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.requests.filter((r) => r.type === 'rj_link').length).toBeGreaterThanOrEqual(2));
+    const [first, second] = h.requests.filter((r) => r.type === 'rj_link');
+    expect(first.producer?.firstLink).toBe(true);
+    expect(first.producer?.greetListener).toBe(true);
+    expect(second.producer?.firstLink).toBe(false);
+    expect(second.producer?.greetListener).toBe(false);
+    expect(first.producer?.useCatchphrase && second.producer?.useCatchphrase).toBe(false);
+    expect(first.listener.localDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(first.listener.weekday).toBeGreaterThanOrEqual(0);
+    expect(second.showLog?.length).toBeGreaterThan(0);
+    expect(second.showLog?.length).toBeLessThanOrEqual(4);
+    expect(second.showLog?.map((e) => e.type)).toContain('news');
+    expect(second.showLog?.every((e) => e.summary.endsWith('aired'))).toBe(true);
+    const afterNews = h.requests.find((r) => r.type === 'ad_break');
+    expect(afterNews?.moodAfterPrevious).toBe('heavy');
+  });
+
+  it('sends the show log with a call and shows the helpline after a care call', async () => {
+    const h = setup();
+    h.setCallResponse({ transcript: 'bahut akela lag raha hai', intent: 'care', reply: rjLine('hi', 'care-reply') });
+    let called = false;
+    h.engine.onPlay = (text) => {
+      if (text === 'hi:news:0' && !called) {
+        called = true;
+        void h.c.startCall();
+      }
+    };
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.c.getSnapshot().status).toBe('call_recording'));
+    await delay(25);
+    await h.c.endCall();
+    await waitFor(() => expect(h.c.getSnapshot().helpline).toEqual({ name: 'Tele-MANAS', number: '14416' }));
+    expect(h.calls[0].showLog?.map((e) => e.type)).toEqual(['rj_link', 'news']);
+    h.c.setStation('ta');
+    expect(h.c.getSnapshot().helpline).toBeUndefined();
   });
 });

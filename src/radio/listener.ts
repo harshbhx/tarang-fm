@@ -4,6 +4,7 @@ import type { Daypart, ListenerContext } from '../../shared/types';
 
 const NAME_KEY = 'tarang.listenerName';
 const CITY_MAX = 80;
+const REGION_MAX = 60;
 
 export function daypartFor(hour: number): Daypart {
   if (hour >= 5 && hour <= 11) return 'morning';
@@ -12,9 +13,15 @@ export function daypartFor(hour: number): Daypart {
   return 'night';
 }
 
+const pad = (n: number) => String(n).padStart(2, '0');
+
 export function formatLocalTime(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** Browser-local 'YYYY-MM-DD' */
+export function formatLocalDate(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 /** Trimmed, single-spaced, length-capped name; undefined when blank. */
@@ -24,14 +31,21 @@ export function cleanListenerName(name: string | null | undefined): string | und
 }
 
 export function listenerContext(
-  listener: { name?: string; city?: string },
+  listener: { name?: string; city?: string; region?: string },
   now: Date = new Date(),
 ): ListenerContext {
-  const ctx: ListenerContext = { localTime: formatLocalTime(now), daypart: daypartFor(now.getHours()) };
+  const ctx: ListenerContext = {
+    localTime: formatLocalTime(now),
+    daypart: daypartFor(now.getHours()),
+    localDate: formatLocalDate(now),
+    weekday: now.getDay(),
+  };
   const name = cleanListenerName(listener.name);
   const city = listener.city?.trim().slice(0, CITY_MAX).trim();
+  const region = listener.region?.trim().slice(0, REGION_MAX).trim();
   if (name) ctx.name = name;
   if (city) ctx.city = city;
+  if (region) ctx.region = region;
   return ctx;
 }
 

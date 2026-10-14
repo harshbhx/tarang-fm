@@ -80,7 +80,7 @@ export async function getPhoneRecent(signal?: AbortSignal): Promise<PhoneRecentR
 
 /** Starts a streamed TTS request. The body is raw PCM (or WAV) for AudioEngine.playStream. */
 export function ttsFetch(
-  line: Pick<Line, 'speaker' | 'text' | 'pace' | 'temperature'>,
+  line: Pick<Line, 'speaker' | 'text' | 'pace' | 'temperature' | 'loudness' | 'pitch'>,
   station: StationId,
   signal?: AbortSignal,
 ): Promise<Response> {
@@ -91,6 +91,8 @@ export function ttsFetch(
     pace: line.pace,
     temperature: line.temperature,
   };
+  if (typeof line.loudness === 'number') body.loudness = line.loudness;
+  if (typeof line.pitch === 'number') body.pitch = line.pitch;
   return send('/api/tts', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -113,6 +115,7 @@ export function postCall(blob: Blob, meta: CallMeta, signal?: AbortSignal): Prom
   form.append('station', meta.station);
   form.append('listener', JSON.stringify(meta.listener));
   if (meta.nowPlaying) form.append('nowPlaying', meta.nowPlaying);
+  if (meta.showLog?.length) form.append('showLog', JSON.stringify(meta.showLog));
   return json<CallResponse>('/api/call', { method: 'POST', body: form, signal });
 }
 

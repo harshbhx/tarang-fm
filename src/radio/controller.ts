@@ -1,13 +1,15 @@
 /** Show scheduler and radio store (docs/TECH-SPEC.md §9). */
 import { CALL_MAX_SECONDS, LISTENER_NAME_MAX, PAUSE_AFTER_MS } from '../../shared/constants';
-import type { SegmentRequest } from '../../shared/schemas';
+import type { CallMeta, SegmentRequest } from '../../shared/schemas';
 import { getStation, STATION_BY_ID } from '../../shared/stations';
 import type {
   CallResponse,
   Line,
+  Mood,
   PhoneCall,
   PhoneRecentResponse,
   Segment,
+  SegmentType,
   Source,
   Station,
   StationId,
@@ -75,6 +77,8 @@ export interface RadioControllerOptions {
   recorder: Recorder;
   api?: RadioApi;
   timings?: Partial<RadioTimings>;
+  /** Random source for the producer's rotation (tests pin it) */
+  random?: () => number;
 }
 
 interface Cursor {
@@ -88,7 +92,19 @@ interface Cursor {
 interface PendingSegment {
   promise: Promise<Segment | null>;
   controller: AbortController;
+  /** Set once the request settles */
+  segment?: Segment | null;
 }
+
+interface Aired {
+  id: string;
+  type: SegmentType;
+  summary?: string;
+  mood?: Mood;
+}
+
+export type ShowLog = NonNullable<SegmentRequest['showLog']>;
+export type ProducerPlan = NonNullable<SegmentRequest['producer']>;
 
 interface PhonePoll {
   abort: AbortController;
@@ -125,10 +141,28 @@ const PHONE_STATUSES: ReadonlySet<RadioStatus> = new Set<RadioStatus>([
   'call_on_air',
 ]);
 const NOW_PLAYING_CHARS = 120;
+/** SegmentRequest.showLog / CallMeta.showLog limit */
+const SHOW_LOG_MAX = 4;
+const SUMMARY_CHARS = 200;
+/** The RJ greets the listener on the first link and every 4th link after it */
+const GREET_EVERY = 4;
+const CATCHPHRASE_ODDS = 0.3;
+const BIT_ODDS = 0.35;
+const CARE_HELPLINE = { name: 'Tele-MANAS', number: '14416' } as const;
 const MISSES_BEFORE_BACKOFF = 3;
 
 const TOO_SHORT = 'That was too short. Hold the button while you speak.';
 const WEAK_SIGNAL = 'Weak signal. Retrying…';
+
+/** Producer settings for the session's `linkNo`-th RJ link (0-based); a catchphrase never runs twice in a row. */
+export function producerPlan(linkNo: number, lastCatchphrase: boolean, random: () => number = Math.random): ProducerPlan {
+  return {
+    firstLink: linkNo === 0,
+    greetListener: linkNo % GREET_EVERY === 0,
+    useCatchphrase: !lastCatchphrase && random() < CATCHPHRASE_ODDS,
+    bit: random() < BIT_ODDS ? 'any' : 'none',
+  };
+}
 
 const noop = () => {};
 const now = () => performance.now();
@@ -266,6 +300,12 @@ export class RadioController implements RadioActions {
   private headlines: Source[] = [];
   private weather: Weather | undefined;
   private recentCalls: string[] = [];
+  /** Segments that went on air this session, oldest first */
+  private aired: Aired[] = [];
+  private links = 0;
+  private lastCatchphrase = false;
+  private region: string | undefined;
+  private readonly random: () => number;
   private localSegments = 0;
   private phonePoll: PhonePoll | null = null;
   /** Studio-line calls already given to an RJ link this session (each is read on air once) */
@@ -282,6 +322,7 @@ export class RadioController implements RadioActions {
     this.recorder = options.recorder;
     this.api = options.api ?? defaultApi;
     this.timings = { ...DEFAULT_TIMINGS, ...options.timings };
+    this.random = options.random ?? Math.random;
     const name = loadListenerName();
     this.state = { ...INITIAL_STATE, listener: name ? { name } : {} };
   }
@@ -375,6 +416,9 @@ export class RadioController implements RadioActions {
     const gen = this.interrupt();
     this.resetStationScope();
     this.recentCalls = [];
+    this.aired = [];
+    this.links = 0;
+    this.lastCatchphrase = false;
     this.engine.stopVoice(this.timings.stopFadeMs);
     this.engine.music.stop(this.timings.stopFadeMs);
     this.cursor = freshCursor();
@@ -386,6 +430,7 @@ export class RadioController implements RadioActions {
       lineIndex: 0,
       upNext: undefined,
       call: undefined,
+      helpline: undefined,
       error: undefined,
     });
     this.fetchContext(id);
@@ -405,7 +450,7 @@ export class RadioController implements RadioActions {
     const gen = this.interrupt();
     this.engine.stopVoice(this.timings.callStopFadeMs);
     this.recStartedAt = 0;
-    this.set({ status: 'call_recording', call: {} });
+    this.set({ status: 'call_recording', call: {}, helpline: undefined });
 
     const starting = this.startRecorder();
     this.recStart = starting;
@@ -462,15 +507,14 @@ export class RadioController implements RadioActions {
     const station = this.station();
     let res: CallResponse;
     try {
-      res = await this.api.postCall(
-        blob,
-        {
-          station: station.id,
-          listener: this.listener(),
-          nowPlaying: this.state.segment?.title.slice(0, NOW_PLAYING_CHARS) || undefined,
-        },
-        controller.signal,
-      );
+      const meta: CallMeta = {
+        station: station.id,
+        listener: this.listener(),
+        nowPlaying: this.state.segment?.title.slice(0, NOW_PLAYING_CHARS) || undefined,
+      };
+      const showLog = this.showLog();
+      if (showLog.length) meta.showLog = showLog;
+      res = await this.api.postCall(blob, meta, controller.signal);
     } catch (err) {
       this.finishCall(gen, { error: errorMessage(err, 'The RJ could not take your call. Try again.') });
       return;
@@ -526,7 +570,24 @@ export class RadioController implements RadioActions {
   }
 
   private listener() {
-    return listenerContext(this.state.listener);
+    return listenerContext({ ...this.state.listener, region: this.region });
+  }
+
+  /** The last few aired segments with a summary, oldest first */
+  private showLog(): ShowLog {
+    return this.aired
+      .filter((a) => a.summary)
+      .slice(-SHOW_LOG_MAX)
+      .map((a) => ({ type: a.type, summary: (a.summary ?? '').slice(0, SUMMARY_CHARS) }));
+  }
+
+  private recordAired(segment: Segment): void {
+    if (this.aired.some((a) => a.id === segment.id)) return;
+    const summary = segment.summary?.trim();
+    const aired: Aired = { id: segment.id, type: segment.type };
+    if (summary) aired.summary = summary;
+    if (segment.mood) aired.mood = segment.mood;
+    this.aired = [...this.aired, aired].slice(-SHOW_LOG_MAX * 2);
   }
 
   private unlockEngine(): Promise<void> {
@@ -588,6 +649,8 @@ export class RadioController implements RadioActions {
       if (signal.aborted) return;
       this.headlines = cleanHeadlines(ctx.headlines);
       this.weather = ctx.weather && Number.isFinite(ctx.weather.tempC) ? ctx.weather : undefined;
+      const region = ctx.region?.trim();
+      if (region) this.region = region;
       const city = ctx.city?.trim();
       if (city && city !== this.state.listener.city) {
         this.set({ listener: { ...this.state.listener, city } });
@@ -666,6 +729,7 @@ export class RadioController implements RadioActions {
     sting: boolean,
   ): Promise<void> {
     const following = this.following(entry);
+    this.recordAired(segment);
     this.pruneSegments([entry, following]);
     this.prefetchSegment(following, station.id);
     this.set({ segment: toNowPlaying(segment), lineIndex: startLine, upNext: following.type });
@@ -776,7 +840,11 @@ export class RadioController implements RadioActions {
     if (hit) return hit.promise;
     const controller = linkedController(this.stationAbort.signal);
     const promise = this.fetchSegment(entry, station, controller.signal);
-    this.segments.set(key, { promise, controller });
+    const pending: PendingSegment = { promise, controller };
+    void promise.then((segment) => {
+      pending.segment = segment;
+    });
+    this.segments.set(key, pending);
     return promise;
   }
 
@@ -845,6 +913,20 @@ export class RadioController implements RadioActions {
     };
     if (entry.type === 'news') req.headlines = this.headlines;
     if (entry.type === 'rj_link' && this.weather) req.weather = this.weather;
+    if (entry.type === 'rj_link') {
+      const producer = producerPlan(this.links, this.lastCatchphrase, this.random);
+      this.links += 1;
+      this.lastCatchphrase = producer.useCatchphrase;
+      req.producer = producer;
+      // Only tease the next segment when it is already written, so the tease is true
+      const upcoming = this.segments.get(entryKey(this.following(entry)))?.segment;
+      const summary = upcoming?.summary?.trim();
+      if (upcoming && summary) req.next = { type: upcoming.type, summary: summary.slice(0, SUMMARY_CHARS) };
+    }
+    const showLog = this.showLog();
+    if (showLog.length) req.showLog = showLog;
+    const previous = this.aired[this.aired.length - 1];
+    if (previous?.mood) req.moodAfterPrevious = previous.mood;
     if (entry.type === 'kahani' && entry.theme) req.theme = entry.theme;
     const phoneCalls = entry.type === 'rj_link' ? this.takePhoneCalls() : [];
     const recent = [...phoneCalls.map(phoneCallLine), ...this.recentCalls.slice(-MAX_RECENT_CALLS)];
@@ -946,6 +1028,7 @@ export class RadioController implements RadioActions {
       this.recentCalls = [...this.recentCalls, transcript.slice(0, RECENT_CALL_CHARS)].slice(-MAX_RECENT_CALLS);
     }
     if (res.intent === 'story_request') this.planStory(res.theme || transcript);
+    if (res.intent === 'care') this.set({ helpline: { ...CARE_HELPLINE } });
 
     const reply = res.reply?.text?.trim() ? res.reply : null;
     const startedAt = now();

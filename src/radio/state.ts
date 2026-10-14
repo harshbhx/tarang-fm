@@ -56,6 +56,8 @@ export interface RadioState {
   error?: string;
   /** The studio phone line: its number and recent on-air calls, newest first (polled while tuned in) */
   phone?: { number: string; calls: PhoneCall[] };
+  /** Support line shown after a call that sounded like distress; cleared on a new call or station */
+  helpline?: { name: string; number: string };
 }
 
 export interface RadioActions {
