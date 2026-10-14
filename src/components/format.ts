@@ -1,6 +1,6 @@
 import { SHOW_CLOCK } from '../../shared/constants';
-import { ROLES } from '../../shared/stations';
-import type { Role, SegmentType, Station } from '../../shared/types';
+import { ROLES, storyVoices } from '../../shared/stations';
+import type { Role, SegmentType, Station, Voice } from '../../shared/types';
 import type { Caption, RadioStatus } from '../radio/state';
 
 export const DIAL_MIN = 88;
@@ -70,16 +70,20 @@ export interface CastVoice {
   roles: string[];
 }
 
-/** Unique voices in a station cast, each with the roles it plays. */
+/**
+ * Unique voices a station can put on air, each with the roles it plays: the cast, the daypart RJs and the
+ * extra voices its stories are cast from.
+ */
 export function castVoices(station: Station): CastVoice[] {
   const voices = new Map<string, CastVoice>();
-  for (const role of ROLES) {
-    const voice = station.cast[role];
-    const name = ROLE_NAMES[role];
+  const add = (voice: Voice, name: string) => {
     const entry = voices.get(voice.speaker);
     if (!entry) voices.set(voice.speaker, { speaker: voice.speaker, label: voice.label, roles: [name] });
     else if (!entry.roles.includes(name)) entry.roles.push(name);
-  }
+  };
+  for (const role of ROLES) add(station.cast[role], ROLE_NAMES[role]);
+  for (const show of station.shows ?? []) add(show.rj, 'RJ');
+  for (const voice of storyVoices(station)) add(voice, 'Story cast');
   return [...voices.values()];
 }
 

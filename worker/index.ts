@@ -11,6 +11,7 @@ import { getContext, getHeadlines, localNewsCity } from './context';
 import { phoneHeadlines, recentCalls, saveCall, toPhoneCall, tokenMatches } from './phone';
 import { createSarvam, SarvamError } from './sarvam';
 import { capStream, maxPcmBytes } from './show';
+import { kvShowMemory } from './memory';
 import { buildSegment } from './segment';
 import { Timings } from './timing';
 
@@ -139,6 +140,8 @@ app.post('/segment', rateLimit((e) => e.RL_SEGMENT), requireKey, async (c) => {
   const origin = new URL(c.req.url).origin;
   const segment = await buildSegment(sarvam, station, parsed.data, c.var.timings, {
     fetchHeadlines: () => getHeadlines(station, origin, waitUntil(c), localNewsCity(parsed.data.listener.city, edgeCountry(c.req.raw))),
+    // What this station already aired, for every listener, so stories and ads don't repeat
+    memory: kvShowMemory(c.env.PHONE, waitUntil(c)),
   });
   return c.json(segment, 200, { 'Cache-Control': 'no-store' });
 });

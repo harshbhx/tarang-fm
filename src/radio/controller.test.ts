@@ -767,7 +767,8 @@ describe('RadioController producer and show log', () => {
     const never = () => 0.99;
     expect(producerPlan(0, false, always)).toEqual({ firstLink: true, greetListener: true, useCatchphrase: true, bit: 'any' });
     expect(producerPlan(1, true, always)).toEqual({ firstLink: false, greetListener: false, useCatchphrase: false, bit: 'any' });
-    expect(producerPlan(4, false, never)).toEqual({ firstLink: false, greetListener: true, useCatchphrase: false, bit: 'none' });
+    expect(producerPlan(8, false, never)).toEqual({ firstLink: false, greetListener: true, useCatchphrase: false, bit: 'none' });
+    expect(producerPlan(4, false, never).greetListener).toBe(false);
     expect(producerPlan(3, false, never).greetListener).toBe(false);
   });
 

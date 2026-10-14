@@ -6,7 +6,7 @@ import type { CallResponse, Line, Station, TtsLanguage } from '../shared/types';
 import { fallbacksFor } from './fallbacks';
 import { CALL_JSON_SCHEMA, CALL_PLAN, callMessages, rjOnAir } from './prompts';
 import type { Sarvam } from './sarvam';
-import { annotate, fillName, latinBrand, nativeListenerName, toLine } from './segment';
+import { annotate, fillName, latinBrand, limitNameTokens, nativeListenerName, toLine } from './segment';
 import { careReply, careReplyEn, soundsLikeCrisis } from './care';
 import { isDelivery } from './show';
 import { cleanSubtitle } from './subtitle';
@@ -154,7 +154,8 @@ export async function startCall(
   }
 
   const nickname = llm.nickname?.trim() && !EMPTY.test(llm.nickname.trim()) ? llm.nickname.trim().slice(0, 40) : meta.listener.nickname;
-  const joined = llm.lines.map((l) => l.text.trim()).filter(Boolean).join(' ');
+  // Name or nickname once per reply at most
+  const [joined] = limitNameTokens([llm.lines.map((l) => l.text.trim()).filter(Boolean).join(' ')], 1);
   const withNames = fillName(joined, listenerName).replace(/\{\s*nickname\s*\}/giu, nickname ?? listenerName ?? '');
   const spoken = replyText(withNames, station);
   const first = llm.lines[0]?.delivery;

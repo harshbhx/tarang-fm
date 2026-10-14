@@ -146,8 +146,8 @@ const SHOW_LOG_MAX = 4;
 /** Earlier stories sent with each Kahani request (kept across station switches) */
 const MAX_STORY_LOG = 8;
 const SUMMARY_CHARS = 200;
-/** The RJ greets the listener on the first link and every 4th link after it */
-const GREET_EVERY = 4;
+/** The RJ greets the listener by name on the first link, then only every eighth (about every 40 minutes). */
+const GREET_EVERY = 8;
 const CATCHPHRASE_ODDS = 0.3;
 const BIT_ODDS = 0.35;
 const CARE_HELPLINE = { name: 'Tele-MANAS', number: '14416' } as const;

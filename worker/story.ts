@@ -4,7 +4,7 @@
  * (about 3 million combinations) and comes with region-appropriate character names, so the model starts from
  * something specific instead of reaching for the same haunted mansion every night.
  */
-import type { Daypart, StationId } from '../shared/types';
+import type { Daypart, Station, StationId, StoryPool, Voice } from '../shared/types';
 
 type Random = () => number;
 
@@ -234,6 +234,61 @@ export const STORY_NAMES: Partial<Record<StationId, { masculine: string[]; femin
   },
 };
 
+// ---- How a Kahani opens and closes -------------------------------------------------------------------
+
+export interface StoryOpening {
+  id: string;
+  /** What lines 1–2 do; the title is woven in, never announced */
+  how: string;
+}
+
+/**
+ * Radio dramas never open the same way twice. Each opening drops the listener into the story first and
+ * lets the narrator name it in passing, instead of announcing "today's story is…".
+ */
+export const STORY_OPENINGS: StoryOpening[] = [
+  {
+    id: 'cold-open',
+    how: 'Line 1 is a character, mid-sentence, in the middle of trouble (no narrator first). Line 2, narrator: where and when we are, and the title said in passing, e.g. "…and that is how <title> began."',
+  },
+  {
+    id: 'one-image',
+    how: 'Line 1, narrator: one sharp image or sound from the setting, in under 12 words. Line 2, narrator: the title woven into a sentence that pulls us in, never "today\'s story is".',
+  },
+  {
+    id: 'question',
+    how: 'Line 1, narrator: a quiet question to the listener that the story will answer (tied to the hook). Line 2: a character answers it without knowing they are answering it; the narrator names the title on line 3.',
+  },
+  {
+    id: 'overheard',
+    how: 'Lines 1–2: two characters arguing or whispering mid-scene, as if we walked in on them. Line 3, narrator: steps in with the place, the time and the title.',
+  },
+  {
+    id: 'note-read-aloud',
+    how: 'Line 1: a character reads a short note, message or voice note aloud (the hook is in it). Line 2, narrator: who found it, where, and the title in passing.',
+  },
+  {
+    id: 'ending-first',
+    how: 'Line 1, narrator: the strange last moment of the story, without explaining it. Line 2, narrator: rewinds ("but an hour earlier…") and names the title.',
+  },
+];
+
+export interface StoryClosing {
+  id: string;
+  how: string;
+}
+
+/** How the last line lands: never a moral, never "the end". */
+export const STORY_CLOSINGS: StoryClosing[] = [
+  { id: 'character-last', how: 'A character has the last line: short, in their own voice, and it lands the twist. No narrator after it.' },
+  { id: 'callback', how: 'The last line echoes the very first line, now meaning something new.' },
+  { id: 'quiet-image', how: 'Narrator: one quiet, specific image to end on (an object, a sound, a light), under 14 words.' },
+  { id: 'button-joke', how: 'A tiny, character-true joke after the twist, like the button on a sitcom scene.' },
+  { id: 'open-door', how: 'Narrator: the twist lands, then one line hints the story is not quite over, without a cliffhanger.' },
+];
+
+// ---- The brief ------------------------------------------------------------------------------------
+
 export interface StoryBrief {
   genre: string;
   setting: string;
@@ -241,28 +296,92 @@ export interface StoryBrief {
   telling: string;
   twist: string;
   ending: string;
+  opening: StoryOpening;
+  closing: StoryClosing;
   names: { masculine: string[]; feminine: string[] };
 }
 
-/** A fresh, specific premise for one Kahani. Half the settings come from the station's own region. */
-export function storyBrief(station: StationId, daypart: Daypart, random: Random = Math.random): StoryBrief {
+/** Ingredients used recently (by any listener of this station): the brief avoids them while others remain. */
+export interface StoryAvoid {
+  settings?: Iterable<string>;
+  hooks?: Iterable<string>;
+  twists?: Iterable<string>;
+  openings?: Iterable<string>;
+  names?: Iterable<string>;
+}
+
+/** Picks from the items not used recently; falls back to the whole list when everything was. */
+function fresh<T>(list: readonly T[], used: Iterable<string> | undefined, key: (t: T) => string, random: Random): T {
+  const avoid = new Set(used ?? []);
+  const unused = list.filter((item) => !avoid.has(key(item)));
+  return pickWith(unused.length ? unused : list, random);
+}
+
+/** A fresh, specific premise for one Kahani. Most settings come from the station's own region. */
+export function storyBrief(station: StationId, daypart: Daypart, random: Random = Math.random, avoid: StoryAvoid = {}): StoryBrief {
   const local = STORY_SETTINGS[station] ?? [];
   const settings = local.length && random() < 0.6 ? local : [...local, ...STORY_SETTINGS.any];
   const names = STORY_NAMES[station] ?? STORY_NAMES.hi!;
+  const usedNames = new Set(avoid.names ?? []);
+  const freshNames = (list: string[]) => {
+    const unused = list.filter((n) => !usedNames.has(n));
+    return sample(unused.length >= 4 ? unused : list, 4, random);
+  };
+  const same = (t: string) => t;
   return {
     genre: pickWith(STORY_GENRES[daypart], random),
-    setting: pickWith(settings, random),
-    hook: pickWith(STORY_HOOKS, random),
+    setting: fresh(settings, avoid.settings, same, random),
+    hook: fresh(STORY_HOOKS, avoid.hooks, same, random),
     telling: pickWith(STORY_TELLINGS, random),
-    twist: pickWith(STORY_TWISTS, random),
+    twist: fresh(STORY_TWISTS, avoid.twists, same, random),
     ending: pickWith(STORY_ENDINGS, random),
-    names: { masculine: sample(names.masculine, 4, random), feminine: sample(names.feminine, 4, random) },
+    opening: fresh(STORY_OPENINGS, avoid.openings, (o) => o.id, random),
+    closing: pickWith(STORY_CLOSINGS, random),
+    names: { masculine: freshNames(names.masculine), feminine: freshNames(names.feminine) },
   };
+}
+
+// ---- Casting ------------------------------------------------------------------------------------------
+
+export type StoryRole = 'narrator' | 'char_a' | 'char_b' | 'char_kid';
+export type StoryCast = Record<StoryRole, Voice>;
+
+const SPOOKY = /ghost|spooky|eerie|night train|urban legend|empty road|strange|mystery|suspense|time-loop|lighthouse|night-shift/i;
+
+/**
+ * A fresh cast for one story from the station's verified voices: a narrator who suits the genre, two
+ * characters of different voices (either may be a woman or a man), and a kid. No voice plays two roles.
+ */
+export function castStory(station: Station, brief: Pick<StoryBrief, 'genre'>, random: Random = Math.random): StoryCast {
+  const pool: StoryPool | undefined = station.storyPool;
+  const base: StoryCast = { narrator: station.cast.narrator, char_a: station.cast.char_a, char_b: station.cast.char_b, char_kid: station.cast.char_kid };
+  if (!pool) return base;
+  const taken = new Set<string>();
+  const take = (options: Voice[] | undefined, fallback: Voice): Voice => {
+    const free = (options ?? []).filter((v) => !taken.has(v.speaker));
+    const choice = free.length ? pickWith(free, random) : fallback;
+    taken.add(choice.speaker);
+    return choice;
+  };
+  const spooky = SPOOKY.test(brief.genre);
+  const narrators = spooky && pool.spookyNarrators?.length ? pool.spookyNarrators : pool.narrators;
+  const narrator = take(narrators, base.narrator);
+  // Character A and B: one man and one woman by default, in either order; two men or two women sometimes
+  const men = pool.men;
+  const women = pool.women;
+  const roll = random();
+  const [firstPool, secondPool] =
+    roll < 0.4 ? [men, women] : roll < 0.8 ? [women, men] : roll < 0.9 ? [men, men] : [women, women];
+  const charA = take(firstPool.length ? firstPool : men.length ? men : women, base.char_a);
+  const charB = take(secondPool.length ? secondPool : women.length ? women : men, base.char_b);
+  const kid = take(pool.kids, base.char_kid);
+  return { narrator, char_a: charA, char_b: charB, char_kid: kid };
 }
 
 /** Story openings and endings that make every Kahani sound alike. */
 export const STORY_CLICHES: Partial<Record<StationId, string[]>> & { any: string[] } = {
   any: [
+    '"today\'s story is…" or announcing the story corner by name',
     '"once upon a time"',
     'it was all a dream',
     'a moral at the end ("so the lesson is…")',
@@ -282,11 +401,11 @@ export const STORY_CLICHES: Partial<Record<StationId, string[]>> & { any: string
 
 /** Phrases that open or close a story in the tired way; any of them in a script triggers the retry. */
 export const STORY_BANNED: Partial<Record<StationId, RegExp>> = {
-  hi: /एक बार की बात है|सब हैरान रह गए|वो सपना था|यह सपना था|सीख मिलती है/u,
-  mr: /एकदा काय झालं|ते स्वप्न होतं/u,
-  gu: /એક વખતની વાત છે|એ સપનું હતું/u,
-  bn: /এক দেশে ছিল|সবটাই স্বপ্ন ছিল/u,
-  ta: /ஒரு ஊர்ல ஒரு|அது ஒரு கனவு/u,
+  hi: /एक बार की बात है|सब हैरान रह गए|वो सपना था|यह सपना था|सीख मिलती है|आज की कहानी|तरंग कहानी|कहानी कॉर्नर/u,
+  mr: /एकदा काय झालं|ते स्वप्न होतं|आजची गोष्ट|गोष्टींचा कट्टा/u,
+  gu: /એક વખતની વાત છે|એ સપનું હતું|આજની વાર્તા|વાર્તાનો ઓટલો/u,
+  bn: /এক দেশে ছিল|সবটাই স্বপ্ন ছিল|আজকের গল্প|গল্পের আসর/u,
+  ta: /ஒரு ஊர்ல ஒரு|அது ஒரு கனவு|இன்றைய கதை|கதை நேரம்/u,
 };
 
 // ---- Ads -----------------------------------------------------------------------------------------
@@ -394,8 +513,15 @@ export const AD_FORMATS: AdFormat[] = [
   },
 ];
 
-export function adBrief(random: Random = Math.random): { category: string; format: AdFormat } {
-  return { category: pickWith(AD_CATEGORIES, random), format: pickWith(AD_FORMATS, random) };
+/** A category and a format for one ad, skipping those aired recently on the station. */
+export function adBrief(
+  random: Random = Math.random,
+  avoid: { categories?: Iterable<string>; formats?: Iterable<string> } = {},
+): { category: string; format: AdFormat } {
+  return {
+    category: fresh(AD_CATEGORIES, avoid.categories, (c) => c, random),
+    format: fresh(AD_FORMATS, avoid.formats, (f) => f.id, random),
+  };
 }
 
 // ---- RJ links ------------------------------------------------------------------------------------

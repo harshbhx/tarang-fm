@@ -42,6 +42,34 @@ const hindi: Station = {
     { from: 16, to: 21, name: 'घर वापसी', rjName: 'सनी', rj: voice('sunny_hi_reels', 1.05, 0.8, M) },
     { from: 21, to: 6, name: 'रात की बात', rjName: 'रतन', rj: voice('ratan_hi_latenight_warm', 0.95, 0.7, M) },
   ],
+  storyPool: {
+    narrators: [
+      voice('shubh_hi_stories_dramatic', 0.95, 0.8, M),
+      voice('shubh_hi_stories_mixed', 0.97, 0.78, M),
+      voice('sanchita_hi_romantic', 0.95, 0.75, F),
+      voice('ritu_hi_social_lively', 1.0, 0.75, F),
+    ],
+    spookyNarrators: [
+      voice('ratan_hi_latenight_warm', 0.92, 0.7, M),
+      voice('shubh_hi_stories_dramatic', 0.92, 0.8, M),
+      voice('mukul_hi_suspense', 0.9, 0.75, M),
+    ],
+    men: [
+      voice('mukul_hi_suspense', 0.9, 0.8, M),
+      voice('anand_hi_news', 1.0, 0.75, M),
+      voice('sunny_hi_reels', 1.05, 0.85, M),
+      voice('mukul_hi_ads', 1.0, 0.85, M),
+      voice('ratan_hi_latenight_warm', 0.95, 0.8, M),
+    ],
+    women: [
+      voice('sanchita_hi_romantic', 1.0, 0.85, F),
+      voice('ritu_hi_ads_informal', 1.0, 0.85, F),
+      voice('simran_hi_social_excited', 1.0, 0.85, F),
+      voice('ritu_hi_social_lively', 1.0, 0.85, F),
+      voice('ishita_hi_ads', 1.0, 0.8, F),
+    ],
+    kids: [voice('chhavi_hi_kids', 1.05, 0.8, F), voice('kunal_hi_kids', 1.05, 0.8, M)],
+  },
 };
 
 const tamil: Station = {
@@ -67,6 +95,19 @@ const tamil: Station = {
     char_a: voice('aravind_ta_suspense', 0.9, 0.8, M),
     char_b: voice('gokul_ta_narration', 1.05, 0.9, M),
     char_kid: voice('aravind_ta_ads', 1.15, 0.9, M),
+  },
+  // Every live Tamil voice is masculine, so Tamil stories have male characters
+  storyPool: {
+    narrators: [voice('vijay_ta_narration', 0.95, 0.7, M), voice('gokul_ta_narration', 0.95, 0.75, M)],
+    spookyNarrators: [voice('aravind_ta_suspense', 0.9, 0.75, M), voice('vijay_ta_narration', 0.92, 0.7, M)],
+    men: [
+      voice('aravind_ta_suspense', 0.9, 0.8, M),
+      voice('gokul_ta_narration', 1.05, 0.9, M),
+      voice('aravind_ta_ads', 1.0, 0.85, M),
+      voice('vijay_ta_narration', 1.0, 0.8, M),
+    ],
+    women: [],
+    kids: [voice('aravind_ta_ads', 1.15, 0.9, M)],
   },
 };
 
@@ -94,6 +135,13 @@ const bangla: Station = {
     char_b: voice('arnab_bn_conversation', 1.0, 0.9, M),
     char_kid: voice('roopa_bn_conversational', 1.15, 0.9, F),
   },
+  storyPool: {
+    narrators: [voice('roopa_bn_conversational', 0.95, 0.7, F), voice('arnab_bn_conversation', 0.95, 0.75, M)],
+    spookyNarrators: [voice('bimal_bn_suspense', 0.9, 0.75, M)],
+    men: [voice('bimal_bn_suspense', 0.9, 0.8, M), voice('arnab_bn_conversation', 1.0, 0.9, M)],
+    women: [voice('roopa_bn_conversational', 1.0, 0.9, F)],
+    kids: [voice('roopa_bn_conversational', 1.15, 0.9, F)],
+  },
 };
 
 const marathi: Station = {
@@ -119,6 +167,26 @@ const marathi: Station = {
     char_a: voice('mukul_mr_stories', 0.9, 0.8, M),
     char_b: voice('soham_mr_narration', 1.0, 0.85, M),
     char_kid: voice('mrunal_mr_narration', 1.1, 0.85, F),
+  },
+  storyPool: {
+    narrators: [
+      voice('rupali_mr_stories', 0.95, 0.75, F),
+      voice('neha_mr_narration', 0.95, 0.7, F),
+      voice('soham_mr_narration', 0.95, 0.75, M),
+    ],
+    spookyNarrators: [voice('mukul_mr_stories', 0.9, 0.75, M), voice('soham_mr_narration', 0.92, 0.75, M)],
+    men: [
+      voice('mukul_mr_stories', 0.9, 0.8, M),
+      voice('soham_mr_narration', 1.0, 0.85, M),
+      voice('nilesh_mr_conversation', 1.0, 0.85, M),
+    ],
+    women: [
+      voice('ishita_mr_conversational', 1.0, 0.85, F),
+      voice('ritu_mr_insurance', 1.0, 0.85, F),
+      voice('neha_mr_narration', 1.0, 0.8, F),
+      voice('rupali_mr_stories', 1.0, 0.8, F),
+    ],
+    kids: [voice('mrunal_mr_narration', 1.1, 0.85, F)],
   },
 };
 
@@ -146,6 +214,12 @@ const gujarati: Station = {
     char_b: voice('pooja_gu_conversational', 1.05, 0.9, F),
     char_kid: voice('pooja_gu_customer', 1.15, 0.9, F),
   },
+  storyPool: {
+    narrators: [voice('pooja_gu_customer', 0.95, 0.7, F), voice('bhavik_gu_conversation', 0.95, 0.75, M)],
+    men: [voice('bhavik_gu_conversation', 0.95, 0.8, M)],
+    women: [voice('pooja_gu_conversational', 1.05, 0.9, F), voice('pooja_gu_customer', 1.0, 0.85, F)],
+    kids: [voice('pooja_gu_customer', 1.15, 0.9, F)],
+  },
 };
 
 /** Stations on the dial, in frequency order. */
@@ -163,8 +237,14 @@ export function getStation(id: StationId): Station {
 
 /** Every speaker in any station cast: the /api/tts allowlist. */
 export const CAST_SPEAKERS: ReadonlySet<string> = new Set(
-  STATIONS.flatMap((s) => [...Object.values(s.cast), ...(s.shows ?? []).map((show) => show.rj)].map((v) => v.speaker)),
+  STATIONS.flatMap((s) => [...Object.values(s.cast), ...(s.shows ?? []).map((show) => show.rj), ...storyVoices(s)].map((v) => v.speaker)),
 );
+
+/** Every voice a station's stories may be cast from. */
+export function storyVoices(station: Station): Voice[] {
+  const p = station.storyPool;
+  return p ? [...p.narrators, ...(p.spookyNarrators ?? []), ...p.men, ...p.women, ...p.kids] : [];
+}
 
 /** The show on air at a local hour, if the station runs daypart shows. */
 export function showAt(station: Station, hour: number): Show | undefined {

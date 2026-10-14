@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { SegmentRequest } from '../shared/schemas';
-import { STATION_BY_ID } from '../shared/stations';
+import { CAST_SPEAKERS, STATION_BY_ID, STATIONS, storyVoices } from '../shared/stations';
 import type { Station } from '../shared/types';
 import { segmentMessages } from './prompts';
-import { AD_FORMATS, adBrief, sample, STORY_SETTINGS, storyBrief } from './story';
+import { AD_FORMATS, adBrief, castStory, sample, STORY_OPENINGS, STORY_SETTINGS, storyBrief } from './story';
 import { storyProblems } from './validate';
 
 /** Deterministic random numbers for repeatable tests. */
@@ -88,13 +88,20 @@ describe('story quality gate', () => {
 
   it('passes a real radio play', () => {
     const play = [
-      line('narrator', 'तरंग कहानी… आज की कहानी: टिफ़िन का राज़।'),
+      line('narrator', 'दादर स्टेशन, सुबह 9:12 की लोकल, और यहीं से शुरू हुआ टिफ़िन का राज़।'),
       line('char_a', 'मेहर, ये टिफ़िन फिर मेरी डेस्क पर कैसे?'),
       line('char_b', 'कबीर, मुझे क्या पता, मैं तो अभी आई हूँ।'),
       line('char_kid', 'दीदी, इसमें आलू पराठे हैं!'),
       line('narrator', 'और तभी शटर खड़का।'),
     ];
     expect(storyProblems(hindi, play)).toEqual([]);
+  });
+
+  it('rejects the old "today\'s story" announcement in every language', () => {
+    const chars = [line('char_a', 'चलो।'), line('char_b', 'रुको!')];
+    expect(storyProblems(hindi, [line('narrator', 'तरंग कहानी… आज की कहानी: टिफ़िन का राज़।'), ...chars]).some((p) => p.includes('stock story phrase'))).toBe(true);
+    const tamil = STATION_BY_ID.ta as Station;
+    expect(storyProblems(tamil, [line('narrator', 'இன்றைய கதை: ரகசிய டிபன்.'), ...chars]).some((p) => p.includes('stock story phrase'))).toBe(true);
   });
 
   it('rejects a narrated summary, a one-character story and stock phrases', () => {
@@ -107,5 +114,55 @@ describe('story quality gate', () => {
     expect(problems.some((p) => p.includes('mostly narration'))).toBe(true);
     expect(problems.some((p) => p.includes('two speaking characters'))).toBe(true);
     expect(problems.some((p) => p.includes('stock story phrase'))).toBe(true);
+  });
+});
+
+describe('story casting', () => {
+  it('casts every Hindi story differently, with no voice playing two parts', () => {
+    const random = seeded(21);
+    const casts = new Set<string>();
+    for (let i = 0; i < 60; i++) {
+      const cast = castStory(hindi, { genre: 'a comedy of errors' }, random);
+      const speakers = Object.values(cast).map((v) => v.speaker);
+      expect(new Set(speakers).size).toBe(4);
+      casts.add(speakers.join('|'));
+    }
+    expect(casts.size).toBeGreaterThan(25);
+  });
+
+  it('gives ghost stories and night mysteries a suspense narrator', () => {
+    const random = seeded(5);
+    for (let i = 0; i < 20; i++) {
+      const narrator = castStory(hindi, { genre: 'a mildly spooky ghost story where the ghost is not what it seems' }, random).narrator;
+      expect(['ratan_hi_latenight_warm', 'shubh_hi_stories_dramatic', 'mukul_hi_suspense']).toContain(narrator.speaker);
+    }
+  });
+
+  it('only casts voices the speech endpoint allows', () => {
+    for (const station of STATIONS) for (const v of storyVoices(station)) expect(CAST_SPEAKERS.has(v.speaker), v.speaker).toBe(true);
+  });
+
+  it('keeps Tamil stories on the masculine voices that exist', () => {
+    const tamil = STATION_BY_ID.ta as Station;
+    const cast = castStory(tamil, { genre: 'a romantic misunderstanding' }, seeded(9));
+    expect(Object.values(cast).every((v) => v.gender === 'masculine')).toBe(true);
+  });
+});
+
+describe('story openings', () => {
+  it('opens stories in many different ways and avoids the ones used recently', () => {
+    const random = seeded(13);
+    const openings = new Set(Array.from({ length: 60 }, () => storyBrief('hi', 'night', random).opening.id));
+    expect(openings.size).toBe(STORY_OPENINGS.length);
+    const recent = STORY_OPENINGS.slice(0, -1).map((o) => o.id);
+    expect(storyBrief('hi', 'night', seeded(2), { openings: recent }).opening.id).toBe(STORY_OPENINGS[STORY_OPENINGS.length - 1].id);
+  });
+
+  it('tells the model to drop the listener into the story, never to announce it', () => {
+    const p = segmentMessages(hindi, 'kahani', req())[1].content;
+    expect(p).toContain('needs no introduction');
+    expect(p).toContain('How it opens (');
+    expect(p).toContain('Never announce it');
+    expect(p).not.toContain('आज की कहानी: <title>');
   });
 });
