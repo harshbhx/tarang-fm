@@ -2,12 +2,13 @@ import { Hono, type Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { z } from 'zod';
-import { CALL_MAX_BYTES, TTS_SAMPLE_RATE } from '../shared/constants';
+import { CALL_MAX_BYTES, STUDIO_NUMBER, TTS_SAMPLE_RATE } from '../shared/constants';
 import { CallMetaSchema, SegmentRequestSchema, StationIdSchema, TtsRequestSchema } from '../shared/schemas';
 import { CAST_SPEAKERS, STATION_BY_ID } from '../shared/stations';
 import type { Station } from '../shared/types';
 import { audioFile, handleCall } from './call';
 import { getContext, getHeadlines } from './context';
+import { phoneHeadlines, recentCalls, saveCall, toPhoneCall, tokenMatches } from './phone';
 import { createSarvam, SarvamError } from './sarvam';
 import { buildSegment } from './segment';
 import { Timings } from './timing';
@@ -192,6 +193,34 @@ app.post('/call', rateLimit((e) => e.RL_CALL), requireKey, async (c) => {
   } catch (err) {
     return upstreamFailure(c, err, 'Call-in');
   }
+});
+
+// ---- Studio phone line (Sarvam Voice Agents) ----------------------------------
+
+/** Headlines for the phone RJ's news tool. */
+app.get('/phone/headlines', rateLimit((e) => e.RL_SEGMENT), async (c) => {
+  const parsed = StationIdSchema.safeParse(c.req.query('station') ?? 'hi');
+  const station = parsed.success ? stationFor(parsed.data) : undefined;
+  if (!station) return apiError(c, 400, 'unknown_station', 'Unknown station.');
+  const city = c.req.query('city')?.trim().slice(0, 60) || undefined;
+  const body = await phoneHeadlines(station, new URL(c.req.url).origin, city, waitUntil(c));
+  return c.json(body, 200, { 'Cache-Control': 'no-store' });
+});
+
+/** Call-end webhook from the Sarvam deployment: keeps what the caller wants read on air. */
+app.post('/phone/call-end', async (c) => {
+  if (!tokenMatches(c.req.query('token'), c.env.PHONE_WEBHOOK_TOKEN)) return apiError(c, 401, 'unauthorized', 'Bad token.');
+  const body = await readJson(c);
+  if (!body.ok) return apiError(c, 400, 'invalid_json', 'Request body must be JSON.');
+  const call = toPhoneCall(body.value);
+  if (call) await saveCall(c.env.PHONE, call);
+  return c.json({ ok: true, stored: Boolean(call) }, 200);
+});
+
+/** Recent studio calls for the web show (numbers masked). */
+app.get('/phone/recent', async (c) => {
+  const recent = await recentCalls(c.env.PHONE).catch(() => ({ number: STUDIO_NUMBER, calls: [] }));
+  return c.json(recent, 200, { 'Cache-Control': 'no-store' });
 });
 
 app.notFound((c) => apiError(c, 404, 'not_found', `No route for ${c.req.method} ${c.req.path}.`));

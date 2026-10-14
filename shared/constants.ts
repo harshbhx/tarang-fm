@@ -35,3 +35,7 @@ export const PAUSE_AFTER_MS: Record<SegmentType, number> = {
   ad_break: 250,
   kahani: 400,
 };
+
+/** The studio call-in line (Sarvam Voice Agents inbound number). */
+export const STUDIO_NUMBER = '+917965854148';
+export const STUDIO_NUMBER_DISPLAY = '+91 79658 54148';

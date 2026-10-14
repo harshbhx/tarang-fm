@@ -128,3 +128,25 @@ export interface CallResponse {
 export interface ApiError {
   error: { code: string; message: string };
 }
+
+export type PhoneRequestType = 'dedication' | 'story_request' | 'news_request' | 'chat' | 'other';
+
+/** A call to the studio line, as the web show sees it (the caller's number is masked). */
+export interface PhoneCall {
+  id: string;
+  /** ISO timestamp of the end of the call */
+  at: string;
+  name?: string;
+  city?: string;
+  /** e.g. '+91 ••••• 4148' */
+  maskedNumber: string;
+  type: PhoneRequestType;
+  /** Short on-air message in the caller's language */
+  message: string;
+  theme?: string;
+}
+
+export interface PhoneRecentResponse {
+  number: string;
+  calls: PhoneCall[];
+}
