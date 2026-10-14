@@ -3,6 +3,7 @@ import type { CallMeta, SegmentRequest } from '../../shared/schemas';
 import { getStation } from '../../shared/stations';
 import type { CallResponse, Line, PhoneCall, PhoneRecentResponse, Segment, StationId } from '../../shared/types';
 import type { AudioEngine, PlayResult, Recorder } from '../audio/types';
+import { readCallStream, type LiveCallResponse } from './api';
 import { RadioController, producerPlan, toDedication, type RadioApi } from './controller';
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -125,7 +126,7 @@ function harness() {
   const skipDedications = new Set<string>();
   let segDelay = 3;
   let callDelay = 5;
-  let callResponse: CallResponse = {
+  let callResponse: LiveCallResponse = {
     transcript: 'ek sher ki kahani sunao',
     transcriptEn: 'tell me a story about a tiger',
     intent: 'story_request',
@@ -214,7 +215,7 @@ function harness() {
     skipDedications,
     setSegDelay: (ms: number) => (segDelay = ms),
     setCallDelay: (ms: number) => (callDelay = ms),
-    setCallResponse: (r: CallResponse) => (callResponse = r),
+    setCallResponse: (r: LiveCallResponse) => (callResponse = r),
   };
 }
 
@@ -360,7 +361,59 @@ describe('RadioController programme', () => {
   });
 });
 
+describe('streamed call responses', () => {
+  const chunked = (...parts: string[]) =>
+    new ReadableStream<Uint8Array>({
+      start(c) {
+        const enc = new TextEncoder();
+        for (const p of parts) c.enqueue(enc.encode(p));
+        c.close();
+      },
+    });
+
+  it('hands over the reply from line 1 and the subtitles from line 2, across chunk boundaries', async () => {
+    const reply = { transcript: 'नमस्ते', intent: 'chat', reply: rjLine('hi', 'जवाब') };
+    const body = JSON.stringify(reply);
+    const res = await readCallStream(chunked(body.slice(0, 10), `${body.slice(10)}\n{"subti`, 'tles":{"replyEn":"Answer"}}\n'));
+    expect(res.reply.text).toBe('जवाब');
+    expect(await res.subtitles).toEqual({ replyEn: 'Answer' });
+  });
+
+  it('resolves empty subtitles when the stream ends after the reply', async () => {
+    const res = await readCallStream(chunked(`${JSON.stringify({ transcript: '', intent: 'retry', reply: rjLine('hi', 'x') })}\n`));
+    expect(await res.subtitles).toEqual({});
+  });
+});
+
 describe('RadioController call-in', () => {
+  it('speaks the reply before its subtitles arrive, then fills them in', async () => {
+    const h = setup();
+    let release: (s: { transcriptEn?: string; replyEn?: string }) => void = () => {};
+    const subtitles = new Promise<{ transcriptEn?: string; replyEn?: string }>((resolve) => (release = resolve));
+    const { en: _en, ...bare } = rjLine('hi', 'reply-text');
+    h.setCallResponse({ transcript: 'नमस्ते सनी', intent: 'chat', reply: bare, subtitles });
+    let called = false;
+    h.engine.onPlay = (text) => {
+      if (text === 'hi:rj_link:0' && !called) {
+        called = true;
+        void h.c.startCall();
+      }
+    };
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.c.getSnapshot().status).toBe('call_recording'));
+    await delay(25);
+    void h.c.endCall();
+    await waitFor(() => expect(h.engine.played).toContain('reply-text'));
+    expect(h.c.getSnapshot().call?.replyEn).toBeUndefined();
+
+    release({ transcriptEn: 'Hello Sunny', replyEn: 'The reply' });
+    await waitFor(() => expect(h.c.getSnapshot().call?.replyEn).toBe('The reply'));
+    const s = h.c.getSnapshot();
+    const caps = [...s.history, s.caption];
+    expect(caps.find((c) => c?.role === 'caller')?.en).toBe('Hello Sunny');
+    expect(caps.find((c) => c?.text === 'reply-text')?.en).toBe('The reply');
+  });
+
   it('puts the caller on air, queues the requested story and resumes from the next line', async () => {
     const h = setup();
     let called = false;

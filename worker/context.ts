@@ -188,6 +188,16 @@ async function cachedFeed(key: string, feeds: Feed[], origin: string, waitUntil?
   }
 }
 
+/**
+ * The city to search local news for. Only listeners in India get city news: the feeds search Indian-language
+ * news, so a city abroad matches noise (a film called "Columbus", say). An unknown country (local dev) keeps it.
+ */
+export function localNewsCity(city: string | undefined, country: string | undefined): string | undefined {
+  const place = city?.trim();
+  if (!place) return undefined;
+  return !country || country.toUpperCase() === 'IN' ? place : undefined;
+}
+
 /** Up to LOCAL_LIMIT stories from the listener's city, then national headlines, NEWS_LIMIT in total. */
 export function mixHeadlines(local: Source[], national: Source[]): Source[] {
   const out: Source[] = [];
@@ -272,7 +282,7 @@ export async function getContext(
   const cf = (request as Request & { cf?: IncomingRequestCfProperties }).cf;
   const city = cf?.city || undefined;
   const [headlines, weather] = await Promise.all([
-    getHeadlines(station, new URL(request.url).origin, waitUntil, city).catch(() => []),
+    getHeadlines(station, new URL(request.url).origin, waitUntil, localNewsCity(city, cf?.country)).catch(() => []),
     getWeather(cf?.latitude, cf?.longitude),
   ]);
   return {

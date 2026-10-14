@@ -3,7 +3,6 @@ import { CALL_MAX_SECONDS, LISTENER_NAME_MAX, PAUSE_AFTER_MS } from '../../share
 import type { CallMeta, Dedication, SegmentRequest } from '../../shared/schemas';
 import { getStation, STATION_BY_ID } from '../../shared/stations';
 import type {
-  CallResponse,
   Line,
   Mood,
   PhoneCall,
@@ -17,7 +16,7 @@ import type {
 } from '../../shared/types';
 import type { AudioEngine, Recorder } from '../audio/types';
 import * as defaultApi from './api';
-import { readAhead } from './api';
+import { readAhead, type CallSubtitles, type LiveCallResponse } from './api';
 import { entryKey, firstEntry, nextEntry, withStoryRequest, type ClockEntry } from './clock';
 import { cleanListenerName, listenerContext, loadListenerName, saveListenerName } from './listener';
 import {
@@ -516,7 +515,7 @@ export class RadioController implements RadioActions {
     const controller = new AbortController();
     this.callAbort = controller;
     const station = this.station();
-    let res: CallResponse;
+    let res: LiveCallResponse;
     try {
       const meta: CallMeta = {
         station: station.id,
@@ -1083,7 +1082,7 @@ export class RadioController implements RadioActions {
     return { ...c, lineIndex: next, started: false };
   }
 
-  private async putOnAir(gen: number, station: Station, res: CallResponse, signal: AbortSignal): Promise<void> {
+  private async putOnAir(gen: number, station: Station, res: LiveCallResponse, signal: AbortSignal): Promise<void> {
     if (!res || typeof res !== 'object') throw new Error('Malformed call response');
     const transcript = typeof res.transcript === 'string' ? res.transcript.trim() : '';
     if (transcript) {
@@ -1106,6 +1105,10 @@ export class RadioController implements RadioActions {
     if (gen !== this.gen) return;
 
     const call: CallState = { transcript, transcriptEn: res.transcriptEn, reply: reply?.text, replyEn: reply?.en };
+    // Streamed calls send subtitles after the reply; they're filled in wherever the call is still on screen.
+    void res.subtitles?.then((subs) => {
+      if (gen === this.gen) this.applyCallSubtitles(subs, transcript, reply);
+    });
     if (transcript) {
       const name = cleanListenerName(this.state.listener.name);
       const caption: Caption = { role: 'caller', speaker: '', label: name ?? 'Caller', text: transcript };
@@ -1147,6 +1150,28 @@ export class RadioController implements RadioActions {
       await attempt(() => this.engine.silence(reply.pauseAfterMs || PAUSE_AFTER_MS.rj_link));
     }
     this.finishCall(gen);
+  }
+
+  /** Adds late-arriving English subtitles to the call panel and to the caller's and RJ's captions. */
+  private applyCallSubtitles(subs: CallSubtitles, transcript: string, reply: Line | null): void {
+    if (!subs.transcriptEn && !subs.replyEn) return;
+    const fill = (c: Caption): Caption => {
+      if (c.en) return c;
+      if (subs.transcriptEn && c.role === 'caller' && c.text === transcript) return { ...c, en: subs.transcriptEn };
+      if (subs.replyEn && reply && c.role !== 'caller' && c.text === reply.text) return { ...c, en: subs.replyEn };
+      return c;
+    };
+    const patch: Partial<RadioState> = { history: this.state.history.map(fill) };
+    if (this.state.caption) patch.caption = fill(this.state.caption);
+    const call = this.state.call;
+    if (call && call.transcript === transcript) {
+      patch.call = {
+        ...call,
+        transcriptEn: call.transcriptEn ?? subs.transcriptEn,
+        replyEn: call.replyEn ?? subs.replyEn,
+      };
+    }
+    this.set(patch);
   }
 
   /** Makes the segment after the current one a kahani on the caller's theme. */

@@ -349,7 +349,7 @@ function Show({
         <StudioLinePanel
           phone={state.phone}
           phoneStatus={state.phoneStatus}
-          tunedIn={state.status !== 'idle' && state.status !== 'error' && state.status !== 'paused'}
+          radio={state.status === 'paused' ? 'paused' : state.status === 'idle' || state.status === 'error' ? 'off' : 'live'}
           className="below-wide"
         />
       </div>

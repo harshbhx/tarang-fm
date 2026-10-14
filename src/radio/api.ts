@@ -109,14 +109,60 @@ export function audioFilename(mime: string): string {
   return 'call.webm';
 }
 
-export function postCall(blob: Blob, meta: CallMeta, signal?: AbortSignal): Promise<CallResponse> {
+/** English subtitles for a call; they arrive after the reply on a streamed response. */
+export interface CallSubtitles {
+  transcriptEn?: string;
+  replyEn?: string;
+}
+
+/** A call response, plus its subtitles still on the way when the server streamed it. */
+export type LiveCallResponse = CallResponse & { subtitles?: Promise<CallSubtitles> };
+
+const NDJSON = 'application/x-ndjson';
+
+export async function postCall(blob: Blob, meta: CallMeta, signal?: AbortSignal): Promise<LiveCallResponse> {
   const form = new FormData();
   form.append('audio', blob, audioFilename(blob.type));
   form.append('station', meta.station);
   form.append('listener', JSON.stringify(meta.listener));
   if (meta.nowPlaying) form.append('nowPlaying', meta.nowPlaying);
   if (meta.showLog?.length) form.append('showLog', JSON.stringify(meta.showLog));
-  return json<CallResponse>('/api/call', { method: 'POST', body: form, signal });
+  const res = await send('/api/call', { method: 'POST', body: form, signal, headers: { accept: `${NDJSON}, application/json` } });
+  if (!res.headers.get('content-type')?.includes(NDJSON) || !res.body) return (await res.json()) as CallResponse;
+  return readCallStream(res.body);
+}
+
+/** Resolves with line 1 (the reply) as soon as it arrives; `subtitles` resolves with line 2. */
+export async function readCallStream(body: ReadableStream<Uint8Array>): Promise<LiveCallResponse> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const nextLine = async (): Promise<string | null> => {
+    for (;;) {
+      const at = buffer.indexOf('\n');
+      if (at >= 0) {
+        const line = buffer.slice(0, at);
+        buffer = buffer.slice(at + 1);
+        if (line.trim()) return line;
+        continue;
+      }
+      const { done, value } = await reader.read();
+      if (done) {
+        const rest = buffer.trim();
+        buffer = '';
+        return rest || null;
+      }
+      buffer += decoder.decode(value, { stream: true });
+    }
+  };
+  const first = await nextLine();
+  if (!first) throw new ApiRequestError('Empty call response', 'bad_response', 200);
+  const response = JSON.parse(first) as CallResponse;
+  const subtitles = nextLine()
+    .then((line) => (line ? ((JSON.parse(line) as { subtitles?: CallSubtitles }).subtitles ?? {}) : {}))
+    .catch(() => ({}))
+    .finally(() => reader.cancel().catch(() => undefined));
+  return { ...response, subtitles };
 }
 
 /**

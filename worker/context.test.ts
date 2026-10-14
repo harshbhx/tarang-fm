@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { STATION_BY_ID } from '../shared/stations';
-import { describeWeather, isGrim, localFeedUrl, localFeeds, mixHeadlines, nationalFeeds, parseRss, unwrapLink } from './context';
+import { describeWeather, isGrim, localFeedUrl, localFeeds, localNewsCity, mixHeadlines, nationalFeeds, parseRss, unwrapLink } from './context';
 
 const item = (title: string, n: number) =>
   `<item><title>${title} - Daily News</title><link>https://news.example.com/${n}</link><source url="https://x">Daily News</source></item>`;
@@ -76,5 +76,20 @@ describe('fallback feeds', () => {
     const hi = STATION_BY_ID.hi!;
     expect(nationalFeeds(hi).map((f) => f.url)).toEqual(['https://feeds.bbci.co.uk/hindi/rss.xml', hi.newsFeedUrl]);
     expect(localFeeds(hi, 'Vadodara')[0].url).toBe('https://www.bing.com/news/search?q=Vadodara&format=rss&setlang=hi-IN&cc=IN');
+  });
+});
+
+describe('localNewsCity', () => {
+  it('searches city news only for listeners in India', () => {
+    expect(localNewsCity('Vadodara', 'IN')).toBe('Vadodara');
+    expect(localNewsCity(' Pune ', 'in')).toBe('Pune');
+    expect(localNewsCity('Columbus', 'US')).toBeUndefined();
+    expect(localNewsCity('London', 'GB')).toBeUndefined();
+  });
+
+  it('keeps the city when the country is unknown, and ignores a blank city', () => {
+    expect(localNewsCity('Jammu', undefined)).toBe('Jammu');
+    expect(localNewsCity('  ', 'IN')).toBeUndefined();
+    expect(localNewsCity(undefined, 'IN')).toBeUndefined();
   });
 });

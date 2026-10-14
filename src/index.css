@@ -3169,6 +3169,15 @@
     box-shadow: inset 0 0 0 1px rgb(110 231 160 / 0.3);
   }
 
+  .studio-air[data-tone='held'] {
+    color: var(--tfm-fg-2);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tfm-led-amber) 25%, var(--tfm-line));
+  }
+
+  .studio-call[data-tone='held'] {
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tfm-led-amber) 22%, var(--tfm-line));
+  }
+
   .studio-air[data-tone='idle'] {
     color: var(--tfm-fg-3);
   }

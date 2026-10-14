@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { MAX_LINE_CHARS } from '../shared/constants';
 import { LlmCallSchema, type CallMeta, type LlmCall } from '../shared/schemas';
-import type { CallResponse, Station, TtsLanguage } from '../shared/types';
+import type { CallResponse, Line, Station, TtsLanguage } from '../shared/types';
 import { fallbacksFor } from './fallbacks';
 import { CALL_JSON_SCHEMA, CALL_PLAN, callMessages, rjOnAir } from './prompts';
 import type { Sarvam } from './sarvam';
@@ -55,6 +55,21 @@ function replyText(raw: string, station: Station): string {
   return text ? splitLine(text, MAX_LINE_CHARS)[0] : '';
 }
 
+/** English subtitles for a call, which arrive after the reply itself. */
+export interface CallSubtitles {
+  transcriptEn?: string;
+  replyEn?: string;
+}
+
+/** The reply as soon as it is written, and its subtitles once Translate finishes. */
+export interface CallResult {
+  response: CallResponse;
+  subtitles: Promise<CallSubtitles>;
+}
+
+const NO_SUBTITLES: Promise<CallSubtitles> = Promise.resolve({});
+
+/** The whole call in one object (subtitles included), for clients that don't stream. */
 export async function handleCall(
   sarvam: Sarvam,
   station: Station,
@@ -63,6 +78,26 @@ export async function handleCall(
   filename: string,
   timings: Timings,
 ): Promise<CallResponse> {
+  const { response, subtitles } = await startCall(sarvam, station, meta, audio, filename, timings);
+  const { transcriptEn, replyEn } = await subtitles;
+  const full: CallResponse = { ...response, reply: { ...response.reply } };
+  if (transcriptEn) full.transcriptEn = transcriptEn;
+  if (replyEn) full.reply.en = replyEn;
+  return full;
+}
+
+/**
+ * Call-in pipeline with Translate off the critical path: the reply is ready to speak as soon as the model
+ * has written it, while the caller's subtitle (started alongside the model) and the reply's subtitle finish.
+ */
+export async function startCall(
+  sarvam: Sarvam,
+  station: Station,
+  meta: CallMeta,
+  audio: Blob,
+  filename: string,
+  timings: Timings,
+): Promise<CallResult> {
   const fallback = fallbacksFor(station.id);
   const rjVoice = rjOnAir(station, meta.listener).voice;
   // No keyterms: on near-silent clips they bias Saaras into "hearing" them.
@@ -75,16 +110,22 @@ export async function handleCall(
 
   if (!/[\p{L}\p{N}]/u.test(transcript)) {
     const reply = toLine(station, 'rj', fallback.lineNotClear, 'rj_link', { voice: rjVoice, delivery: 'normal' });
-    await annotate(sarvam, [reply], station.language, timings, { cache: true });
-    return { transcript, language, intent: 'retry', reply };
+    return { response: { transcript, language, intent: 'retry', reply }, subtitles: replySubtitle(sarvam, reply, station, timings, true) };
   }
 
   if (soundsLikeCrisis(transcript)) {
     // Never left to the model: a caller in distress always hears the same warm reply and the helpline.
     const reply = toLine(station, 'rj', careReply(station.id), 'rj_link', { voice: rjVoice, delivery: 'warm' });
     reply.en = careReplyEn();
-    return { transcript, language, intent: 'care', reply };
+    return { response: { transcript, language, intent: 'care', reply }, subtitles: NO_SUBTITLES };
   }
+
+  // The caller's subtitle only needs the transcript, so it runs while the model writes the reply.
+  const source = (TRANSLATABLE.has(language) ? language : station.language) as TtsLanguage;
+  const transcriptEn: Promise<string | undefined> =
+    source === 'en-IN'
+      ? Promise.resolve(undefined)
+      : timings.measure('translate_caller', () => sarvam.translate(latinBrand(transcript), source).then(cleanSubtitle, () => undefined));
 
   let llm: LlmCall;
   try {
@@ -109,7 +150,7 @@ export async function handleCall(
   if (llm.intent === 'care') {
     const reply = toLine(station, 'rj', careReply(station.id), 'rj_link', { voice: rjVoice, delivery: 'warm' });
     reply.en = careReplyEn();
-    return { transcript, language, intent: 'care', reply };
+    return { response: { transcript, language, intent: 'care', reply }, subtitles: NO_SUBTITLES };
   }
 
   const nickname = llm.nickname?.trim() && !EMPTY.test(llm.nickname.trim()) ? llm.nickname.trim().slice(0, 40) : meta.listener.nickname;
@@ -119,15 +160,20 @@ export async function handleCall(
   const first = llm.lines[0]?.delivery;
   const delivery = isDelivery(first) ? first : 'normal';
   const reply = toLine(station, 'rj', spoken || cleanText(fallback.callThanks, station.language), 'rj_link', { voice: rjVoice, delivery });
-  const source = (TRANSLATABLE.has(language) ? language : station.language) as TtsLanguage;
-  const [transcriptEn] = await Promise.all([
-    source === 'en-IN'
-      ? Promise.resolve(undefined)
-      : timings.measure('translate_caller', () => sarvam.translate(latinBrand(transcript), source).then(cleanSubtitle, () => undefined)),
-    annotate(sarvam, [reply], station.language, timings),
-  ]);
-
   const rawTheme = llm.story_theme?.trim() ?? '';
   const theme = llm.intent === 'story_request' && !EMPTY.test(rawTheme) ? rawTheme : undefined;
-  return { transcript, transcriptEn, language, intent: llm.intent, theme, reply, nickname };
+  const subtitles = Promise.all([transcriptEn, replySubtitle(sarvam, reply, station, timings)]).then(([caller, rj]) => ({
+    ...(caller ? { transcriptEn: caller } : {}),
+    ...(rj.replyEn ? { replyEn: rj.replyEn } : {}),
+  }));
+  return { response: { transcript, language, intent: llm.intent, theme, reply, nickname }, subtitles };
+}
+
+/** The reply's English subtitle, translated on a copy so the reply can be sent before it's ready. */
+function replySubtitle(sarvam: Sarvam, reply: Line, station: Station, timings: Timings, cache = false): Promise<CallSubtitles> {
+  const copy: Line = { ...reply };
+  return annotate(sarvam, [copy], station.language, timings, { cache }).then(
+    () => (copy.en ? { replyEn: copy.en } : {}),
+    () => ({}),
+  );
 }

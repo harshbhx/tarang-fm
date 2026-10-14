@@ -105,14 +105,21 @@ export function StudioDockKey({ phone }: { phone?: RadioState['phone'] }) {
   );
 }
 
-type AirTag = { label: string; tone: 'waiting' | 'next' | 'live' | 'done' | 'idle' };
+type AirTag = { label: string; tone: 'waiting' | 'next' | 'live' | 'held' | 'done' | 'idle' };
+
+/** Whether this listener's radio is playing, paused, or not tuned in. */
+export type RadioMode = 'live' | 'paused' | 'off';
 
 /** Where a call is on its way to air, in words a listener understands. */
-export function airTag(status: PhoneAirStatus | undefined, tunedIn: boolean): AirTag {
+export function airTag(status: PhoneAirStatus | undefined, radio: RadioMode): AirTag {
+  if (status === 'aired') return { label: 'Read on air', tone: 'done' };
+  if (radio === 'paused') {
+    if (status === 'on_air') return { label: 'Paused mid-read', tone: 'held' };
+    return { label: status === 'up_next' ? 'Up next · paused' : 'Resume to hear it', tone: 'held' };
+  }
   if (status === 'on_air') return { label: 'On air now', tone: 'live' };
   if (status === 'up_next') return { label: 'Up next', tone: 'next' };
-  if (status === 'aired') return { label: 'Read on air', tone: 'done' };
-  return tunedIn ? { label: 'In the queue', tone: 'waiting' } : { label: 'Tune in to hear it', tone: 'idle' };
+  return radio === 'live' ? { label: 'In the queue', tone: 'waiting' } : { label: 'Tune in to hear it', tone: 'idle' };
 }
 
 function initials(name: string | undefined): string {
@@ -125,9 +132,9 @@ function initials(name: string | undefined): string {
     .toUpperCase();
 }
 
-function CallRow({ call, now, status, tunedIn }: { call: PhoneCall; now: number; status?: PhoneAirStatus; tunedIn: boolean }) {
+function CallRow({ call, now, status, radio }: { call: PhoneCall; now: number; status?: PhoneAirStatus; radio: RadioMode }) {
   const who = call.name?.trim() || 'A listener';
-  const tag = airTag(status, tunedIn);
+  const tag = airTag(status, radio);
   return (
     <li className="studio-call" data-tone={tag.tone}>
       <span className="studio-avatar" aria-hidden="true">
@@ -171,18 +178,18 @@ const STEPS: { title: string; body: string }[] = [
 export function StudioLinePanel({
   phone,
   phoneStatus = {},
-  tunedIn = false,
+  radio = 'off',
   className = '',
 }: {
   phone?: RadioState['phone'];
   phoneStatus?: RadioState['phoneStatus'];
-  tunedIn?: boolean;
+  radio?: RadioMode;
   className?: string;
 }) {
   const now = useNow(30_000);
   const { tel, display } = studioNumber(phone);
   const calls = phone?.calls ?? [];
-  const live = calls.find((c) => phoneStatus[c.id] === 'on_air');
+  const live = radio === 'live' ? calls.find((c) => phoneStatus[c.id] === 'on_air') : undefined;
   const waiting = calls.filter((c) => !phoneStatus[c.id] || phoneStatus[c.id] === 'up_next').length;
 
   return (
@@ -227,14 +234,20 @@ export function StudioLinePanel({
           <h3 className="studio-feed-title">From the studio line</h3>
           {calls.length ? (
             <p className="studio-feed-count" aria-live="polite">
-              {live ? 'Reading a call on air' : waiting ? `${waiting} waiting to go on air` : 'All calls read on air'}
+              {live
+                ? 'Reading a call on air'
+                : radio === 'paused' && waiting
+                  ? 'Paused · press play to hear your call'
+                  : waiting
+                    ? `${waiting} waiting to go on air`
+                    : 'All calls read on air'}
             </p>
           ) : null}
         </div>
         {calls.length ? (
           <ul className="studio-calls" aria-label="Recent calls">
             {calls.map((call) => (
-              <CallRow key={call.id} call={call} now={now} status={phoneStatus[call.id]} tunedIn={tunedIn} />
+              <CallRow key={call.id} call={call} now={now} status={phoneStatus[call.id]} radio={radio} />
             ))}
           </ul>
         ) : (

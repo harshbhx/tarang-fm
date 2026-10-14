@@ -5,9 +5,9 @@ import type { z } from 'zod';
 import { CALL_MAX_BYTES, STUDIO_NUMBER, TTS_SAMPLE_RATE } from '../shared/constants';
 import { CallMetaSchema, SegmentRequestSchema, StationIdSchema, TtsRequestSchema } from '../shared/schemas';
 import { CAST_SPEAKERS, STATION_BY_ID } from '../shared/stations';
-import type { Station } from '../shared/types';
-import { audioFile, handleCall } from './call';
-import { getContext, getHeadlines } from './context';
+import type { CallResponse, Station } from '../shared/types';
+import { audioFile, handleCall, startCall, type CallSubtitles } from './call';
+import { getContext, getHeadlines, localNewsCity } from './context';
 import { phoneHeadlines, recentCalls, saveCall, toPhoneCall, tokenMatches } from './phone';
 import { createSarvam, SarvamError } from './sarvam';
 import { capStream, maxPcmBytes } from './show';
@@ -38,6 +38,26 @@ function upstreamFailure(c: Ctx, err: unknown, what: string) {
   }
   console.error(`[api] ${what} failed: ${String(err)}`);
   return apiError(c, 500, 'internal_error', `${what} failed.`);
+}
+
+const NDJSON = 'application/x-ndjson';
+
+/** Line 1: the call response. Line 2: {"subtitles": {...}} (empty if Translate failed). */
+function ndjsonCall(response: CallResponse, subtitles: Promise<CallSubtitles>): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      controller.enqueue(encoder.encode(`${JSON.stringify(response)}\n`));
+      const subs = await subtitles.catch(() => ({}));
+      controller.enqueue(encoder.encode(`${JSON.stringify({ subtitles: subs })}\n`));
+      controller.close();
+    },
+  });
+}
+
+/** The listener's country code from Cloudflare's edge, when known. */
+function edgeCountry(request: Request): string | undefined {
+  return (request as Request & { cf?: IncomingRequestCfProperties }).cf?.country || undefined;
 }
 
 function waitUntil(c: Ctx): ((p: Promise<unknown>) => void) | undefined {
@@ -118,7 +138,7 @@ app.post('/segment', rateLimit((e) => e.RL_SEGMENT), requireKey, async (c) => {
   const sarvam = createSarvam(c.env.SARVAM_API_KEY);
   const origin = new URL(c.req.url).origin;
   const segment = await buildSegment(sarvam, station, parsed.data, c.var.timings, {
-    fetchHeadlines: () => getHeadlines(station, origin, waitUntil(c), parsed.data.listener.city),
+    fetchHeadlines: () => getHeadlines(station, origin, waitUntil(c), localNewsCity(parsed.data.listener.city, edgeCountry(c.req.raw))),
   });
   return c.json(segment, 200, { 'Cache-Control': 'no-store' });
 });
@@ -197,6 +217,14 @@ app.post('/call', rateLimit((e) => e.RL_CALL), requireKey, async (c) => {
     const sarvam = createSarvam(c.env.SARVAM_API_KEY);
     const file = audioFile(audio.type, audio.name);
     const blob = new Blob([await audio.arrayBuffer()], { type: file.type });
+    // A streaming client gets the reply the moment it's written (one NDJSON line), and the subtitles as a second line.
+    if (c.req.header('accept')?.includes(NDJSON)) {
+      const { response, subtitles } = await startCall(sarvam, station, parsed.data, blob, file.name, c.var.timings);
+      return new Response(ndjsonCall(response, subtitles), {
+        status: 200,
+        headers: { 'Content-Type': `${NDJSON}; charset=utf-8`, 'Cache-Control': 'no-store' },
+      });
+    }
     const result = await handleCall(sarvam, station, parsed.data, blob, file.name, c.var.timings);
     return c.json(result, 200, { 'Cache-Control': 'no-store' });
   } catch (err) {
