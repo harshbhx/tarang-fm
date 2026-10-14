@@ -668,26 +668,9 @@
     border-top: 1px solid var(--tfm-line);
   }
 
-  @media (min-width: 1024px) {
-    .dock {
-      position: static;
-      padding: 0;
-      background: none;
-      -webkit-backdrop-filter: none;
-      backdrop-filter: none;
-      border: 0;
-    }
-  }
-
   /* Reserve room for the fixed dock so the last caption line is never hidden */
   .with-dock {
     padding-bottom: calc(var(--dock-h, 152px) + 32px);
-  }
-
-  @media (min-width: 1024px) {
-    .with-dock {
-      padding-bottom: 48px;
-    }
   }
 
   /* Push-to-talk */

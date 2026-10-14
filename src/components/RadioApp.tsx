@@ -67,11 +67,11 @@ function RadioShell({ state, actions }: Props) {
     <div ref={rootRef} className="radio" style={{ '--accent': station.accent } as CSSProperties}>
       <AmbientBackground accent={station.accent} active={live} />
       <div
-        className={`mx-auto w-full max-w-3xl px-4 pt-[max(12px,env(safe-area-inset-top))] sm:px-6 lg:max-w-[1200px] lg:px-10 ${idle ? 'pb-12' : 'with-dock'}`}
+        className={`mx-auto w-full max-w-3xl px-4 pt-[max(12px,env(safe-area-inset-top))] sm:px-6 lg:max-w-[1120px] lg:px-10 ${idle ? 'pb-12' : 'with-dock'}`}
       >
-        <main className="grid lg:grid-cols-[minmax(0,500px)_minmax(0,1fr)] lg:items-start lg:gap-x-12 lg:pt-6">
+        <main className="flex flex-col lg:pt-4">
           {idle ? (
-            <header className="order-first pt-2 pb-5 lg:order-none lg:col-start-2 lg:row-start-1 lg:self-end lg:pt-0 lg:pb-6">
+            <header className="pt-2 pb-5 lg:pb-8">
               <h1 className="text-[1.5rem] leading-[1.1] font-semibold tracking-[-0.025em] text-balance sm:text-5xl lg:text-6xl">
                 AI radio in your language
               </h1>
@@ -87,7 +87,7 @@ function RadioShell({ state, actions }: Props) {
 
           <form
             onSubmit={submit}
-            className="flex flex-col gap-5 lg:sticky lg:top-6 lg:col-start-1 lg:row-span-2 lg:row-start-1"
+            className="flex flex-col gap-5"
           >
             <RadioDevice
               stations={STATIONS}
@@ -131,7 +131,7 @@ function RadioShell({ state, actions }: Props) {
           </form>
 
           {idle ? (
-            <div className="mt-6 flex flex-col gap-5 lg:col-start-2 lg:row-start-2 lg:mt-0 lg:self-start">
+            <div className="mt-6 flex flex-col gap-5">
               <label className="flex max-w-sm flex-col gap-2">
                 <span className="text-fg-2 text-sm">
                   What should the RJ call you? <span className="text-fg-3">(optional)</span>
@@ -163,7 +163,7 @@ function RadioShell({ state, actions }: Props) {
               </p>
             </div>
           ) : (
-            <div className="min-w-0 lg:col-start-2 lg:row-start-1">
+            <div className="min-w-0">
               <Show
                 state={state}
                 station={station}
@@ -235,7 +235,7 @@ function Show({
 
   return (
     <>
-      <section aria-labelledby="now-title" className="relative mt-5 sm:mt-7 lg:mt-0">
+      <section aria-labelledby="now-title" className="relative mt-5 sm:mt-7">
         <SpotlightCard
           ambient
           theme="room"
