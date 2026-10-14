@@ -1,6 +1,8 @@
 # Tarang FM: Technical Specification
 
-Version 1.0 · 14 Oct 2026 · Product context: [PRD](./PRD.md) · Casting: [VOICE-CASTING.md](./VOICE-CASTING.md) · Work split: [BUILD-PLAN.md](./BUILD-PLAN.md)
+Version 1.0 · 14 Oct 2026 · Product context: [PRD](./PRD.md) · Diagrams of every flow: [How it works](./ARCHITECTURE.md) · Casting: [VOICE-CASTING.md](./VOICE-CASTING.md) · Work split: [BUILD-PLAN.md](./BUILD-PLAN.md)
+
+> **Status:** written as the build plan's contract on day one, then updated as the build went. Where this spec and the code disagree, the code (`shared/types.ts`, `shared/schemas.ts`, `worker/index.ts`) wins. §8.6 lists what live testing changed.
 
 The **contracts** in §4 (shared types), §5 (HTTP API) and §7 (audio engine interface) are frozen once the scaffold commit lands. Parallel workstreams build against them. Change a contract only with the lead's agreement, and update this doc in the same commit.
 
@@ -151,7 +153,7 @@ export interface ContextResponse {
   weather?: { tempC: number; description: string };   // T3
 }
 
-export type CallIntent = 'chat' | 'dedication' | 'story_request' | 'news_request' | 'other';
+export type CallIntent = 'chat' | 'dedication' | 'story_request' | 'news_request' | 'retry' | 'deflect' | 'care' | 'other';
 
 export interface CallResponse {
   transcript: string;
@@ -161,6 +163,65 @@ export interface CallResponse {
   theme?: string;               // for story_request
   reply: Line;                  // RJ line to synthesize via /api/tts
 }
+```
+
+### Type map
+
+```mermaid
+classDiagram
+  direction LR
+  class Station {
+    id: StationId
+    language: TtsLanguage
+    frequency, tagline, accent
+    sttMode: codemix | transcribe
+    stationIdText
+    cast: Record~Role, Voice~
+    shows?: Show[]
+  }
+  class Voice {
+    speaker
+    pace, temperature
+    gender
+  }
+  class Show {
+    from, to
+    name, rjName
+    rj: Voice
+  }
+  class Segment {
+    id, station, type
+    title, summary?, mood?
+    lines: Line[]
+    sources?: Source[]
+    fallback?
+  }
+  class Line {
+    role, speaker, text
+    en?
+    delivery
+    pace, temperature, loudness, pitch
+    pauseAfterMs
+  }
+  class CallResponse {
+    transcript, transcriptEn?
+    intent, theme?
+    reply: Line
+    nickname?
+  }
+  class PhoneCall {
+    id, at
+    name?, city?
+    maskedNumber
+    type, message, theme?
+  }
+  Station "1" *-- "9" Voice : cast
+  Station "1" *-- "0..4" Show
+  Show --> Voice : rj
+  Segment "1" *-- "1..*" Line
+  Segment --> Source : sources
+  CallResponse --> Line : reply
+  Line ..> Voice : speaker from
 ```
 
 ## 5. HTTP API (Worker)
@@ -217,15 +278,27 @@ All routes are JSON unless noted. Errors use `{ error: { code: string, message: 
   4. Return `CallResponse`. The client then calls `/api/tts` with `reply` (two round trips, which keeps the API simple).
 - Caller audio is never stored.
 
+### Studio phone line (`worker/phone.ts`)
+The phone line runs on Sarvam Voice Agents. The Worker only stores and serves what callers asked for.
+
+| Route | Notes |
+|---|---|
+| `GET /api/phone/headlines?station=hi&city=…` | The phone RJ's news tool. Rate-limited like `/api/segment` |
+| `POST /api/phone/call-end?token=…` | Sarvam's call-end webhook. The token must match `PHONE_WEBHOOK_TOKEN`. Stores the on-air message in the `PHONE` KV namespace with the caller's number masked |
+| `GET /api/phone/recent` | `PhoneRecentResponse`: the studio number and recent calls. The web show reads each new call on air once |
+
 ### Rate limits (Workers rate-limiting binding, per IP)
 | Route | Limit |
 |---|---|
 | `/api/segment` | 30 / min |
 | `/api/tts` | 120 / min |
 | `/api/call` | 8 / min |
+| `/api/phone/headlines` | 30 / min (shares the segment limiter) |
 
 ### Secrets and config
 - `SARVAM_API_KEY`: `.dev.vars` locally (gitignored) and `wrangler secret put SARVAM_API_KEY` in production.
+- `PHONE_WEBHOOK_TOKEN`: shared secret for the phone call-end webhook.
+- `PHONE`: KV namespace for studio calls.
 - `wrangler.jsonc`: `main: "worker/index.ts"`, `assets: { not_found_handling: "single-page-application" }`, `compatibility_flags: ["nodejs_compat"]`, `observability.enabled: true`, plus `ratelimits` bindings.
 
 ## 6. Sarvam calls (`worker/sarvam.ts`)
@@ -331,9 +404,12 @@ Each station has 3 template RJ filler lines, for example "आप सुन र�
 - **STT `keyterms` dropped.** With them, a silent clip came back as a keyterm ("सनी").
 - **Brand-safe subtitles:** the Indic brand name is swapped to Latin "Tarang" before translation, because Translate rendered "तरंग FM" as "Waaree FM".
 - **Measured latency:** `station_id` about 50 ms, `rj_link` 2.6–4.3 s, `news` 2.1–4.0 s, `ad_break` 2.4–2.7 s, `kahani` 3.7–5.0 s, TTS TTFB 190–390 ms, call-in 1.7–2.5 s.
+- **Subtitle guard:** Translate occasionally turned a harmless line into English profanity, so `cleanSubtitle()` (`worker/subtitle.ts`) drops any subtitle that trips a profanity list. The native caption still shows.
 - **Known gaps:** Tamil and Bangla Kahani and ads are less coherent than Hindi. Some English subtitles are clumsy. On `*.workers.dev` the Cache API does nothing, so news is cached per isolate in memory.
 
 ## 9. Show scheduler (`src/radio`)
+
+The full state machine and prefetch timeline are drawn in [How it works §4–5](./ARCHITECTURE.md#4-the-radio-controllers-states).
 
 - **Clock:** `['station_id','rj_link','news','ad_break','kahani','rj_link','ad_break','kahani']`, looping from index 1 after the first pass.
 - **State (store):**
@@ -362,7 +438,9 @@ Each station has 3 template RJ filler lines, for example "आप सुन र�
 | Data | Source | Cache |
 |---|---|---|
 | City, region, timezone | `request.cf` | – |
-| Headlines | Google News RSS: `https://news.google.com/rss?hl={hl}&gl=IN&ceid=IN:{hl}` with `hl` = `hi`, `ta`, `bn` (also `mr`, `te`, `kn`, `pa`, `gu`). Parse `<item><title>`, `<link>`, `<source>` with regex (no XML lib). Strip the " - Source" suffix from titles | Cache API, 30 min |
+| National headlines | BBC's RSS service in the station language first, then Google News RSS (`https://news.google.com/rss?hl={hl}&gl=IN&ceid=IN:{hl}`) | Cache API + per-isolate memory, 30 min |
+| City headlines | Bing News search RSS for the listener's city in the station language, then Google News search. Bing click-tracker links are unwrapped to the publisher URL | Same |
+| Parsing | `<item><title>`, `<link>`, `<source>` with regex (no XML lib). Strip the " - Source" suffix from titles. Headlines about murder, sexual violence, stabbing or suicide (in all station languages) are dropped | – |
 | Weather (T3) | `https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,weather_code` (credit Open-Meteo in the footer) | Cache API, 15 min |
 
 ## 11. Testing and verification
@@ -394,17 +472,21 @@ Each feature has a job. Nothing is added just to tick a box.
 | Cloudflare | **Cache API** | News RSS (30 min) and weather (15 min) | MVP |
 | Cloudflare | `request.cf` geolocation | Listener city, region and timezone for personalization, with no permission prompt | MVP |
 | Cloudflare | Workers Logs / observability | Timings and errors per request (`Server-Timing`) | MVP |
+| Cloudflare | **KV** (`PHONE`) | Recent studio phone calls for the web show | Shipped |
+| Sarvam | **Voice Agents** | The studio phone line, with a headlines tool and call-end webhook | Shipped |
 | Cloudflare | **Cron Triggers + KV** | Pre-build each station's news bulletin script every 30 min, so news starts instantly | If time |
 | Cloudflare | **R2** | Audio cache for share-a-clip and instant replays | If time |
 | Cloudflare | **D1** | "Dedication wall": recent on-air dedications per station | If time |
 | Cloudflare | **Analytics Engine** | Listen and call-in counts and TTFA percentiles for a live stats panel | If time |
 | Cloudflare | **Durable Objects** (WebSocket hibernation) | Live broadcast mode: one shared timeline per station, call-ins heard by everyone | If time (last) |
 
-## 13. Commands (to be filled in once the scaffold exists)
+## 13. Commands
 ```
-npm run dev       # Vite + Worker locally (needs .dev.vars with SARVAM_API_KEY)
-npm run build     # production build
-npm run deploy    # build + wrangler deploy
-npm test          # vitest
-npx tsx scripts/spike.ts
+npm run dev        # Vite + Worker locally (needs .dev.vars with SARVAM_API_KEY)
+npm run build      # typecheck + production build
+npm run typecheck  # tsc -b across app, worker and shared
+npm test           # vitest
+npm run deploy     # build + wrangler deploy
+npm run spike      # live checks of the Sarvam APIs
+npm run audition   # synthesize and pitch-measure every cast voice
 ```

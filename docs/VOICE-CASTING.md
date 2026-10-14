@@ -2,6 +2,30 @@
 
 The source of truth for `shared/stations.ts`. Every speaker ID below was **checked against the live API on 14 Oct 2026**. The live roster has 224 IDs, and some differ from the docs page: Tamil `vetri_*` is live as `aravind_*`, and Bangla `bappa_*` is live as `arnab_*`. Assamese (`kangkana_as_*`, `mouchumi_as_*`) is also live.
 
+```mermaid
+pie showData
+  title Distinct Bulbul v4 voices on air (29 in total)
+  "Hindi 91.1" : 11
+  "Marathi 94.3" : 8
+  "Tamil 98.3" : 4
+  "Bangla 102.7" : 3
+  "Gujarati 106.1" : 3
+```
+
+**How a voice is chosen**
+
+```mermaid
+flowchart LR
+  R["Role in the script<br/>(news, ad, narrator, kid…)"] --> S["Pick the style suffix<br/>news · ads · stories_dramatic<br/>suspense · kids · latenight"]
+  S --> A["Audition it<br/>npm run audition"]
+  A --> P{"Median pitch"}
+  P -->|"&lt; 158 Hz"| M["masculine"]
+  P -->|"&gt; 172 Hz"| F["feminine"]
+  P -->|"in between"| O["check the same speaker's<br/>other styles"]
+  M & F & O --> C["Cast sheet in the prompt<br/>so verbs agree in Hindi,<br/>Marathi and Bangla"]
+  C --> T["Tune with pace + temperature;<br/>the script's delivery shapes each line"]
+```
+
 **Rules**
 - Cast for **style first**: the style suffix (`news_breaking`, `suspense`, `kids`, `ads`, `stories_dramatic`) does most of the acting. Then tune with `pace` (0.5–2.0) and `temperature` (0.01–1.0, higher is more expressive).
 - `pitch` and `loudness` are accepted by v4-flash (the spike got 200 OK) but aren't needed. Don't use them in the MVP.
@@ -43,7 +67,7 @@ Station ID text: "आप सुन रहे हैं तरंग FM 91.1… �
 |---|---|---|---|---|
 | station_id | `ishita_hi_ads` | 1.0 | 0.7 | feminine |
 | rj | `sunny_hi_reels` | 1.05 | 0.8 | masculine |
-| news | `simran_hi_news_breaking` | 1.05 | 0.4 | feminine |
+| news | `simran_hi_news` | 1.0 | 0.4 | feminine |
 | ad_announcer | `mukul_hi_ads` | 1.1 | 0.8 | masculine |
 | ad_customer | `ritu_hi_ads_informal` | 1.0 | 0.8 | feminine |
 | narrator | `shubh_hi_stories_dramatic` | 0.95 | 0.8 | masculine |
@@ -52,7 +76,27 @@ Station ID text: "आप सुन रहे हैं तरंग FM 91.1… �
 | char_kid | `chhavi_hi_kids` | 1.05 | 0.8 | feminine |
 
 Alternates: `anand_hi_news` (M), `simran_hi_social_excited` (F), `kunal_hi_kids` (M), `shubh_hi_stories_mixed` (M), `advait_hi_character` / `ashok_hi_character` (stylized).
-Night RJ (If time): `ratan_hi_latenight_warm` (M), pace 0.95, temp 0.7.
+**Daypart RJs (shipped).** The RJ changes with the listener's local time:
+
+```mermaid
+gantt
+  title Tarang Hindi 91.1, a day on air (listener's local time)
+  dateFormat HH
+  axisFormat %H:00
+  section Show
+  रात की बात · RJ Ratan (ratan_hi_latenight_warm)   :00, 6h
+  सुबह की चाय · RJ Sunny (sunny_hi_reels)           :06, 5h
+  दोपहर की गपशप · RJ Ritu (ritu_hi_social_lively)   :11, 5h
+  घर वापसी · RJ Sunny (sunny_hi_reels)              :16, 5h
+  रात की बात · RJ Ratan                             :21, 3h
+```
+
+| Show | Hours | RJ | Speaker | Pace | Temp | Gender |
+|---|---|---|---|---|---|---|
+| सुबह की चाय | 6–11 | Sunny | `sunny_hi_reels` | 1.05 | 0.8 | masculine |
+| दोपहर की गपशप | 11–16 | Ritu | `ritu_hi_social_lively` | 1.0 | 0.8 | feminine |
+| घर वापसी | 16–21 | Sunny | `sunny_hi_reels` | 1.05 | 0.8 | masculine |
+| रात की बात | 21–6 | Ratan | `ratan_hi_latenight_warm` | 0.95 | 0.7 | masculine |
 
 ### 🔵 Tarang Tamil · `ta` · `ta-IN` · 98.3
 Tagline: "இதயத்தின் அலைவரிசை" · STT mode `transcribe` · News feed `hl=ta`

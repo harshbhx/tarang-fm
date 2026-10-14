@@ -9,7 +9,7 @@
 | **Event** | Sarvam Bulbul Build Challenge, "Build something that speaks". Deadline 15 Oct 2026, 8 PM IST |
 | **Models** | **Bulbul v4 Flash** (`bulbul:v4-flash`) for voice, **Saaras v4** for speech-to-text, **Sarvam-105B** for writing and understanding |
 
-Related: [Technical spec](./TECH-SPEC.md) · [Voice casting](./VOICE-CASTING.md) · [Build plan](./BUILD-PLAN.md)
+Related: [How it works](./ARCHITECTURE.md) · [Technical spec](./TECH-SPEC.md) · [Voice casting](./VOICE-CASTING.md) · [Build plan](./BUILD-PLAN.md)
 
 ---
 
@@ -24,7 +24,7 @@ Related: [Technical spec](./TECH-SPEC.md) · [Voice casting](./VOICE-CASTING.md)
 
 Hold **Call RJ** at any time, speak in your language, and the RJ answers you on air within seconds. Turning the dial switches stations, and each station is a different Indian language with its own native voices.
 
-Every segment of a radio station has its own vocal style: news, ads, drama, late-night, kids. Bulbul v4 Flash's 222 voices are organized by exactly those styles, so a radio station is the most natural way to show the model's range.
+Every segment of a radio station has its own vocal style: news, ads, drama, late-night, kids. Bulbul v4 Flash's 224 live voices are organized by exactly those styles, so a radio station is the most natural way to show the model's range.
 
 ## 2. Problem
 
@@ -41,7 +41,7 @@ Every segment of a radio station has its own vocal style: news, ads, drama, late
 | G1 | Show the breadth of Bulbul v4 Flash | ≥ 12 distinct V4 speaker IDs heard in a 10-minute session. Every line shows its speaker ID on screen |
 | G2 | Instant for anyone | Public URL, no install, no login. First audio ≤ 3 s after pressing Tune in |
 | G3 | A real conversation | Call-in: from end of speech to first reply audio in ≤ 3 s p50 |
-| G4 | Multilingual India | 3 language stations at launch (Hindi, Tamil, Bangla) |
+| G4 | Multilingual India | 3 language stations at minimum (Hindi, Tamil, Bangla). Shipped with 5: Marathi and Gujarati were added |
 | G5 | Never goes silent | Failures fall back to template lines or skip a segment. No dead air longer than 2 s |
 | G6 | Ship on time | Live URL, README, demo video, social post and Discord submission done within the build window |
 
@@ -63,12 +63,34 @@ Every segment of a radio station has its own vocal style: news, ads, drama, late
 
 ## 5. Experience
 
+```mermaid
+flowchart TD
+  L["Open the link<br/>landing page"] -->|"Tune in (one tap)"| J["📻 Jingle"]
+  J --> RJ["🎙️ RJ greets you<br/>name · city · time · weather"]
+  RJ --> N["📰 News<br/>your city first"]
+  N --> AD["📢 Ad break"]
+  AD --> K["👻 Kahani"]
+  K --> RJ2["🎙️ RJ link"] --> AD2["📢 Ad break"] --> K2["👻 Kahani"] -->|loops with fresh content| RJ
+  RJ -. "anytime: hold Call RJ" .-> CALL["☎️ You speak → RJ replies on air"]
+  CALL -. "resumes; a story request<br/>changes the next Kahani" .-> K
+  RJ -. "anytime: turn the dial" .-> SW["📶 Static → new language,<br/>new jingle, new voices"]
 ```
-Open link → Tuner screen (station dial, optional name, "Tune in")
-  → Tune in → jingle → RJ greets you by name, city and time of day
-  → News → Ad break → Kahani Corner → RJ link → Ad break → Kahani → … (loops with fresh content)
-  → [anytime] hold "Call RJ" → speak → programme pauses → RJ replies on air → programme resumes
-  → [anytime] change station → new language starts with its own jingle
+
+```mermaid
+journey
+  title A judge's first two minutes
+  section Arrive
+    Open the link on a phone: 4: Judge
+    Hear voice samples on the landing page: 5: Judge
+  section Listen
+    Tap Tune in, jingle plays: 5: Judge
+    RJ greets them by name and city: 5: Judge
+    News from their own city: 4: Judge
+    Ad break makes them laugh: 5: Judge
+  section Interact
+    Hold Call RJ and ask for a ghost story: 4: Judge
+    RJ answers, next Kahani is about ghosts: 5: Judge
+    Turn the dial to Tamil: 5: Judge
 ```
 
 **Screens:**
@@ -148,7 +170,7 @@ Open link → Tuner screen (station dial, optional name, "Tune in")
 | Typical voice-app entry | Tarang FM |
 |---|---|
 | 1–3 voices | 12+ V4 personas across news, ads, drama, kids and RJ styles, with each speaker ID shown on screen |
-| One language | 3 language stations at launch, each with native V4 voices |
+| One language | 5 language stations, each with native V4 voices |
 | Local install | One link, any phone or laptop |
 | Talks or listens | Programmed broadcast **plus** a live two-way call-in that changes the show |
 
@@ -164,7 +186,27 @@ Open link → Tuner screen (station dial, optional name, "Tune in")
 | News feed blocked | Cache 30 min. Skip news on failure |
 | 4–5 hour time box | Strict MVP. "If time" items only after MVP is deployed. Parallel workstreams with frozen contracts (Build Plan) |
 
-## 11. Open questions
+## 11. What shipped beyond the MVP
+
+```mermaid
+timeline
+  title Scope over the build
+  Planned MVP : Hindi, Tamil, Bangla : Show clock with 5 segment types : Push-to-talk call-in : Captions with English subtitles
+  Added during the build : Marathi and Gujarati stations : Daypart RJs on Hindi : Weather and city news : Visualizer and tuning static
+  Added at the end : Studio phone line on Sarvam Voice Agents : Distress check with helpline : Subtitle profanity guard
+```
+
+| Item | Where |
+|---|---|
+| Marathi (94.3) and Gujarati (106.1) stations | `shared/stations.ts` |
+| Daypart shows on Hindi, with a night RJ (`ratan_hi_latenight_warm`) | T2 · `shared/stations.ts` |
+| Weather and city news in the RJ link and bulletin | T3 · `worker/context.ts` |
+| Visualizer, VU meter and tuning static | T4 · `src/components`, `src/audio/sfx.ts` |
+| Dedications read on air | T7 · call-ins and the studio line |
+| A real phone line (+91 79 6585 4148) on Sarvam Voice Agents, with calls read on the web show | `worker/phone.ts` |
+| A deterministic distress check on call-ins with the Tele-MANAS helpline | `worker/care.ts` |
+
+## 12. Open questions
 
 | # | Question | Resolve in |
 |---|---|---|

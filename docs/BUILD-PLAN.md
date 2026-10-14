@@ -2,7 +2,9 @@
 
 **Time box: 4–5 hours** from the start of build, with several workstreams running in parallel. Scope is the PRD's **Must ship** list (§6.1). The **If time** items (§6.2) are started only after the MVP is deployed and passes the smoke test.
 
-Related: [PRD](./PRD.md) · [Tech spec](./TECH-SPEC.md) · [Voice casting](./VOICE-CASTING.md)
+> This is the plan as written before the build started. The shipped scope grew past it (five stations, a phone line, daypart shows); see PRD §11 for what was added.
+
+Related: [How it works](./ARCHITECTURE.md) · [PRD](./PRD.md) · [Tech spec](./TECH-SPEC.md) · [Voice casting](./VOICE-CASTING.md)
 
 ---
 
@@ -16,6 +18,27 @@ Related: [PRD](./PRD.md) · [Tech spec](./TECH-SPEC.md) · [Voice casting](./VOI
 | **P3 Stations + hardening** | T+3:20 → 3:50 | A + C | Tamil + Bangla live, fallbacks verified, mobile QA | QA matrix (TECH-SPEC §11) passes |
 | **P4 Ship** | T+3:50 → 4:30 | Lead + Harsh | README, demo video, public repo, X/LinkedIn post, Discord submission | Submission posted |
 | **If time** | after P3 passes | Whoever is free | PRD §6.2, in order T1 → T9 | Each item deployed and smoke-tested before the next starts |
+
+```mermaid
+gantt
+  title Build time box (hours from start)
+  dateFormat HH:mm
+  axisFormat T+%H:%M
+  section Lead
+  P0 Foundation (scaffold, contracts)   :p0, 00:00, 40m
+  P2 Integrate + deploy                 :p2, 02:40, 40m
+  P4 Ship (README, video, posts)        :p4, 03:50, 40m
+  section Spike
+  S API spike + voice audition          :s, 00:00, 40m
+  section Parallel tracks
+  A Worker API                          :a, 00:40, 2h
+  B Audio engine                        :b, 00:40, 2h
+  C UI                                  :c, 00:40, 2h
+  D Scheduler + glue                    :d, 00:40, 2h
+  L Landing page                        :l, 00:40, 2h
+  section Hardening
+  P3 Stations + QA                      :p3, 03:20, 30m
+```
 
 If P1 runs over by 30 minutes, cut in this order: news `sources` UI → ad break → Bangla station. Never cut call-in, captions or Kahani.
 
@@ -32,6 +55,23 @@ Each track edits **only** its owned paths. `shared/` is frozen after P0. A contr
 | **D: Scheduler + glue** | Track D (or Lead) | `src/radio/**`, `src/App.tsx` | §5 API + §7 engine + §9 | Show clock loops with prefetch. Station switch and call-in flows work against the real API |
 | **L: Landing page** | Track L | `src/landing/**` | PRD M16, shared stations/casts, `src/audio` engine (read-only) | `Landing({ onTuneIn })` renders all sections, plays voice samples via `/api/tts`, mobile 360 px, a11y |
 | **E: Docs + launch** | Lead / Harsh | `README.md`, `docs/**` | n/a | README with live link, GIF/video, architecture, Sarvam models used, setup |
+
+```mermaid
+flowchart LR
+  SH["shared/<br/>types · schemas · stations<br/>(frozen after P0)"]
+  SP["S: spike results"] --> SH
+  SH --> A["A: worker/**"]
+  SH --> B["B: src/audio/**"]
+  SH --> C["C: src/components/**"]
+  SH --> L["L: src/landing/**"]
+  A --> D["D: src/radio/**<br/>scheduler + glue"]
+  B --> D
+  C --> D
+  B -.->|read-only| L
+  D --> INT["P2 integrate + deploy"]
+  L --> INT
+  INT --> E["E: README + docs"]
+```
 
 **Lead responsibilities:** P0 scaffold and contracts, merging and integration, deploys, reviewing commits, and keeping the time box.
 

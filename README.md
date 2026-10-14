@@ -31,6 +31,17 @@ Every segment of a real radio station has its own vocal style: the newsreader, t
 
 ## How the show is written
 
+```mermaid
+flowchart LR
+  A["Show clock<br/>picks the next segment"] --> B["Sarvam-105B<br/>writes the script as JSON"]
+  B --> C{"Validator<br/>romanized? filler? invented numbers?"}
+  C -->|fails| B2["Retry once,<br/>cooler temperature"] --> C
+  C -->|passes| D["Cast each line<br/>role → Bulbul voice<br/>delivery → pace · loudness"]
+  D --> E["Sarvam Translate<br/>English subtitles"]
+  E --> F["Bulbul v4 Flash<br/>streams each line"]
+  F --> G["🔊 Web Audio<br/>over a ducked music bed"]
+```
+
 - **RJs with a character.** Each station's RJ has a character sheet (age, background, how they joke), a catchphrase and a set of running bits (`worker/show.ts`). The catchphrase only comes out when the mood is light. After heavy news there are no jokes, just one calm line.
 - **Daypart shows on Hindi 91.1.** सुबह की चाय (6 to 11, RJ Sunny), दोपहर की गपशप (11 to 16, RJ Ritu), घर वापसी (16 to 21, RJ Sunny) and रात की बात (21 to 6, RJ Ratan), each with its own voice and character sheet (`shared/stations.ts`).
 - **Every line is acted.** The script gives each line a delivery (`normal`, `warm`, `excited`, `fast`, `hushed`, `shout`, `dramatic`, `sad`). Bulbul has no SSML, so each delivery maps to `pace`, `loudness` and `temperature` on top of the voice's base settings (`DELIVERY_PARAMS`).
@@ -38,12 +49,45 @@ Every segment of a real radio station has its own vocal style: the newsreader, t
 - **Local flavour.** For known cities the RJ gets a local pack (`LOCAL_PACKS`): the city's own greeting, landmarks, food and vibe, such as "केम छो बड़ौदा" and Sursagar lake for Vadodara.
 - **Script checks.** A validator (`worker/validate.ts`) rejects romanized Hindi, stock filler phrases, lines copied from the prompt's examples, overlong lines and any number in the news that isn't in the real headlines. A failed script is retried once at a lower temperature (`worker/segment.ts`). After that, news lines that still carry an invented number are dropped.
 
+## Call the RJ from the browser
+
+```mermaid
+sequenceDiagram
+  actor You
+  participant Radio as Radio (browser)
+  participant W as Worker
+  participant S as Sarvam
+  You->>Radio: hold "Call RJ" and speak
+  Note over Radio: show pauses after the current line
+  You->>Radio: release
+  Radio->>W: POST /api/call (audio)
+  W->>S: Saaras v4 → transcript
+  W->>W: distress check (care.ts)
+  W->>S: Sarvam-105B → intent + reply
+  W->>S: Translate → English subtitles
+  W-->>Radio: reply line
+  Radio->>W: POST /api/tts
+  W->>S: Bulbul v4 Flash (stream)
+  S-->>You: 🔊 the RJ answers on air
+  Note over Radio: the show resumes, and a story request<br/>changes the next Kahani
+```
+
 ## Call the studio
 
 **📞 +91 79 6585 4148** is a real phone line into the show. Call it from any phone, no app or internet needed.
 
 - **RJ Sunny picks up** and chats with you in Hindi, Marathi, Gujarati, Tamil, Bangla or English. Leave a dedication, ask for a story or ask what's in the news (the RJ reads you live headlines).
 - **Your message goes on air.** When you hang up, the next RJ link on the web show reads your dedication out by first name and city ("and we just got a call on the studio line from Priya in Vadodara…"). The radio also lists recent calls under **From the studio line**.
+```mermaid
+flowchart LR
+  P["☎️ Your phone"] <--> VA["Sarvam Voice Agent<br/>RJ Sunny"]
+  VA -- "news tool" --> H["/api/phone/headlines"]
+  VA -- "call-end webhook" --> CE["/api/phone/call-end"]
+  CE --> KV[("Workers KV<br/>number masked")]
+  KV --> R["/api/phone/recent"]
+  R -- "polled every 45 s" --> WEB["📻 Web radio<br/>next RJ link reads it"]
+```
+
 - **How it works:** the line runs on [Sarvam Voice Agents](https://docs.sarvam.ai) with the Bulbul v4 Sunny voice. When a call ends, Sarvam posts a call-end webhook to the Worker (`/api/phone/call-end`, token-protected), which keeps the on-air message in Cloudflare KV with the caller's number masked (`+91 ••••• 4148`). Listeners' radios poll `/api/phone/recent` and hand each new call to the RJ exactly once.
 
 ## How it uses Sarvam
@@ -84,10 +128,13 @@ flowchart LR
 - **Music without copyright issues.** The drone and stings are synthesized live in Web Audio, and the bed ducks automatically under speech.
 - **Local by default:** the listener's city, timezone and coordinates come from Cloudflare's edge (`request.cf`), with no location prompt. City news comes from Bing News search, national news from BBC's service in the station language (Google News as a fallback), and the weather from Open-Meteo. Grim crime stories are filtered out.
 
+For every flow in detail (state machine, prefetch timing, segment pipeline, audio graph, failure handling) see **[How it works](./docs/ARCHITECTURE.md)**.
+
 ## Safety
 
 - **Grim news stays off air.** Headlines about murder, sexual violence or suicide are filtered out before the news is written.
 - **A fixed safety net on call-ins.** A deterministic check (`worker/care.ts`) runs on every caller's words, in all five station languages and English. If a caller sounds distressed, the RJ always gives a warm, fixed reply in the station's language with the Tele-MANAS helpline (14416, free, 24×7), whatever the model decided.
+- **Clean subtitles.** Machine translation occasionally turns a harmless line into an English swear word. Any subtitle that trips a profanity list (`worker/subtitle.ts`) is dropped, and the native-script caption still shows.
 - **Prompt injection gets deflected.** Callers who try to make the RJ break character, ignore its rules or say something unsafe get one cheerful "that's for off-air" line, and their words are never repeated on air.
 - **The key stays on the server.** All Sarvam calls go through the Worker. `/api/tts` only accepts voices from the station casts, inputs are validated, and the routes that call Sarvam are rate-limited per IP.
 
@@ -107,25 +154,76 @@ npm run dev            # http://localhost:5173
 |---|---|
 | `npm run dev` | App + Worker locally with hot reload |
 | `npm test` | Unit tests (Vitest) |
-| `npm run deploy` | Build and deploy to Cloudflare (`npx wrangler secret put SARVAM_API_KEY` first) |
+| `npm run typecheck` | TypeScript across app, Worker and shared code |
+| `npm run deploy` | Build and deploy to Cloudflare (set the secrets below first) |
 | `npm run spike` | Live checks of the Sarvam APIs this app relies on |
 | `npm run audition` | Synthesizes every cast voice and measures its pitch. Open `tmp/audition/index.html` to listen |
+
+**Secrets for a deploy** (`npx wrangler secret put <NAME>`):
+
+| Secret | Needed for |
+|---|---|
+| `SARVAM_API_KEY` | Everything that speaks, listens or writes |
+| `PHONE_WEBHOOK_TOKEN` | Only the studio phone line: the `?token=` the Sarvam call-end webhook must send |
+
+The phone line also uses the `PHONE` KV namespace declared in `wrangler.jsonc`. Create your own with `npx wrangler kv namespace create PHONE` and put its id there.
+
+**Debug views:** `/?debug=audio` (audio engine test page) and `/?preview=ui` (every UI state with mock data).
+
+## API
+
+All routes live under `/api` on the same Worker that serves the app. Errors are `{ "error": { "code", "message" } }` with a matching HTTP status, and every response carries a `Server-Timing` header.
+
+| Route | What it does | Limit / IP |
+|---|---|---|
+| `GET /api/health` | Liveness, and whether the Sarvam key is set | n/a |
+| `GET /api/context?station=hi` | Listener city and timezone (from the edge), weather and headlines | n/a |
+| `POST /api/segment` | Writes one show segment (RJ link, news, ad or Kahani) as cast, cleaned, subtitled lines | 30 / min |
+| `POST /api/tts` | Streams one line from Bulbul v4 Flash as raw 24 kHz PCM. Only cast voices are allowed | 120 / min |
+| `POST /api/call` | Push-to-talk call-in: Saaras v4 transcript, then the RJ's on-air reply | 8 / min |
+| `GET /api/phone/headlines` | Headlines tool for the phone RJ | 30 / min |
+| `POST /api/phone/call-end` | Sarvam call-end webhook (token-protected) | n/a |
+| `GET /api/phone/recent` | Recent studio calls, numbers masked | n/a |
+
+Request and response shapes are the zod schemas in `shared/schemas.ts` and the types in `shared/types.ts`.
 
 ## Project layout
 
 ```
-shared/   station configs + voice casts, types, zod schemas (used by both sides)
-worker/   Cloudflare Worker: Sarvam client, prompts, context, routes
+shared/        station configs + voice casts, types, zod schemas, constants (used by both sides)
+worker/        Cloudflare Worker (Hono)
+  index.ts       routes, rate limits, error handling
+  sarvam.ts      Bulbul, Saaras, Sarvam-105B and Translate client with retries
+  segment.ts     builds a segment: prompt → validate → cast → clean → subtitle
+  prompts.ts     system and user prompts per segment type and for call-ins
+  show.ts        RJ character sheets, deliveries, local packs, pauses
+  validate.ts    script checks (romanization, filler, invented numbers …)
+  call.ts        push-to-talk call-in pipeline
+  care.ts        deterministic distress check with the helpline reply
+  context.ts     geo, weather and news feeds, with the grim-news filter
+  subtitle.ts    profanity guard for English subtitles
+  phone.ts       studio phone line: webhook, KV storage, number masking
+  fallbacks.ts   template lines for when a segment fails
 src/
-  audio/       Web Audio engine: PCM stream decoder, music bed, SFX, recorder
-  radio/       show scheduler, API client, state store
-  components/  the radio UI (tuner dial, captions, call button)
-  landing/     the landing page and voice gallery
-docs/     PRD, technical spec, voice casting, build plan
-scripts/  API spike and voice audition tools
+  audio/         Web Audio engine: PCM stream decoder, music bed, SFX, recorder
+  radio/         show clock, controller (scheduler + prefetch), API client, state
+  components/    the radio UI (tuner dial, captions, call panel, studio line)
+  landing/       the landing page and voice gallery
+docs/          PRD, technical spec, voice casting, build plan
+scripts/       API spike and voice audition tools
 ```
 
-The full design is in [`docs/`](./docs): [PRD](./docs/PRD.md) · [Tech spec](./docs/TECH-SPEC.md) · [Voice casting](./docs/VOICE-CASTING.md).
+Tests sit next to the code they cover (`*.test.ts`).
+
+## Docs
+
+| Doc | Read it for |
+|---|---|
+| [How it works](./docs/ARCHITECTURE.md) | 15+ diagrams of the running system: every flow from Tune in to call-in to the phone line, with the code behind each |
+| [PRD](./docs/PRD.md) | What the product is, who it's for, goals and the shipped scope |
+| [Tech spec](./docs/TECH-SPEC.md) | Architecture, API contracts, the audio engine, LLM prompt design and what live testing changed |
+| [Voice casting](./docs/VOICE-CASTING.md) | Every station's cast, with the pitch audition behind each voice's grammatical gender |
+| [Build plan](./docs/BUILD-PLAN.md) | How the build was split into parallel workstreams, and the submission checklist |
 
 ## Notes
 
