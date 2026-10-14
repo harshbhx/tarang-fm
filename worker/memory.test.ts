@@ -109,7 +109,6 @@ describe('story plans from the memory', () => {
           { role: 'narrator', text: 'अगली रात, वही पर्ची फिर वहीं थी।' },
         ],
       }),
-      translate: async (t: string) => `EN ${t}`,
       transliterate: async (t: string) => t,
     } as unknown as Sarvam;
     const segment = await buildSegment(sarvam, hindi, req('kahani'), new Timings(), { memory });
@@ -131,7 +130,6 @@ describe('story plans from the memory', () => {
       chatJson: async () => {
         throw new Error('model down');
       },
-      translate: async (t: string) => t,
       transliterate: async (t: string) => t,
     } as unknown as Sarvam;
     const segment = await buildSegment(sarvam, hindi, req('kahani'), new Timings(), { memory });

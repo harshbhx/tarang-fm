@@ -45,14 +45,13 @@ function upstreamFailure(c: Ctx, err: unknown, what: string) {
 
 const NDJSON = 'application/x-ndjson';
 
-/** Line 1: the call response. Line 2: {"subtitles": {...}} (empty if Translate failed). */
-function ndjsonCall(response: CallResponse, subtitles: Promise<CallSubtitles>): ReadableStream<Uint8Array> {
+/** Line 1: the call response. Line 2: {"subtitles": {...}}, sent right after it (empty when subtitles are off). */
+function ndjsonCall(response: CallResponse, subtitles: CallSubtitles): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream<Uint8Array>({
-    async start(controller) {
+    start(controller) {
       controller.enqueue(encoder.encode(`${JSON.stringify(response)}\n`));
-      const subs = await subtitles.catch(() => ({}));
-      controller.enqueue(encoder.encode(`${JSON.stringify({ subtitles: subs })}\n`));
+      controller.enqueue(encoder.encode(`${JSON.stringify({ subtitles })}\n`));
       controller.close();
     },
   });
@@ -221,11 +220,13 @@ app.post('/call', rateLimit((e) => e.RL_CALL), requireKey, async (c) => {
   } catch {
     showLog = undefined;
   }
+  const subtitles = form.get('subtitles');
   const parsed = CallMetaSchema.safeParse({
     station: form.get('station'),
     listener,
     nowPlaying: typeof nowPlaying === 'string' && nowPlaying.trim() ? nowPlaying.trim() : undefined,
     showLog,
+    subtitles: subtitles === 'true' || subtitles === '1',
   });
   if (!parsed.success) return apiError(c, 400, 'invalid_request', issues(parsed.error));
   const station = stationFor(parsed.data.station);
@@ -235,7 +236,7 @@ app.post('/call', rateLimit((e) => e.RL_CALL), requireKey, async (c) => {
     const sarvam = createSarvam(c.env.SARVAM_API_KEY);
     const file = audioFile(audio.type, audio.name);
     const blob = new Blob([await audio.arrayBuffer()], { type: file.type });
-    // A streaming client gets the reply the moment it's written (one NDJSON line), and the subtitles as a second line.
+    // A streaming client gets the reply as one NDJSON line, then its subtitles (written with it) as a second line.
     if (c.req.header('accept')?.includes(NDJSON)) {
       const { response, subtitles } = await startCall(sarvam, station, parsed.data, blob, file.name, c.var.timings);
       return new Response(ndjsonCall(response, subtitles), {

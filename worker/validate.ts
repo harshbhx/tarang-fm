@@ -23,6 +23,7 @@ const EXAMPLE_FRAGMENTS = [
   'seat अब adventure sport',
   'अब आ रही है कहानी',
   'हवेली की पुरानी घड़ी अचानक रुक गई',
+  'आख़िरी twist अभी तक दिमाग में घूम',
 ];
 
 const normalize = (t: string) => t.replace(/[़\s]/gu, '');

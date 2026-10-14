@@ -110,6 +110,8 @@ export interface RawLine {
   text: string;
   /** Acting direction from the model (validated later) */
   delivery?: string;
+  /** English subtitle the model wrote with the line (every piece of a split line keeps it) */
+  en?: string;
   /** True for the second and later pieces of a line that was split for length */
   continuation?: boolean;
 }
@@ -133,7 +135,9 @@ export function processLines(
     }
     const text = cleanText(line.text, language);
     if (!text) continue;
-    splitLine(text).forEach((chunk, i) => out.push({ role, text: chunk, delivery: line.delivery, ...(i > 0 ? { continuation: true } : {}) }));
+    splitLine(text).forEach((chunk, i) =>
+      out.push({ role, text: chunk, delivery: line.delivery, ...(line.en ? { en: line.en } : {}), ...(i > 0 ? { continuation: true } : {}) }),
+    );
   }
   return out;
 }

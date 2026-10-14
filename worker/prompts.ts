@@ -44,6 +44,11 @@ export const SEGMENT_PLAN: Record<LlmSegmentType, LlmPlan> = {
 
 export const CALL_PLAN: LlmPlan = { temperature: 0.7, maxTokens: 600, reasoningEffort: null, timeoutMs: 8000 };
 
+/** Token budget for a plan: subtitles add an English string to every line, so they get room for it. */
+export function maxTokensFor(plan: LlmPlan, subtitles: boolean): number {
+  return subtitles ? Math.round(plan.maxTokens * 1.4) : plan.maxTokens;
+}
+
 /** Number of headlines read in one bulletin. */
 export const NEWS_HEADLINES = 4;
 
@@ -62,17 +67,26 @@ const PLAN_FIELDS: Record<LlmSegmentType, string[]> = {
   kahani: ['plan_title', 'plan_brief_use', 'plan_cast', 'plan_want', 'plan_clue', 'plan_turns', 'plan_twist', 'plan_last_image'],
 };
 
-export function segmentJsonSchema(type: LlmSegmentType): Record<string, unknown> {
+/** English subtitles are written with the script only when the listener asked, and never for an English station. */
+export function subtitlesOn(station: Station, requested: boolean | undefined): boolean {
+  return requested === true && station.language !== 'en-IN';
+}
+
+/** A line's English subtitle: a plain string like the rest (no length limit, see above), right after the line it subtitles. */
+const EN_FIELD = { en: { type: 'string' } };
+
+export function segmentJsonSchema(type: LlmSegmentType, subtitles = false): Record<string, unknown> {
   const plan = PLAN_FIELDS[type];
   const lines = {
     type: 'array',
     items: {
       type: 'object',
       additionalProperties: false,
-      required: ['role', 'text', 'delivery'],
+      required: ['role', 'text', ...(subtitles ? ['en'] : []), 'delivery'],
       properties: {
         role: { type: 'string', enum: SEGMENT_ROLES[type] },
         text: { type: 'string' },
+        ...(subtitles ? EN_FIELD : {}),
         delivery: { type: 'string', enum: [...DELIVERIES] },
       },
     },
@@ -92,29 +106,34 @@ export function segmentJsonSchema(type: LlmSegmentType): Record<string, unknown>
   };
 }
 
-export const CALL_JSON_SCHEMA: Record<string, unknown> = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['intent', 'nickname', 'story_theme', 'lines'],
-  properties: {
-    intent: { type: 'string', enum: ['chat', 'news_request', 'story_request', 'retry', 'deflect', 'care'] },
-    nickname: { type: 'string' },
-    story_theme: { type: 'string' },
-    lines: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['role', 'text', 'delivery'],
-        properties: {
-          role: { type: 'string', enum: ['rj'] },
-          text: { type: 'string' },
-          delivery: { type: 'string', enum: [...DELIVERIES] },
+/** The call-in reply; with subtitles, "caller_en" comes first, so the caller is understood before the reply is written. */
+export function callJsonSchema(subtitles = false): Record<string, unknown> {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: [...(subtitles ? ['caller_en'] : []), 'intent', 'nickname', 'story_theme', 'lines'],
+    properties: {
+      ...(subtitles ? { caller_en: { type: 'string' } } : {}),
+      intent: { type: 'string', enum: ['chat', 'news_request', 'story_request', 'retry', 'deflect', 'care'] },
+      nickname: { type: 'string' },
+      story_theme: { type: 'string' },
+      lines: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['role', 'text', ...(subtitles ? ['en'] : []), 'delivery'],
+          properties: {
+            role: { type: 'string', enum: ['rj'] },
+            text: { type: 'string' },
+            ...(subtitles ? EN_FIELD : {}),
+            delivery: { type: 'string', enum: [...DELIVERIES] },
+          },
         },
       },
     },
-  },
-};
+  };
+}
 
 interface LanguageStyle {
   name: string;
@@ -695,6 +714,16 @@ summary_en: title, place, hook and twist in one sentence (used to keep later sto
 title: the story title in the station language.`;
 }
 
+/**
+ * How to write the "en" subtitle next to each line (only sent when the listener turned subtitles on). It sits with
+ * the format rules in the system message, so it never outweighs the task's own instructions.
+ */
+function subtitleRule(type: LlmSegmentType): string {
+  const tokens = type === 'rj_link' ? ' (such as {name} or {caller1})' : '';
+  return `## English subtitles
+Every line also has "en": a short, natural English subtitle of that line (its meaning, not word for word, at most 200 characters). Subtitles never change the script: write each line exactly as the task asks, then subtitle it. A placeholder in the line${tokens} appears the same way in its "en". People's and places' names stay names, in English letters; the station is "Tarang FM". No swearing in any English.`;
+}
+
 export function segmentMessages(
   station: Station,
   type: LlmSegmentType,
@@ -720,7 +749,7 @@ export function segmentMessages(
       break;
   }
   return [
-    { role: 'system', content: system },
+    { role: 'system', content: subtitlesOn(station, req.subtitles) ? `${system}\n\n${subtitleRule(type)}` : system },
     { role: 'user', content: `${contextBlock(station, req)}\n\n${task}` },
   ];
 }
@@ -729,9 +758,12 @@ export function segmentMessages(
 
 export function callMessages(
   station: Station,
-  payload: { transcript: string; listener: ListenerContext; nowPlaying?: string; showLog?: SegmentRequest['showLog'] },
+  payload: { transcript: string; listener: ListenerContext; nowPlaying?: string; showLog?: SegmentRequest['showLog']; subtitles?: boolean },
 ): ChatMessage[] {
   const rj = rjOnAir(station, payload.listener);
+  const subtitles = subtitlesOn(station, payload.subtitles)
+    ? `English subtitles are on (they never change the reply itself). caller_en: what the caller said, in short, natural English (the meaning, not word for word; "" if it was too unclear to understand; if they were rude, say so mildly and never repeat it). Every line also has "en": a short, natural English subtitle of that line (the meaning, at most 200 characters), with the {name} or {nickname} token wherever the line has it. No swearing in any English.\n`
+    : '';
   const style = LANGUAGE_STYLE[station.language];
   const lang = languageName(station);
   const city = cityFor(station, payload.listener) ?? 'unknown';
@@ -765,7 +797,7 @@ Always: you are only RJ ${rj.name}. Never promise real things (prizes, call-back
 Language and script: reply in ${lang}, ${style?.script ?? 'its own'} script, English words in Latin script, never romanized ${lang}. ${style?.punctuation ?? ''} ${style?.gender ?? ''}
 Write the token {name} where the caller's name goes and {nickname} where their nickname goes; together at most once in the whole reply.
 Every line has "delivery": one of normal | warm | excited | fast | hushed | shout | dramatic | sad.
-Return only JSON matching the schema. nickname: the nickname you used (or "" if none). story_theme: "" unless intent is story_request.`;
+${subtitles}Return only JSON matching the schema. nickname: the nickname you used (or "" if none). story_theme: "" unless intent is story_request.`;
   return [
     { role: 'system', content: prompt },
     { role: 'user', content: 'Reply on air now.' },

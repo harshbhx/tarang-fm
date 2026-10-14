@@ -4,10 +4,14 @@ import type { StationId } from '../shared/types';
 interface StationFallbacks {
   /** RJ filler lines, one is played in place of a failed segment */
   filler: [string, string, string];
+  /** Their English subtitles, in the same order (none when the lines are English already) */
+  fillerEn?: [string, string, string];
   /** Call-in reply when the caller could not be heard */
   lineNotClear: string;
+  lineNotClearEn?: string;
   /** Call-in reply when the model is unavailable */
   callThanks: string;
+  callThanksEn?: string;
 }
 
 const FALLBACKS: Partial<Record<StationId, StationFallbacks>> = {
@@ -17,8 +21,15 @@ const FALLBACKS: Partial<Record<StationId, StationFallbacks>> = {
       'दिल से सुनिए, दिल की बात… तरंग FM पर मस्ती का सिलसिला जारी है!',
       'कहीं मत जाइए, तरंग FM पर अभी बहुत कुछ बाकी है… चाय की प्याली उठाइए और सुनते रहिए!',
     ],
+    fillerEn: [
+      "You're listening to Tarang FM 91.1… stay with us, the next big thing is just about to start!",
+      'Listen with your heart, to words from the heart… the fun goes on, on Tarang FM!',
+      "Don't go anywhere, there's lots more to come on Tarang FM… grab a cup of chai and keep listening!",
+    ],
     lineNotClear: 'माफ़ कीजिए, लाइन थोड़ी साफ़ नहीं थी… एक बार फिर कॉल कीजिए, हम यहीं हैं!',
+    lineNotClearEn: "Sorry, the line wasn't very clear… call once more, we're right here!",
     callThanks: 'कॉल करने के लिए शुक्रिया! आपकी आवाज़ सुनकर दिल खुश हो गया, बने रहिए तरंग FM के साथ!',
+    callThanksEn: 'Thanks for calling! Hearing your voice made my day, stay with Tarang FM!',
   },
   ta: {
     filler: [
@@ -26,8 +37,15 @@ const FALLBACKS: Partial<Record<StationId, StationFallbacks>> = {
       'இதயத்தின் அலைவரிசை, தரங் FM… இன்னும் நிறைய சுவாரசியம் காத்திருக்கு!',
       'எங்கேயும் போயிடாதீங்க, தரங் FM-ல கொண்டாட்டம் தொடருது… ஒரு கப் காபியோட கேட்டுகிட்டே இருங்க!',
     ],
+    fillerEn: [
+      "You're listening to Tarang FM 98.3… stay with us, the next surprise is on its way!",
+      'The frequency of the heart, Tarang FM… lots more fun is waiting!',
+      "Don't go anywhere, the party goes on at Tarang FM… keep listening with a cup of coffee!",
+    ],
     lineNotClear: 'மன்னிக்கவும், லைன் கொஞ்சம் சரியா கேட்கல… மறுபடியும் கால் பண்ணுங்க, நாங்க இங்கதான் இருக்கோம்!',
+    lineNotClearEn: "Sorry, the line wasn't quite clear… call again, we're right here!",
     callThanks: 'கால் பண்ணதுக்கு ரொம்ப நன்றி! உங்க குரல் கேட்டதே சந்தோஷம், தரங் FM-ஓட இணைந்திருங்க!',
+    callThanksEn: 'Thanks so much for calling! So happy to hear your voice, stay with Tarang FM!',
   },
   bn: {
     filler: [
@@ -35,8 +53,15 @@ const FALLBACKS: Partial<Record<StationId, StationFallbacks>> = {
       'মনের কথা, মনের সুরে… তরঙ্গ FM-এ আড্ডা চলছে, চলবে!',
       'কোথাও যাবেন না, তরঙ্গ FM-এ এখনও অনেক মজা বাকি… এক কাপ চা নিয়ে শুনতে থাকুন!',
     ],
+    fillerEn: [
+      "You're listening to Tarang FM 102.7… stay with us, the next surprise is almost here!",
+      "Words from the heart, in the heart's tune… the adda on Tarang FM goes on and on!",
+      "Don't go anywhere, there's lots more fun left on Tarang FM… grab a cup of tea and keep listening!",
+    ],
     lineNotClear: 'দুঃখিত, লাইনটা ঠিক পরিষ্কার ছিল না… আবার ফোন করুন, আমরা এখানেই আছি!',
+    lineNotClearEn: "Sorry, the line wasn't very clear… call again, we're right here!",
     callThanks: 'ফোন করার জন্য অনেক ধন্যবাদ! আপনার গলা শুনে মনটা ভরে গেল, তরঙ্গ FM-এর সঙ্গে থাকুন!',
+    callThanksEn: 'Thanks so much for calling! Hearing your voice made my day, stay with Tarang FM!',
   },
   mr: {
     filler: [
@@ -44,8 +69,15 @@ const FALLBACKS: Partial<Record<StationId, StationFallbacks>> = {
       'मनातलं, मनापासून… तरंग FM वर मजा सुरूच आहे!',
       'कुठेही जाऊ नका, तरंग FM वर अजून खूप काही बाकी आहे… चहाचा कप घ्या आणि ऐकत राहा!',
     ],
+    fillerEn: [
+      "You're listening to Tarang FM 94.3… stay with us, the next surprise is very close!",
+      'From the heart, straight from the heart… the fun goes on, on Tarang FM!',
+      "Don't go anywhere, there's much more to come on Tarang FM… grab a cup of tea and keep listening!",
+    ],
     lineNotClear: 'माफ करा, लाइन जरा स्पष्ट नव्हती… पुन्हा एकदा कॉल करा, आम्ही इथेच आहोत!',
+    lineNotClearEn: "Sorry, the line wasn't very clear… call once more, we're right here!",
     callThanks: 'कॉल केल्याबद्दल खूप धन्यवाद! तुमचा आवाज ऐकून छान वाटलं, तरंग FM सोबत राहा!',
+    callThanksEn: 'Thanks so much for calling! It was lovely to hear your voice, stay with Tarang FM!',
   },
   gu: {
     filler: [
@@ -53,8 +85,15 @@ const FALLBACKS: Partial<Record<StationId, StationFallbacks>> = {
       'દિલથી સાંભળો, દિલની વાત… તરંગ FM પર મજા ચાલુ જ છે!',
       'ક્યાંય જશો નહીં, તરંગ FM પર હજી ઘણું બાકી છે… ચાનો કપ લો અને સાંભળતા રહો!',
     ],
+    fillerEn: [
+      "You're listening to Tarang FM 106.1… stay with us, the next surprise is just coming up!",
+      'Listen with your heart, to words from the heart… the fun goes on, on Tarang FM!',
+      "Don't go anywhere, there's lots more on Tarang FM… grab a cup of tea and keep listening!",
+    ],
     lineNotClear: 'માફ કરજો, લાઇન થોડી સ્પષ્ટ નહોતી… ફરી એક વાર કૉલ કરો, અમે અહીં જ છીએ!',
+    lineNotClearEn: "Sorry, the line wasn't very clear… call once more, we're right here!",
     callThanks: 'કૉલ કરવા બદલ ખૂબ આભાર! તમારો અવાજ સાંભળીને મજા આવી ગઈ, તરંગ FM સાથે રહો!',
+    callThanksEn: 'Thanks so much for calling! It was great to hear your voice, stay with Tarang FM!',
   },
 };
 
@@ -72,9 +111,11 @@ export function fallbacksFor(station: StationId): StationFallbacks {
   return FALLBACKS[station] ?? DEFAULT_FALLBACKS;
 }
 
-export function randomFiller(station: StationId): string {
-  const { filler } = fallbacksFor(station);
-  return filler[Math.floor(Math.random() * filler.length)];
+/** One filler line and its hand-written English subtitle (if the line needs one). */
+export function randomFiller(station: StationId, random = Math.random): { text: string; en?: string } {
+  const { filler, fillerEn } = fallbacksFor(station);
+  const i = Math.floor(random() * filler.length);
+  return { text: filler[i], en: fillerEn?.[i] };
 }
 
 interface StudioCallTemplate {
@@ -128,6 +169,17 @@ export function studioCallLine(station: StationId, caller: string | undefined, c
   const lead = (city ? t.withCity : t.noCity).replace('{caller}', caller || t.someone).replace('{city}', city ?? '');
   return `${lead} ${message.trim()}`;
 }
+
+/** The English subtitle of the fixed studio-call line; the caller's message is quoted only when it is in English already. */
+export function studioCallLineEn(caller: string | undefined, city: string | undefined, message: string): string {
+  const t = DEFAULT_STUDIO_CALL;
+  const lead = (city?.trim() ? t.withCity : t.noCity).replace('{caller}', caller?.trim() || t.someone).replace('{city}', city?.trim() ?? '');
+  const said = message.trim();
+  return /^[\p{Script=Latin}\P{L}]+$/u.test(said) ? `${lead} ${said}` : lead.replace(/, who says:$/, '.');
+}
+
+/** An unnamed caller in an English subtitle. */
+export const SOMEONE_EN = DEFAULT_STUDIO_CALL.someone;
 
 /** The word for an unnamed caller in the station language. */
 export function someoneFor(station: StationId): string {

@@ -1,6 +1,6 @@
 /** Thin fetch client for the Sarvam REST APIs. See docs/TECH-SPEC.md §6. */
 import type { z } from 'zod';
-import { LLM_MODEL, STT_MODEL, TRANSLATE_MODEL, TTS_MODEL, TTS_SAMPLE_RATE } from '../shared/constants';
+import { LLM_MODEL, STT_MODEL, TTS_MODEL, TTS_SAMPLE_RATE } from '../shared/constants';
 import type { TtsLanguage } from '../shared/types';
 
 const API = 'https://api.sarvam.ai';
@@ -299,36 +299,6 @@ export function createSarvam(apiKey: string) {
     return result.data;
   }
 
-  /** Mayura translation. Throws on failure; callers treat it as best-effort. */
-  async function translate(text: string, source: string, target = 'en-IN', timeoutMs = 4000): Promise<string> {
-    const payload = JSON.stringify({
-      input: text.slice(0, 1000),
-      source_language_code: source,
-      target_language_code: target,
-      model: TRANSLATE_MODEL,
-      mode: 'modern-colloquial',
-    });
-    const signal = AbortSignal.timeout(timeoutMs);
-    return withRetry(1, async () => {
-      let res: Response;
-      try {
-        res = await fetch(`${API}/translate`, {
-          method: 'POST',
-          headers: { ...auth, 'Content-Type': 'application/json' },
-          body: payload,
-          signal,
-        });
-      } catch (err) {
-        throw networkError('translate', err);
-      }
-      if (!res.ok) throw await upstreamError('translate', res);
-      const data = (await res.json()) as { translated_text?: string };
-      const out = data.translated_text?.trim();
-      if (!out) throw new SarvamError('empty translation', 502, 'empty_output');
-      return out;
-    });
-  }
-
   /** Script conversion (e.g. a Latin listener name into Devanagari) via Sarvam Transliterate. */
   async function transliterate(text: string, source: string, target: string, timeoutMs = 3000): Promise<string> {
     const payload = JSON.stringify({ input: text.slice(0, 200), source_language_code: source, target_language_code: target });
@@ -353,7 +323,7 @@ export function createSarvam(apiKey: string) {
     });
   }
 
-  return { ttsStream, transcribe, chatJson, translate, transliterate };
+  return { ttsStream, transcribe, chatJson, transliterate };
 }
 
 export type Sarvam = ReturnType<typeof createSarvam>;

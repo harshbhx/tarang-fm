@@ -1,15 +1,15 @@
-/** Call-in pipeline: Saaras STT → Sarvam-105B reply → English subtitles. See docs/TECH-SPEC.md §5. */
+/** Call-in pipeline: Saaras STT → Sarvam-105B reply, with its English subtitles written alongside when asked. See docs/TECH-SPEC.md §5. */
 import { z } from 'zod';
 import { MAX_LINE_CHARS } from '../shared/constants';
 import { LlmCallSchema, type CallMeta, type LlmCall } from '../shared/schemas';
-import type { CallResponse, Line, Station, TtsLanguage } from '../shared/types';
+import type { CallResponse, Station } from '../shared/types';
 import { fallbacksFor } from './fallbacks';
-import { CALL_JSON_SCHEMA, CALL_PLAN, callMessages, rjOnAir } from './prompts';
+import { CALL_PLAN, callJsonSchema, callMessages, maxTokensFor, rjOnAir, subtitlesOn } from './prompts';
 import type { Sarvam } from './sarvam';
-import { annotate, fillName, latinBrand, limitNameTokens, nativeListenerName, toLine } from './segment';
+import { fillName, limitNameTokens, nativeListenerName, toLine } from './segment';
 import { careReply, careReplyEn, soundsLikeCrisis } from './care';
 import { isDelivery } from './show';
-import { cleanSubtitle } from './subtitle';
+import { modelSubtitle } from './subtitle';
 import { cleanText, splitLine } from './text';
 import type { Timings } from './timing';
 
@@ -22,22 +22,23 @@ const AUDIO_TYPES: [RegExp, string, string][] = [
   [/flac/, 'audio/flac', 'call.flac'],
 ];
 
-const TRANSLATABLE: ReadonlySet<string> = new Set(['bn-IN', 'en-IN', 'gu-IN', 'hi-IN', 'kn-IN', 'ml-IN', 'mr-IN', 'od-IN', 'pa-IN', 'ta-IN', 'te-IN']);
-
 /** Accepts over-long lines or fields; the reply is trimmed to one caption line afterwards. */
 const LenientCallSchema = z.preprocess((value) => {
   if (!value || typeof value !== 'object') return value;
-  const v = value as { lines?: unknown; nickname?: unknown; story_theme?: unknown };
+  const v = value as { lines?: unknown; nickname?: unknown; story_theme?: unknown; caller_en?: unknown };
   return {
     ...v,
     lines: Array.isArray(v.lines)
       ? v.lines.slice(0, 4).map((l: unknown) => {
-          const line = l as { text?: unknown };
-          return typeof line?.text === 'string' ? { ...line, text: line.text.slice(0, 600) } : l;
+          const line = l as { text?: unknown; en?: unknown };
+          if (typeof line?.text !== 'string') return l;
+          const { en, ...rest } = line;
+          return { ...rest, text: line.text.slice(0, 600), ...(typeof en === 'string' ? { en: en.slice(0, 600) } : {}) };
         })
       : v.lines,
     nickname: typeof v.nickname === 'string' ? v.nickname.slice(0, 60) : v.nickname,
     story_theme: typeof v.story_theme === 'string' ? v.story_theme.slice(0, 120) : v.story_theme,
+    caller_en: typeof v.caller_en === 'string' ? v.caller_en.slice(0, 600) : undefined,
   };
 }, LlmCallSchema);
 
@@ -50,24 +51,40 @@ export function audioFile(mime: string, filename?: string): { type: string; name
   return { type: 'audio/webm', name: 'call.webm' };
 }
 
-function replyText(raw: string, station: Station): string {
-  const text = cleanText(raw, station.language);
-  return text ? splitLine(text, MAX_LINE_CHARS)[0] : '';
+/** One spoken reply line and its English subtitle ('' when there is none). */
+export interface ReplyPart {
+  text: string;
+  en: string;
 }
 
-/** English subtitles for a call, which arrive after the reply itself. */
+/**
+ * The reply is one caption line: the model's lines, whole, while they fit, so the subtitle matches what is said.
+ * A first line too long on its own is cut at a sentence boundary instead.
+ */
+export function fitReply(parts: ReplyPart[], max = MAX_LINE_CHARS): ReplyPart {
+  const used: ReplyPart[] = [];
+  let length = 0;
+  for (const part of parts) {
+    const next = used.length ? length + 1 + part.text.length : part.text.length;
+    if (next > max) break;
+    used.push(part);
+    length = next;
+  }
+  if (!used.length) return parts.length ? { text: splitLine(parts[0].text, max)[0], en: parts[0].en } : { text: '', en: '' };
+  return { text: used.map((p) => p.text).join(' '), en: used.map((p) => p.en).filter(Boolean).join(' ') };
+}
+
+/** English subtitles for a call: line 2 of a streamed response. */
 export interface CallSubtitles {
   transcriptEn?: string;
   replyEn?: string;
 }
 
-/** The reply as soon as it is written, and its subtitles once Translate finishes. */
+/** The reply, and its subtitles (empty unless the listener turned subtitles on). */
 export interface CallResult {
   response: CallResponse;
-  subtitles: Promise<CallSubtitles>;
+  subtitles: CallSubtitles;
 }
-
-const NO_SUBTITLES: Promise<CallSubtitles> = Promise.resolve({});
 
 /** The whole call in one object (subtitles included), for clients that don't stream. */
 export async function handleCall(
@@ -79,16 +96,15 @@ export async function handleCall(
   timings: Timings,
 ): Promise<CallResponse> {
   const { response, subtitles } = await startCall(sarvam, station, meta, audio, filename, timings);
-  const { transcriptEn, replyEn } = await subtitles;
   const full: CallResponse = { ...response, reply: { ...response.reply } };
-  if (transcriptEn) full.transcriptEn = transcriptEn;
-  if (replyEn) full.reply.en = replyEn;
+  if (subtitles.transcriptEn) full.transcriptEn = subtitles.transcriptEn;
+  if (subtitles.replyEn) full.reply.en = subtitles.replyEn;
   return full;
 }
 
 /**
- * Call-in pipeline with Translate off the critical path: the reply is ready to speak as soon as the model
- * has written it, while the caller's subtitle (started alongside the model) and the reply's subtitle finish.
+ * Call-in pipeline. With subtitles on, the model writes the English of the caller's words and of its reply in the
+ * same response, so both are ready the moment the reply is.
  */
 export async function startCall(
   sarvam: Sarvam,
@@ -100,6 +116,7 @@ export async function startCall(
 ): Promise<CallResult> {
   const fallback = fallbacksFor(station.id);
   const rjVoice = rjOnAir(station, meta.listener).voice;
+  const subtitles = subtitlesOn(station, meta.subtitles);
   // No keyterms: on near-silent clips they bias Saaras into "hearing" them.
   const [stt, listenerName] = await Promise.all([
     timings.measure('stt', () => sarvam.transcribe(audio, { languageCode: station.language, mode: station.sttMode, filename })),
@@ -110,71 +127,69 @@ export async function startCall(
 
   if (!/[\p{L}\p{N}]/u.test(transcript)) {
     const reply = toLine(station, 'rj', fallback.lineNotClear, 'rj_link', { voice: rjVoice, delivery: 'normal' });
-    return { response: { transcript, language, intent: 'retry', reply }, subtitles: replySubtitle(sarvam, reply, station, timings, true) };
+    const replyEn = subtitles ? fallback.lineNotClearEn : undefined;
+    return { response: { transcript, language, intent: 'retry', reply }, subtitles: replyEn ? { replyEn } : {} };
   }
 
   if (soundsLikeCrisis(transcript)) {
     // Never left to the model: a caller in distress always hears the same warm reply and the helpline.
     const reply = toLine(station, 'rj', careReply(station.id), 'rj_link', { voice: rjVoice, delivery: 'warm' });
     reply.en = careReplyEn();
-    return { response: { transcript, language, intent: 'care', reply }, subtitles: NO_SUBTITLES };
+    return { response: { transcript, language, intent: 'care', reply }, subtitles: {} };
   }
-
-  // The caller's subtitle only needs the transcript, so it runs while the model writes the reply.
-  const source = (TRANSLATABLE.has(language) ? language : station.language) as TtsLanguage;
-  const transcriptEn: Promise<string | undefined> =
-    source === 'en-IN'
-      ? Promise.resolve(undefined)
-      : timings.measure('translate_caller', () => sarvam.translate(latinBrand(transcript), source).then(cleanSubtitle, () => undefined));
 
   let llm: LlmCall;
   try {
     llm = await timings.measure('llm', () =>
       sarvam.chatJson(
-        callMessages(station, { transcript, listener: meta.listener, nowPlaying: meta.nowPlaying, showLog: meta.showLog }),
-        CALL_JSON_SCHEMA,
+        callMessages(station, { transcript, listener: meta.listener, nowPlaying: meta.nowPlaying, showLog: meta.showLog, subtitles }),
+        callJsonSchema(subtitles),
         LenientCallSchema,
         {
           name: 'tarang_call',
           temperature: CALL_PLAN.temperature,
-          maxTokens: CALL_PLAN.maxTokens,
+          maxTokens: maxTokensFor(CALL_PLAN, subtitles),
           reasoningEffort: CALL_PLAN.reasoningEffort,
           timeoutMs: CALL_PLAN.timeoutMs,
         },
       ),
     );
   } catch {
-    llm = { intent: 'chat', lines: [{ text: fallback.callThanks, delivery: 'warm' }], nickname: null, story_theme: null };
+    llm = {
+      intent: 'chat',
+      lines: [{ text: fallback.callThanks, delivery: 'warm', ...(fallback.callThanksEn ? { en: fallback.callThanksEn } : {}) }],
+      nickname: null,
+      story_theme: null,
+    };
   }
 
   if (llm.intent === 'care') {
     const reply = toLine(station, 'rj', careReply(station.id), 'rj_link', { voice: rjVoice, delivery: 'warm' });
     reply.en = careReplyEn();
-    return { response: { transcript, language, intent: 'care', reply }, subtitles: NO_SUBTITLES };
+    return { response: { transcript, language, intent: 'care', reply }, subtitles: {} };
   }
 
   const nickname = llm.nickname?.trim() && !EMPTY.test(llm.nickname.trim()) ? llm.nickname.trim().slice(0, 40) : meta.listener.nickname;
-  // Name or nickname once per reply at most
-  const [joined] = limitNameTokens([llm.lines.map((l) => l.text.trim()).filter(Boolean).join(' ')], 1);
-  const withNames = fillName(joined, listenerName).replace(/\{\s*nickname\s*\}/giu, nickname ?? listenerName ?? '');
-  const spoken = replyText(withNames, station);
+  const withNames = (name: string | undefined) => (text: string) =>
+    fillName(text, name).replace(/\{\s*nickname\s*\}/giu, nickname ?? name ?? '');
+  // Name or nickname once per reply at most; the subtitle gets the name as the caller typed it
+  const texts = limitNameTokens(llm.lines.map((l) => l.text.trim()), 1).map(withNames(listenerName));
+  const ens = subtitles ? limitNameTokens(llm.lines.map((l) => l.en?.trim() ?? ''), 1).map(withNames(meta.listener.name?.trim() || undefined)) : [];
+  const parts = texts.map((t, i) => ({ text: cleanText(t, station.language), en: ens[i] ?? '' })).filter((p) => p.text);
+  const fitted = fitReply(parts);
   const first = llm.lines[0]?.delivery;
   const delivery = isDelivery(first) ? first : 'normal';
-  const reply = toLine(station, 'rj', spoken || cleanText(fallback.callThanks, station.language), 'rj_link', { voice: rjVoice, delivery });
+  const reply = toLine(station, 'rj', fitted.text || cleanText(fallback.callThanks, station.language), 'rj_link', { voice: rjVoice, delivery });
   const rawTheme = llm.story_theme?.trim() ?? '';
   const theme = llm.intent === 'story_request' && !EMPTY.test(rawTheme) ? rawTheme : undefined;
-  const subtitles = Promise.all([transcriptEn, replySubtitle(sarvam, reply, station, timings)]).then(([caller, rj]) => ({
-    ...(caller ? { transcriptEn: caller } : {}),
-    ...(rj.replyEn ? { replyEn: rj.replyEn } : {}),
-  }));
-  return { response: { transcript, language, intent: llm.intent, theme, reply, nickname }, subtitles };
-}
 
-/** The reply's English subtitle, translated on a copy so the reply can be sent before it's ready. */
-function replySubtitle(sarvam: Sarvam, reply: Line, station: Station, timings: Timings, cache = false): Promise<CallSubtitles> {
-  const copy: Line = { ...reply };
-  return annotate(sarvam, [copy], station.language, timings, { cache }).then(
-    () => (copy.en ? { replyEn: copy.en } : {}),
-    () => ({}),
-  );
+  const subs: CallSubtitles = {};
+  if (subtitles) {
+    // A caller who spoke English needs no subtitle
+    const transcriptEn = language === 'en-IN' ? undefined : modelSubtitle(llm.caller_en);
+    const replyEn = modelSubtitle(fitted.text ? fitted.en : fallback.callThanksEn);
+    if (transcriptEn) subs.transcriptEn = transcriptEn;
+    if (replyEn) subs.replyEn = replyEn;
+  }
+  return { response: { transcript, language, intent: llm.intent, theme, reply, nickname }, subtitles: subs };
 }

@@ -1,15 +1,15 @@
-/** Builds programme segments: model script → clean lines → cast voices → English subtitles. */
+/** Builds programme segments: model script (with English subtitles when asked) → clean lines → cast voices. */
 import { z } from 'zod';
 import { PAUSE_AFTER_MS } from '../shared/constants';
 import { LlmSegmentSchema, type Dedication, type SegmentRequest } from '../shared/schemas';
 import type { Delivery, Line, Mood, Role, Segment, SegmentType, Source, Station, TtsLanguage, Voice } from '../shared/types';
-import { randomFiller, someoneFor, studioCallLine } from './fallbacks';
-import { callerPlaceholder, MAX_LINES, NEWS_HEADLINES, rjOnAir, storyPlan, type AdPlan, type SegmentPlans, type StoryPlan, SEGMENT_PLAN, SEGMENT_ROLES, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
+import { randomFiller, SOMEONE_EN, someoneFor, studioCallLine, studioCallLineEn } from './fallbacks';
+import { callerPlaceholder, MAX_LINES, NEWS_HEADLINES, rjOnAir, maxTokensFor, storyPlan, subtitlesOn, type AdPlan, type SegmentPlans, type StoryPlan, SEGMENT_PLAN, SEGMENT_ROLES, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
 import type { Sarvam } from './sarvam';
 import { gapAfter, isDelivery, timePhrase, voiceFor } from './show';
 import { normalizeTitle, type ShowMemory } from './memory';
 import { adBrief } from './story';
-import { cleanSubtitle } from './subtitle';
+import { modelSubtitle } from './subtitle';
 import { cleanText, processLines, type RawLine } from './text';
 import type { Timings } from './timing';
 import { copiesExample, dropInventedNumbers, validateScript } from './validate';
@@ -17,7 +17,6 @@ import { copiesExample, dropInventedNumbers, validateScript } from './validate';
 /** Total budget for one segment request, including the retry. */
 const SEGMENT_BUDGET_MS = 19_000;
 const MIN_ATTEMPT_MS = 4000;
-const CONVERT_CONCURRENCY = 6;
 
 const MIN_LINES: Record<LlmSegmentType, number> = { rj_link: 2, news: 3, ad_break: 3, kahani: 8 };
 
@@ -31,14 +30,14 @@ const LenientSegmentSchema = z.preprocess((value) => {
     mood: typeof v.mood === 'string' ? v.mood.slice(0, 10) : undefined,
     lines: Array.isArray(v.lines)
       ? v.lines.slice(0, 16).map((l: unknown) => {
-          const line = l as { role?: unknown; text?: unknown };
-          return typeof line?.text === 'string' ? { ...line, text: line.text.slice(0, 600) } : l;
+          const line = l as { role?: unknown; text?: unknown; en?: unknown };
+          if (typeof line?.text !== 'string') return l;
+          const { en, ...rest } = line;
+          return { ...rest, text: line.text.slice(0, 600), ...(typeof en === 'string' ? { en: en.slice(0, 600) } : {}) };
         })
       : v.lines,
   };
 }, LlmSegmentSchema);
-
-const annotationCache = new Map<string, string>();
 
 /** One spoken line: the role's voice (or the daypart RJ), shaped by its delivery. */
 export function toLine(
@@ -100,77 +99,22 @@ export async function nativeListenerName(sarvam: Sarvam, name: string | undefine
   }
 }
 
-/** Writes the station brand in Latin script so Translate keeps it as "Tarang". */
-export function latinBrand(text: string): string {
-  return text.replace(/[^\s\x00-\x7F]+(?=\s*FM\b)/gu, 'Tarang');
-}
-
-/** Runs a best-effort text conversion over many lines with bounded concurrency; failures stay undefined. */
-async function convertAll(
-  texts: string[],
-  kind: string,
-  convert: (text: string) => Promise<string>,
-  cache: boolean,
-): Promise<(string | undefined)[]> {
-  const out: (string | undefined)[] = new Array(texts.length).fill(undefined);
-  let next = 0;
-  const worker = async () => {
-    for (let i = next++; i < texts.length; i = next++) {
-      const key = `${kind}:${texts[i]}`;
-      const hit = cache ? annotationCache.get(key) : undefined;
-      if (hit) {
-        out[i] = hit;
-        continue;
-      }
-      try {
-        const value = await convert(latinBrand(texts[i]));
-        out[i] = value;
-        if (cache && annotationCache.size < 300) annotationCache.set(key, value);
-      } catch {
-        out[i] = undefined;
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(CONVERT_CONCURRENCY, texts.length) }, worker));
-  return out;
-}
-
-/** Fills each line's `en` subtitle via Sarvam Translate, in parallel and best-effort. Profane translations are dropped. */
-export async function annotate(
-  sarvam: Sarvam,
-  lines: Line[],
-  language: TtsLanguage,
-  timings: Timings,
-  opts: { cache?: boolean } = {},
-): Promise<void> {
-  if (language === 'en-IN' || !lines.length) return;
-  const texts = lines.map((l) => l.text);
-  const en = await timings.measure('translate', () =>
-    convertAll(texts, `en:${language}`, (t) => sarvam.translate(t, language), opts.cache ?? false),
-  );
-  lines.forEach((line, i) => {
-    const subtitle = cleanSubtitle(en[i]);
-    if (subtitle) line.en = subtitle;
-  });
-}
-
 function cleanTitle(raw: string, fallback: string, language: TtsLanguage): string {
   const title = cleanText(raw, language).replace(/[।.]+$/u, '').trim();
   return (title || fallback).slice(0, 80);
 }
 
-async function withSubtitles(sarvam: Sarvam, segment: Segment, language: TtsLanguage, timings: Timings, cache = false): Promise<Segment> {
-  await annotate(sarvam, segment.lines, language, timings, { cache });
-  return segment;
-}
-
-export function fallbackSegment(station: Station, type: SegmentType): Segment {
+/** A template filler in place of a failed segment; with subtitles, its hand-written English. */
+export function fallbackSegment(station: Station, type: SegmentType, subtitles = false): Segment {
+  const filler = randomFiller(station.id);
+  const line = toLine(station, 'rj', filler.text, type);
+  if (subtitles && filler.en) line.en = filler.en;
   return {
     id: crypto.randomUUID(),
     station: station.id,
     type,
     title: station.nativeName,
-    lines: [toLine(station, 'rj', randomFiller(station.id), type)],
+    lines: [line],
     fallback: true,
   };
 }
@@ -312,21 +256,30 @@ export function callersRead(lines: { text: string }[]): Set<number> {
 
 /**
  * Makes sure every studio call is on air: a call the script left out gets the station's fixed studio-call line,
- * placed before the closing tease. Then each {callerN} placeholder becomes the caller's name.
+ * placed before the closing tease. Then each {callerN} placeholder becomes the caller's name: in the station
+ * script in the line, and as the caller gave it in the English subtitle.
  */
-export function withStudioCalls<T extends RawLine>(station: Station, lines: T[], calls: Dedication[], callers: Caller[]): RawLine[] {
+export function withStudioCalls<T extends RawLine>(station: Station, lines: T[], calls: Dedication[], callers: Caller[], subtitles = false): RawLine[] {
   if (!calls.length) return lines;
   const read = callersRead(lines);
   const missing: RawLine[] = calls.flatMap((call, i) =>
     read.has(i + 1)
       ? []
-      : [{ role: 'rj' as Role, text: studioCallLine(station.id, callerPlaceholder(i + 1), callers[i]?.city, call.message), delivery: 'warm' }],
+      : [
+          {
+            role: 'rj' as Role,
+            text: studioCallLine(station.id, callerPlaceholder(i + 1), callers[i]?.city, call.message),
+            delivery: 'warm',
+            ...(subtitles ? { en: studioCallLineEn(callerPlaceholder(i + 1), call.city, call.message) } : {}),
+          },
+        ],
   );
   const all: RawLine[] = missing.length && lines.length > 1 ? [...lines.slice(0, -1), ...missing, lines[lines.length - 1]] : [...lines, ...missing];
   const someone = someoneFor(station.id);
   return all.map((l) => ({
     ...l,
     text: l.text.replace(CALLER_SLOT, (_m, n: string) => callers[Number(n) - 1]?.name || someone),
+    ...(l.en ? { en: l.en.replace(CALLER_SLOT, (_m, n: string) => calls[Number(n) - 1]?.name?.trim() || SOMEONE_EN) } : {}),
   }));
 }
 
@@ -343,7 +296,8 @@ async function writeScript(
   const deadline = Date.now() + SEGMENT_BUDGET_MS;
   const plan = SEGMENT_PLAN[type];
   const roles = SEGMENT_ROLES[type];
-  const schema = segmentJsonSchema(type);
+  const subtitles = subtitlesOn(station, req.subtitles);
+  const schema = segmentJsonSchema(type, subtitles);
   const headlinesText = headlines.map((h) => h.title).join(' ');
   const time = timePhrase(station, req.listener);
   const greet = type === 'rj_link' && Boolean(req.producer?.greetListener || req.producer?.firstLink || !req.showLog?.some((e) => e.type === 'rj_link'));
@@ -360,7 +314,7 @@ async function writeScript(
           name: `tarang_${type}`,
           // The pack's retry: one more try at a slightly lower temperature.
           temperature: Math.max(0.1, plan.temperature - attempt * 0.1),
-          maxTokens: plan.maxTokens,
+          maxTokens: maxTokensFor(plan, subtitles),
           reasoningEffort: plan.reasoningEffort,
           timeoutMs: Math.min(plan.timeoutMs + attempt * 3000, remaining),
         }),
@@ -382,8 +336,15 @@ async function writeScript(
       let scriptLines = type === 'kahani' ? raw.lines : raw.lines.filter((l) => !copiesExample(l.text));
       if (type === 'news') scriptLines = dropOrphanKicker(dropInventedNumbers(scriptLines, headlinesText, `${time} ${station.frequency}`));
       const limited = limitNameTokens(scriptLines.map((l) => l.text), namesAllowed);
-      scriptLines = scriptLines.map((l, i) => ({ ...l, text: limited[i] }));
-      const named = withStudioCalls(station, scriptLines as RawLine[], calls, callers).map((l) => ({ ...l, text: fillName(l.text, listenerName) }));
+      // The subtitle follows the same name rule, and gets the name as the listener typed it
+      const limitedEn = subtitles ? limitNameTokens(scriptLines.map((l) => l.en ?? ''), namesAllowed) : [];
+      scriptLines = scriptLines.map((l, i) => ({ ...l, text: limited[i], en: limitedEn[i] || undefined }));
+      const enName = req.listener.name?.trim() || undefined;
+      const named = withStudioCalls(station, scriptLines as RawLine[], calls, callers, subtitles).map((l) => ({
+        ...l,
+        text: fillName(l.text, listenerName),
+        ...(l.en ? { en: fillName(l.en, enName) } : {}),
+      }));
       const lines = processLines(capLines(named, MAX_LINES[type] + calls.length), roles, type, station.language);
       const min = type === 'news' ? Math.min(MIN_LINES.news, headlines.length + 1) : MIN_LINES[type];
       if (lines.length < min) throw new Error(`only ${lines.length} usable lines for ${type}`);
@@ -406,6 +367,7 @@ export async function buildSegment(
   opts: { fetchHeadlines?: () => Promise<Source[]>; storyPlan?: StoryPlan; memory?: ShowMemory } = {},
 ): Promise<Segment> {
   const type = req.type;
+  const subtitles = subtitlesOn(station, req.subtitles);
 
   if (type === 'station_id') {
     const line = toLine(station, 'station_id', station.stationIdText, type);
@@ -427,7 +389,7 @@ export async function buildSegment(
       headlines = await timings.measure('news', () => opts.fetchHeadlines!().catch(() => [] as Source[]));
       headlines = headlines.slice(0, NEWS_HEADLINES);
     }
-    if (!headlines.length) return withSubtitles(sarvam, fallbackSegment(station, type), station.language, timings, true);
+    if (!headlines.length) return fallbackSegment(station, type, subtitles);
   }
 
   const listenerName = await timings.measure('name', () => nativeListenerName(sarvam, req.listener.name, station.language));
@@ -440,16 +402,20 @@ export async function buildSegment(
   try {
     script = await writeScript(sarvam, station, type, req, headlines, timings, listenerName, plans);
   } catch {
-    return withSubtitles(sarvam, fallbackSegment(station, type), station.language, timings, true);
+    return fallbackSegment(station, type, subtitles);
   }
 
   const rjVoice = rjOnAir(station, req.listener).voice;
-  const lines = script.lines.map((l) =>
-    toLine(station, l.role, l.text, type, {
+  const lines = script.lines.map((l) => {
+    const line = toLine(station, l.role, l.text, type, {
       delivery: isDelivery(l.delivery) ? l.delivery : 'normal',
       voice: l.role === 'rj' ? rjVoice : story ? story.cast[l.role as keyof StoryPlan['cast']] : undefined,
-    }),
-  );
+    });
+    // The subtitle the script writer wrote with the line, through the profanity guard
+    const en = modelSubtitle(l.en);
+    if (en) line.en = en;
+    return line;
+  });
   const segment: Segment = {
     id: crypto.randomUUID(),
     station: station.id,
@@ -462,5 +428,5 @@ export async function buildSegment(
   if (script.dedicated?.length) segment.dedicated = script.dedicated;
   remember(opts.memory, station, type, segment, plans);
   if (type === 'news') segment.sources = headlines;
-  return withSubtitles(sarvam, segment, station.language, timings);
+  return segment;
 }

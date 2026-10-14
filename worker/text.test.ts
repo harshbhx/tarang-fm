@@ -114,4 +114,12 @@ describe('processLines', () => {
     expect(out.length).toBeGreaterThan(1);
     expect(out.every((l) => l.role === 'narrator' && l.text.length <= 220)).toBe(true);
   });
+
+  it('gives every piece of a split line the same English subtitle', () => {
+    const long = Array.from({ length: 10 }, () => 'कहानी आगे बढ़ती है और रात गहरी होती जाती है।').join(' ');
+    const out = processLines([{ role: 'narrator', text: long, en: 'The story goes on as the night grows deep.' }], ['narrator'], 'kahani', 'hi-IN');
+    expect(out.length).toBeGreaterThan(1);
+    expect(out.every((l) => l.en === 'The story goes on as the night grows deep.')).toBe(true);
+    expect(processLines([{ role: 'rj', text: 'नमस्ते!' }], ['rj'], 'rj_link', 'hi-IN')[0]).not.toHaveProperty('en');
+  });
 });

@@ -1,7 +1,7 @@
 /**
- * Guard for machine-translated English subtitles. Translation sometimes turns a harmless line
- * into profanity, so any subtitle that trips this list is dropped; the native-script caption
- * still shows. Mild words like "idiot", "stupid" and "saala" are allowed on purpose.
+ * Guard for English subtitles. A subtitle can turn a harmless line into profanity, so any
+ * subtitle that trips this list is dropped; the native-script caption still shows. Mild words
+ * like "idiot", "stupid" and "saala" are allowed on purpose.
  */
 const PROFANITY = new RegExp(
   [
@@ -43,4 +43,29 @@ export function hasProfanity(text: string): boolean {
 export function cleanSubtitle(en: string | undefined): string | undefined {
   if (!en?.trim()) return undefined;
   return hasProfanity(en) ? undefined : en;
+}
+
+/** Longest subtitle shown (the script writer is asked for at most 200 characters). */
+export const SUBTITLE_MAX_CHARS = 280;
+
+/**
+ * A subtitle the script writer wrote next to a line, made fit to show: one line of text, no leftover
+ * placeholders, a sane length, and through the profanity guard. Undefined when there is nothing to show
+ * or it is not English at all.
+ */
+export function modelSubtitle(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  let text = raw
+    .normalize('NFC')
+    .replace(/\{[^{}]{0,40}\}/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.!?;:…])/g, '$1')
+    .replace(/^[\s,;:.!?…-]+/, '')
+    .trim();
+  if (!/[A-Za-z]/.test(text)) return undefined;
+  if (text.length > SUBTITLE_MAX_CHARS) {
+    const cut = text.lastIndexOf(' ', SUBTITLE_MAX_CHARS - 1);
+    text = `${text.slice(0, cut > SUBTITLE_MAX_CHARS / 2 ? cut : SUBTITLE_MAX_CHARS - 1).replace(/[\s,;:]+$/, '')}…`;
+  }
+  return cleanSubtitle(text);
 }

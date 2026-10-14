@@ -690,7 +690,8 @@ export class LiveStation extends DurableObject<Env> {
     if (city) listener.city = city;
     if (local?.region) listener.region = local.region;
 
-    const req: SegmentRequest = { station: station.id, type, listener };
+    // Always with subtitles: one script serves everyone listening, and each listener chooses whether to show them
+    const req: SegmentRequest = { station: station.id, type, listener, subtitles: true };
     if (following) req.upNext = following;
     let calls: PhoneCall[] = [];
     if (type === 'rj_link') {

@@ -92,6 +92,8 @@ export const SegmentRequestSchema = z.object({
   dedications: z.array(DedicationSchema).max(2).optional(),
   /** rj_link only: this listening session's random id, which the studio calls are claimed in */
   holder: HolderSchema.optional(),
+  /** Write an English subtitle for every line (the script writer adds it; off unless the listener turned subtitles on) */
+  subtitles: z.boolean().optional(),
 });
 
 /** POST /api/phone/aired: the studio calls an RJ link has started reading on air. */
@@ -117,13 +119,23 @@ export const CallMetaSchema = z.object({
   listener: ListenerContextSchema,
   nowPlaying: z.string().max(120).optional(),
   showLog: z.array(z.object({ type: SegmentTypeSchema, summary: z.string().trim().max(200) })).max(4).optional(),
+  /** Write English subtitles for the caller and the reply (off unless the listener turned subtitles on) */
+  subtitles: z.boolean().optional(),
 });
 
 /** Raw LLM output for a segment, before role → voice mapping and cleaning. */
 export const LlmSegmentSchema = z.object({
   title: z.string().min(1).max(120),
   lines: z
-    .array(z.object({ role: RoleSchema, text: z.string().min(1).max(600), delivery: z.string().max(20).optional() }))
+    .array(
+      z.object({
+        role: RoleSchema,
+        text: z.string().min(1).max(600),
+        delivery: z.string().max(20).optional(),
+        /** English subtitle, written with the line (only when subtitles were requested) */
+        en: z.string().max(600).optional(),
+      }),
+    )
     .max(16),
   summary_en: z.string().max(400).optional(),
   mood: z.string().max(10).optional(),
@@ -134,9 +146,14 @@ export const CallIntentSchema = z.enum(['chat', 'dedication', 'story_request', '
 /** Raw LLM output for a call-in reply. */
 export const LlmCallSchema = z.object({
   intent: CallIntentSchema,
-  lines: z.array(z.object({ text: z.string().min(1).max(600), delivery: z.string().max(20).optional() })).min(1).max(4),
+  lines: z
+    .array(z.object({ text: z.string().min(1).max(600), delivery: z.string().max(20).optional(), en: z.string().max(600).optional() }))
+    .min(1)
+    .max(4),
   nickname: z.string().max(60).nullable().optional(),
   story_theme: z.string().max(120).nullable().optional(),
+  /** English subtitle of what the caller said (only when subtitles were requested) */
+  caller_en: z.string().max(600).nullable().optional(),
 });
 
 export type SegmentRequest = z.infer<typeof SegmentRequestSchema>;
