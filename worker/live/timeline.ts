@@ -1,6 +1,13 @@
-/** Shared-show timeline math for a live station: placing, inserting and shifting lines, IST clock, producer plan. Pure, no I/O. */
+/** Shared-show timeline math for a live station: placing, inserting and shifting lines, IST clock, producer plan, auto-start rules. Pure, no I/O. */
 import { SHOW_CLOCK } from '../../shared/constants';
-import { LIVE_PCM_BYTES_PER_MS, type LiveLine } from '../../shared/live';
+import {
+  LIVE_ENDED_NOTE,
+  LIVE_IDLE_SLEEP_MS,
+  LIVE_PCM_BYTES_PER_MS,
+  LIVE_RESTART_GAP_MS,
+  type LiveLine,
+  type LiveState,
+} from '../../shared/live';
 import type { SegmentRequest } from '../../shared/schemas';
 import type { Daypart, SegmentType } from '../../shared/types';
 
@@ -200,4 +207,46 @@ export class Gate {
   get inFlight(): number {
     return this.active;
   }
+}
+
+// ---- Auto-start rules ----------------------------------------------------------------------------
+
+/** The parts of a station's state the auto-start rules read. */
+export interface SwitchState {
+  state: LiveState;
+  /** The studio pressed Stop: no auto-start until it presses Start */
+  blocked?: boolean;
+  note?: string;
+  /** When the last listener left */
+  emptySince?: number;
+  /** When the current (or last) show woke */
+  startedAt?: number;
+  /** When the show on air reaches its limit */
+  enabledUntil?: number;
+}
+
+/**
+ * A join wakes a sleeping station unless the studio stopped it, or a show just ended for listeners who are
+ * still here (they choose "Tune in again"; reconnects never restart it). Once an ended station has been empty
+ * for LIVE_IDLE_SLEEP_MS, a join starts a fresh show again.
+ */
+export function joinWakes(s: SwitchState, now: number): boolean {
+  if (s.state !== 'sleeping' || s.blocked) return false;
+  if (s.note !== LIVE_ENDED_NOTE) return true;
+  return s.emptySince !== undefined && now - s.emptySince >= LIVE_IDLE_SLEEP_MS;
+}
+
+/** "Tune in again": a sleeping station the studio has not stopped, at most once per LIVE_RESTART_GAP_MS. */
+export function restartAllowed(s: SwitchState, now: number): boolean {
+  return s.state === 'sleeping' && !s.blocked && (s.startedAt === undefined || now - s.startedAt >= LIVE_RESTART_GAP_MS);
+}
+
+/**
+ * What an awake station's alarm does: end the show for everyone at its limit ('ended', or 'idle' when nobody is
+ * left to tell), switch off after LIVE_IDLE_SLEEP_MS with nobody listening, or keep producing.
+ */
+export function awakeAlarm(s: SwitchState, listeners: number, now: number): 'ended' | 'idle' | 'run' {
+  if (now >= (s.enabledUntil ?? 0)) return listeners ? 'ended' : 'idle';
+  if (!listeners && s.emptySince !== undefined && now - s.emptySince >= LIVE_IDLE_SLEEP_MS) return 'idle';
+  return 'run';
 }

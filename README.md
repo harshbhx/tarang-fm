@@ -6,16 +6,19 @@
 
 Every voice is [Sarvam **Bulbul v4 Flash**](https://docs.sarvam.ai/api/api-guides-tutorials/text-to-speech/best-practice-guide-for-bulbul-v-4-flash). Each line on screen shows exactly which of its personas is speaking.
 
-**▶ Live:** https://tarang-fm.dualmindlab.tech (the landing page: scroll through an evening on the station with your name, tonight's headlines and a story you pick in it; stack the five stations; hold the button and talk to the RJ with your own voice) · **Straight to the radio:** https://tarang-fm.dualmindlab.tech/listen · **Listen together:** https://tarang-fm.dualmindlab.tech/live · Works on any phone or laptop, with no install or login.
+**▶ Live:** https://tarang-fm.dualmindlab.tech (the landing page: an evening on the station in five screens, with your name, tonight's headlines and a story you pick in it, and a button you hold to talk to the RJ with your own voice) · **Straight to the radio:** https://tarang-fm.dualmindlab.tech/listen · **Listen together:** https://tarang-fm.dualmindlab.tech/live · Works on any phone or laptop, with no install or login.
 
 > 🎬 Demo video: _recording in progress; the shot list is in [docs/BUILD-PLAN.md §6](./docs/BUILD-PLAN.md#6-demo-video-7590-s-shot-list)_
 
 <p align="center">
-  <img src="docs/images/landing.jpg" alt="The Tarang FM landing page: an amber-dial radio tuned to Hindi 91.1, with Tune in and Call the studio" width="66%" />
+  <img src="docs/images/landing.jpg" alt="The Tarang FM landing page: an amber-dial radio tuned to Hindi 91.1 and one Tune in now button" width="66%" />
   <img src="docs/images/radio-phone.jpg" alt="The radio on a phone: Hindi 91.1 playing a Kahani, with the speaker's Bulbul voice ID and an English subtitle under the Hindi caption" width="24%" />
 </p>
 <p align="center">
-  <img src="docs/images/evening.jpg" alt="One evening on Tarang FM: the ad break beat on the left, and the pinned on-air stage on the right showing Mukul and Ritu's lines with Hear it" width="90%" />
+  <img src="docs/images/evening.jpg" alt="Tonight's show, written for you: the ad break beat on the left, and the pinned on-air stage on the right with tonight's product and Mukul and Ritu's lines" width="90%" />
+</p>
+<p align="center">
+  <img src="docs/images/stations.jpg" alt="Five languages, twenty-seven voices: five station rows on a cream page, each with its native name, frequency, voices and a play button" width="90%" />
 </p>
 <p align="center">
   <img src="docs/images/studio-line.jpg" alt="The studio line panel: how to call, and three recent calls marked On air now, Up next and Read on air" width="90%" />
@@ -60,11 +63,11 @@ Every segment of a real radio station has its own vocal style: the newsreader, t
 - **WebSocket timeline and clock sync.** Each browser syncs to the server clock with pings over the socket and starts every line at its start time. Join mid-line and you hear the rest of that line, in step with everyone else.
 - **Each line is voiced once** and served from the edge cache, so 2 listeners or 200 (the cap per station) cost the same Sarvam credits.
 - **Live welcomes** in Hindi, Marathi, Tamil, Bangla and Gujarati. Joins a few seconds apart share one welcome, which is cut in right after the line on air. Everyone listening shows up as a name chip, and a banner lights up while the RJ is saying your name.
-- **A studio switch.** Stations are off air by default and only the owner can start one. A started station switches itself off after 6 minutes, or after 3 minutes with nobody listening. Listeners can join an off-air station and wait; the show starts for them the moment the studio goes live.
+- **Starts when you join.** No switch to flip: the first listener to join a sleeping station wakes it, and the jingle plays within seconds. The station switches itself off a minute after the last listener leaves. Each show runs for at most 6 minutes; then everyone sees "The show took a short break" and anyone can tap **Tune in again** for a fresh show. The owner's Studio controls are a kill switch: Stop keeps a station off air (no auto-start) until Start is pressed again.
 - **Studio calls are read once, across every show.** Live RJ links claim calls from the same shared call table as the personal radio and mark them aired when the link starts, so a call read on a live show is never read again on anyone's radio.
 - **Name safety.** A typed name never reaches the script-writing model. It's only dropped into fixed welcome templates, after a filter removes links, emails, @handles, phone numbers and emoji, and rejects abuse and anything that reads like an instruction. A rejected name is welcomed with the station's word for friend ("दोस्त" on Hindi).
 
-For the timeline, the welcome insertion and the auto-off in detail see [How it works §12](./docs/ARCHITECTURE.md#12-listen-together-one-shared-show-per-station).
+For the timeline, the welcome insertion, auto-start and the show limit in detail see [How it works §12](./docs/ARCHITECTURE.md#12-listen-together-one-shared-show-per-station).
 
 ## How the show is written
 
@@ -188,7 +191,7 @@ For every flow in detail (state machine, prefetch timing, segment pipeline, audi
 - **Prompt injection gets deflected.** Callers who try to make the RJ break character, ignore its rules or say something unsafe get one cheerful "that's for off-air" line, and their words are never repeated on air.
 - **The key stays on the server.** All Sarvam calls go through the Worker. `/api/tts` only accepts voices from the station casts, inputs are validated, and the routes that call Sarvam are rate-limited per IP.
 - **Names you type are filtered.** On Listen together a name only ever fills a fixed welcome template, after links, numbers, abuse and instruction-like text are stripped or rejected (`worker/live/welcome.ts`).
-- **No show plays to an empty room.** The personal show pauses itself after 6 minutes with no tap, key press or call and asks "Still listening?"; one tap picks it up where it stopped. A live station switches itself off 6 minutes after the studio starts it, or after 3 minutes with nobody listening, and writes at most 600 segments a day.
+- **No show plays to an empty room.** The personal show pauses itself after 6 minutes with no tap, key press or call and asks "Still listening?"; one tap picks it up where it stopped. A live show ends after 6 minutes (a listener has to tap Tune in again for the next one), a live station switches itself off a minute after the last listener leaves, and it writes at most 600 segments a day.
 
 ## Run it locally
 
@@ -202,7 +205,7 @@ echo "SARVAM_API_KEY=your_key_here" > .dev.vars
 npm run dev            # http://localhost:5173
 ```
 
-To try Listen together locally, also put `LIVE_ADMIN_TOKEN=<any long key>` in `.dev.vars`, open `http://localhost:5173/live?admin=<that key>` and start a station from the Studio controls. The key is saved in the browser and removed from the address bar.
+To try Listen together locally, open `http://localhost:5173/live` and join a station; it starts by itself. For the Studio controls (Stop and Start per station), also put `LIVE_ADMIN_TOKEN=<any long key>` in `.dev.vars` and open `http://localhost:5173/live?admin=<that key>`. The key is saved in the browser and removed from the address bar.
 
 | Command | What it does |
 |---|---|
@@ -222,7 +225,7 @@ To try Listen together locally, also put `LIVE_ADMIN_TOKEN=<any long key>` in `.
 |---|---|
 | `SARVAM_API_KEY` | Everything that speaks, listens or writes |
 | `PHONE_WEBHOOK_TOKEN` | Only the studio phone line: the `?token=` the Sarvam call-end webhook must send |
-| `LIVE_ADMIN_TOKEN` | Only Listen together: the owner's key for starting and stopping stations |
+| `LIVE_ADMIN_TOKEN` | Only Listen together: the owner's key for the Studio controls (Stop blocks a station's auto-start, Start lifts it) |
 
 The phone line also uses the `PHONE` KV namespace declared in `wrangler.jsonc`. Create your own with `npx wrangler kv namespace create PHONE` and put its id there. The two Durable Objects (`StudioLine` for the call table, `LiveStation` for the shared shows) are created on the first deploy from the migrations in the same file.
 
@@ -278,10 +281,10 @@ All routes live under `/api` on the same Worker that serves the app. Errors are 
 | `POST /api/phone/call-end` | Sarvam call-end webhook (token-protected) | n/a |
 | `GET /api/phone/recent` | Recent studio calls, numbers masked, each with when it was read on air | n/a |
 | `POST /api/phone/aired` | An RJ link has started reading these calls (only the listener holding the claim can mark them) | 30 / min |
-| `GET /api/live/:station/ws` | Listen together: WebSocket into the station's shared show (join and clock-sync pings in; timeline, listeners and status out) | n/a |
+| `GET /api/live/:station/ws` | Listen together: WebSocket into the station's shared show (join, Tune in again and clock-sync pings in; timeline, listeners and status out) | n/a |
 | `GET /api/live/:station/audio/:lineId` | One line of the shared show as raw 24 kHz PCM; immutable, served from the edge cache | n/a |
-| `GET /api/live/:station/now` | The station's snapshot: on or off air, who is listening, the upcoming lines | n/a |
-| `POST /api/live/:station/control` | Studio switch, `{"action":"start"}` or `{"action":"stop"}`, with the owner's key as a bearer token | n/a |
+| `GET /api/live/:station/now` | The station's snapshot: on air, asleep, ended or stopped, who is listening, the upcoming lines | n/a |
+| `POST /api/live/:station/control` | Studio override, `{"action":"stop"}` (off air, no auto-start) or `{"action":"start"}` (lifts it), with the owner's key as a bearer token | n/a |
 
 Request and response shapes are the zod schemas in `shared/schemas.ts` and the types in `shared/types.ts`; Listen together's messages are in `shared/live.ts`.
 
@@ -315,7 +318,7 @@ src/
   radio/         show clock, controller (scheduler + prefetch, "Still listening?" pause), API client, state
   components/    the radio UI (tuner dial, captions, call panel, studio line)
   live/          Listen together: socket + clock sync, name chips, welcome banner, Studio controls
-  landing/       the landing page and voice gallery
+  landing/       the landing page: the radio, the evening, talk back, the stations, the sign-off, scene illustrations
 docs/          PRD, technical spec, voice casting, build plan
 scripts/       API spike and voice audition tools
 ```
@@ -336,5 +339,5 @@ Tests sit next to the code they cover (`*.test.ts`).
 
 - Hosts, ads and stories are AI-generated and fictional. News lines rephrase real headlines, and the original sources are linked on screen.
 - Caller audio is sent to Sarvam for transcription and is never stored.
-- UI effects adapted from [React Bits](https://reactbits.dev) (Threads, BlurText, SpotlightCard, ClickSpark, DecryptedText, ShinyText; MIT + Commons Clause), [Magic UI](https://magicui.design) (BorderBeam, Ripple, NumberTicker; MIT) and [motion-primitives](https://motion-primitives.com) (TextLoop; MIT). Written fresh for Tarang FM on Motion or plain CSS after the ideas in React Bits (Variable Proximity, Magnet, Tilted Card, Scroll Velocity, Scroll Stack, Star Border, Hold Button and Voice Pill) and Magic UI (Scroll Progress, Text Reveal, Animated Beam, Animated List): `src/components/bits/` and `src/landing/`. Each file names its source and what changed.
+- UI effects adapted from [React Bits](https://reactbits.dev) (BlurText, ClickSpark, DecryptedText, ShinyText; MIT + Commons Clause) and [motion-primitives](https://motion-primitives.com) (TextLoop; MIT); written fresh for Tarang FM after the ideas in React Bits (Scroll Velocity for the dial band, Star Border, Hold Button and Voice Pill) and Magic UI (Animated List): `src/components/bits/` and `src/landing/`. Each file names its source and what changed. The landing page's six scene illustrations are original line art in `src/landing/scenes.tsx`.
 - Headlines via BBC, Bing News and Google News. Weather by [Open-Meteo](https://open-meteo.com). Voices, transcription, scripts, subtitles and transliteration by [Sarvam AI](https://www.sarvam.ai).

@@ -24,7 +24,7 @@ export default function BuiltOnSarvam() {
   return (
     <section className="lp-section lp-sarvam" aria-labelledby="sarvam-title">
       <div className="lp-wrap">
-        <SectionHead id="sarvam-title" title="Built on Sarvam">
+        <SectionHead id="sarvam-title" kicker="Under the hood" title="Built on Sarvam.">
           Four Sarvam models run the station live. Nothing you hear is pre-recorded.
         </SectionHead>
 

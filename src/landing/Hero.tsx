@@ -2,14 +2,14 @@ import { useState } from 'react';
 import { m } from 'motion/react';
 import { STATIONS } from '../../shared/stations';
 import type { StationId } from '../../shared/types';
-import { onAppLink } from '../live/ui/navigate';
 import Magnet from '../components/bits/Magnet';
 import ProximityText from '../components/bits/ProximityText';
 import Tilt from '../components/bits/Tilt';
-import { STATION_COUNT_WORD, VOICE_COUNT, stationIdVoice } from './data';
+import { onAppLink } from '../live/ui/navigate';
+import { stationIdVoice } from './data';
 import RadioSet, { HERO_SAMPLE_PREFIX } from './RadioSet';
 import { TextSwap } from './TextSwap';
-import { PlayGlyph, StudioCall, TuneButton } from './ui';
+import { TuneButton } from './ui';
 import type { VoicePlayer } from './useVoicePlayer';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -35,24 +35,19 @@ export function HeroHeadline({ language }: { language: string | null }) {
   );
 }
 
+/** One idea, one object: the radio. Presets play a station's ID; the single button tunes in to the one on the dial. */
 export default function Hero({ onTuneIn, player }: { onTuneIn: (id: StationId) => void; player: VoicePlayer }) {
   const [dial, setDial] = useState(0);
   const [presented, setPresented] = useState(-1);
   const station = STATIONS[dial];
   const sampleId = `${HERO_SAMPLE_PREFIX}${station.id}`;
   const phase = player.state.id === sampleId ? (player.state.phase ?? 'idle') : 'idle';
-  const busy = phase === 'loading' || phase === 'playing';
 
-  const playSample = () => {
-    const v = stationIdVoice(station.id);
-    player.toggle({
-      id: sampleId,
-      station: station.id,
-      speaker: v.speaker,
-      text: v.line.text,
-      pace: v.pace,
-      temperature: v.temperature,
-    });
+  const play = (index: number) => {
+    setDial(index);
+    const s = STATIONS[index];
+    const v = stationIdVoice(s.id);
+    player.toggle({ id: `${HERO_SAMPLE_PREFIX}${s.id}`, station: s.id, speaker: v.speaker, text: v.line.text, pace: v.pace, temperature: v.temperature });
   };
 
   return (
@@ -62,42 +57,29 @@ export default function Hero({ onTuneIn, player }: { onTuneIn: (id: StationId) =
           <HeroHeadline language={presented >= 0 ? STATIONS[presented].languageName : null} />
         </m.div>
         <m.p className="lp-lede" {...rise(0.08)}>
-          A live show in {STATION_COUNT_WORD} Indian languages, voiced by {VOICE_COUNT} Sarvam Bulbul v4 Flash personas.
-          Call in, and the RJ answers.
+          A live show in five Indian languages, written and voiced the moment you tune in. Call in, and the RJ answers.
         </m.p>
         <m.div className="lp-hero-actions" {...rise(0.16)}>
           <Magnet>
-            <TuneButton onClick={() => onTuneIn('hi')} />
+            <TuneButton onClick={() => onTuneIn(station.id)} />
           </Magnet>
-          <button
-            type="button"
-            className="lp-ghost lp-ghost--sample"
-            data-phase={phase}
-            onClick={playSample}
-            aria-label={busy ? 'Stop sample' : `Hear a sample, ${station.languageName} ${station.frequency}`}
-          >
-            <PlayGlyph phase={phase} size={16} />
-            {busy ? 'Stop sample' : 'Hear a sample'}
-          </button>
         </m.div>
         <m.p className="lp-trust" {...rise(0.22)}>
-          No install, no login. Starts on Hindi 91.1.
+          No install, no login. Starts on {station.languageName} {station.frequency}. Press a preset to hear a station.
         </m.p>
-        <m.a className="lp-ghost lp-ghost--sm mt-3" href="/live" onClick={onAppLink} {...rise(0.25)}>
-          Listen together · beta
+        <m.a className="lp-hero-live" href="/live" onClick={onAppLink} {...rise(0.28)}>
+          <span className="lp-hero-live-dot" aria-hidden="true" />
+          <span className="lp-hero-live-name">Listen together</span>
+          <span className="lp-beta">Beta</span>
+          <span className="lp-hero-live-sub">one live show, everyone in sync</span>
+          <span className="lp-hero-live-arrow" aria-hidden="true">
+            →
+          </span>
         </m.a>
-        <m.div className="lp-hero-phone" {...rise(0.28)}>
-          <StudioCall />
-        </m.div>
       </div>
-      <m.div
-        className="lp-hero-visual"
-        initial={{ opacity: 0, y: 18 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.7, delay: 0.1, ease: EASE }}
-      >
+      <m.div className="lp-hero-visual" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.1, ease: EASE }}>
         <Tilt max={3.5}>
-          <RadioSet dial={dial} onDial={setDial} onTuneIn={onTuneIn} player={player} onPresent={setPresented} />
+          <RadioSet dial={dial} onDial={setDial} onPlay={play} player={player} onPresent={setPresented} />
         </Tilt>
       </m.div>
       <p className="lp-sr" aria-live="polite">

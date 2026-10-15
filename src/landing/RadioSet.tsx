@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useReducedMotion } from 'motion/react';
 import { STATIONS } from '../../shared/stations';
-import type { StationId } from '../../shared/types';
 import { TAGLINE_EN } from './data';
 import { WaveMark } from './icons';
 import type { Vars } from './ui';
@@ -25,7 +24,8 @@ interface RadioSetProps {
   /** Station shown on the dial once the power-on sweep is done. */
   dial: number;
   onDial: (index: number) => void;
-  onTuneIn: (id: StationId) => void;
+  /** A preset key was pressed: play that station's ID (and point the dial at it) */
+  onPlay: (index: number) => void;
   player: VoicePlayer;
   /** Called with the station index the dial is presenting (sweep or hover), or -1 when at rest. */
   onPresent?: (index: number) => void;
@@ -33,9 +33,9 @@ interface RadioSetProps {
 
 /**
  * The hero object: a graphite radio with an amber backlit dial, VU meter, speaker grille,
- * tuning knob and mechanical preset keys. Preset keys tune in; the knob only turns the dial.
+ * tuning knob and mechanical preset keys. Preset keys play that station's ID; the knob only turns the dial.
  */
-export default function RadioSet({ dial, onDial, onTuneIn, player, onPresent }: RadioSetProps) {
+export default function RadioSet({ dial, onDial, onPlay, player, onPresent }: RadioSetProps) {
   const reduce = useReducedMotion() ?? false;
   const [step, setStep] = useState(reduce ? SWEEP.length : -1);
   const [hover, setHover] = useState<number | null>(null);
@@ -157,7 +157,7 @@ export default function RadioSet({ dial, onDial, onTuneIn, player, onPresent }: 
         </button>
       </div>
 
-      <div className="lp-presets" role="group" aria-label="Tune in to a station">
+      <div className="lp-presets" role="group" aria-label="Hear a station">
         {STATIONS.map((s, i) => (
           <button
             key={s.id}
@@ -165,8 +165,9 @@ export default function RadioSet({ dial, onDial, onTuneIn, player, onPresent }: 
             className="lp-preset"
             data-active={shown === i}
             style={{ '--st': s.accent } as Vars}
-            aria-label={`Tune in to ${s.languageName} ${s.frequency}`}
-            onClick={() => onTuneIn(s.id)}
+            aria-label={`${live && sampleIndex === i ? 'Stop' : 'Play'} the ${s.languageName} ${s.frequency} station ID`}
+            aria-pressed={live && sampleIndex === i}
+            onClick={() => onPlay(i)}
             onPointerEnter={(e) => e.pointerType === 'mouse' && setHover(i)}
             onPointerLeave={(e) => e.pointerType === 'mouse' && setHover(null)}
             onFocus={() => setHover(i)}

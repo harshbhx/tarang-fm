@@ -124,7 +124,7 @@ export default function VoiceTuner({ player }: { player: VoicePlayer }) {
   return (
     <section className="lp-section lp-voices" aria-labelledby="voices-title">
       <div className="lp-wrap">
-        <SectionHead id="voices-title" title="Hear every voice">
+        <SectionHead id="voices-title" kicker="The cast" title="Hear every voice.">
           {VOICE_COUNT} Bulbul v4 Flash personas, each cast for one job. Tap a voice and it streams in a blink.
         </SectionHead>
 

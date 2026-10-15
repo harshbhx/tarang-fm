@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   LIVE_AUTO_OFF_MS,
+  LIVE_ENDED_NOTE,
   LIVE_OFF_AIR_NOTE,
   LIVE_PCM_BYTES_PER_MS,
   type LiveLine,
@@ -599,5 +600,52 @@ describe('LiveController', () => {
     expect(h.controller.getSnapshot().status).toBe('reconnecting');
     await flush(500);
     expect(h.sockets).toHaveLength(2);
+  });
+});
+
+describe('LiveController show limit', () => {
+  it('the show ending is told apart from off air, and Tune in again asks for a fresh show', async () => {
+    const h = harness();
+    const ws = await h.joinAs('Asha');
+    expect(h.controller.getSnapshot().enabled).toBe(true);
+
+    // The six-minute limit: sleeping with the ended note; the station still starts by itself
+    ws.receive({ type: 'status', now: server(), state: 'sleeping', enabled: true, note: LIVE_ENDED_NOTE });
+    let s = h.controller.getSnapshot();
+    expect(s.status).toBe('sleeping');
+    expect(s.note).toBe(LIVE_ENDED_NOTE);
+    expect(s.enabled).toBe(true);
+    expect(s.enabledUntil).toBeUndefined();
+
+    h.controller.restart();
+    expect(ws.sent.filter((m) => m.type === 'restart')).toHaveLength(1);
+
+    // A refused restart shows its reason; the next status clears the ended note
+    ws.receive({ type: 'error', code: 'too_soon', message: 'The show is starting again. Try once more in a few seconds.' });
+    expect(h.controller.getSnapshot().status).toBe('sleeping');
+    expect(h.controller.getSnapshot().error).toMatch(/starting again/);
+    h.controller.restart();
+    expect(h.controller.getSnapshot().error).toBeUndefined();
+
+    const until = server() + LIVE_AUTO_OFF_MS;
+    ws.receive({ type: 'status', now: server(), state: 'warming_up', enabled: true, enabledUntil: until });
+    s = h.controller.getSnapshot();
+    expect(s.status).toBe('warming_up');
+    expect(s.note).toBeUndefined();
+    expect(s.enabledUntil).toBe(until);
+  });
+
+  it('a newcomer to an ended show sees it ended; restart is a no-op before joining', async () => {
+    const h = harness();
+    h.controller.restart();
+    const p = h.controller.join('Asha');
+    h.socket().open();
+    expect(h.socket().sent.some((m) => m.type === 'restart')).toBe(false);
+    h.socket().receive(h.joined({ id: 'u1', name: 'Asha', joinedAt: server() }, [], 'sleeping', { enabled: true, note: LIVE_ENDED_NOTE }));
+    await p;
+    const s = h.controller.getSnapshot();
+    expect(s.status).toBe('sleeping');
+    expect(s.note).toBe(LIVE_ENDED_NOTE);
+    expect(s.enabled).toBe(true);
   });
 });

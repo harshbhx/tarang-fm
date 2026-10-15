@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getStation } from '../../../shared/stations';
-import { LIVE_OFF_AIR_NOTE, type LiveLine, type LiveListener } from '../../../shared/live';
+import { LIVE_ENDED_NOTE, LIVE_OFF_AIR_NOTE, type LiveLine, type LiveListener } from '../../../shared/live';
 import type { Role, SegmentType, StationId } from '../../../shared/types';
 import type { LiveActions, LiveViewState } from '../types';
 import LiveView from './LiveView';
@@ -88,6 +88,7 @@ type MockKey =
   | 'reconnecting'
   | 'sleeping'
   | 'off_air'
+  | 'ended'
   | 'offline'
   | 'error';
 
@@ -105,6 +106,7 @@ const MOCK_LABELS: { key: MockKey; label: string }[] = [
   { key: 'reconnecting', label: 'Reconnecting' },
   { key: 'sleeping', label: 'Sleeping' },
   { key: 'off_air', label: 'Off air' },
+  { key: 'ended', label: 'Show ended' },
   { key: 'offline', label: 'Offline' },
   { key: 'error', label: 'Error' },
 ];
@@ -136,6 +138,8 @@ function buildState(key: MockKey, station: StationId, index: number, extra: Live
       return { ...base, status: 'idle', you: undefined, listeners: [], welcomedYou: false, muted: false, enabled: false };
     case 'off_air':
       return { ...base, status: 'sleeping', listeners: [YOU, ...OTHERS.slice(0, 2)], welcomedYou: false, enabled: false, note: LIVE_OFF_AIR_NOTE };
+    case 'ended':
+      return { ...base, status: 'sleeping', listeners: [YOU, ...OTHERS.slice(0, 2)], note: LIVE_ENDED_NOTE };
     case 'connecting':
     case 'sleeping':
       return { ...base, status: key, listeners: key === 'sleeping' ? listeners : [], welcomedYou: false };
@@ -244,6 +248,11 @@ export default function LivePreview() {
         ]);
       },
       toggleMute: () => setMuted((on) => !on),
+      restart: () =>
+        run([
+          [0, 'warming_up'],
+          [2600, 'welcomed'],
+        ]),
       leave: () => {
         clear();
         setKey('idle');

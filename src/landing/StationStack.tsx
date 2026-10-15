@@ -112,9 +112,9 @@ export default function StationStack({ player, onTuneIn }: { player: VoicePlayer
   return (
     <section className="lp-section lp-stack-sec" aria-labelledby="stack-title">
       <div className="lp-wrap">
-        <SectionHead id="stack-title" title="Five stations, one dial">
-          Each station has its own RJ, newsreader, ad voices and story cast, and runs the same show in its own language. Scroll the stack,
-          hear each one announce itself, tune in to the one that sounds like home.
+        <SectionHead id="stack-title" kicker="Five stations, one dial" title="Five languages, one show.">
+          Each station has its own RJ, newsreader, ad voices and story cast. Hear each one announce itself, and tune in to the one that sounds
+          like home.
         </SectionHead>
       </div>
       <div className="lp-wrap lp-stack" style={{ '--n': String(STATIONS.length) } as Vars}>

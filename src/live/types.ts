@@ -28,11 +28,11 @@ export interface LiveViewState {
   clockOffsetMs: number;
   muted: boolean;
   error?: string;
-  /** Switched on by the studio; false means off air (nothing plays until the studio starts it) */
+  /** Starts by itself when someone joins; false means the studio stopped it (off air until it starts it again) */
   enabled: boolean;
-  /** Server epoch ms when a started station switches itself off */
+  /** Server epoch ms when the show on air ends (its six-minute limit) */
   enabledUntil?: number;
-  /** Server note while sleeping, e.g. LIVE_OFF_AIR_NOTE */
+  /** Server note while sleeping, e.g. LIVE_OFF_AIR_NOTE or LIVE_ENDED_NOTE */
   note?: string;
 }
 
@@ -43,4 +43,6 @@ export interface LiveActions {
   setStation(id: StationId): void;
   toggleMute(): void;
   leave(): void;
+  /** "Tune in again" after the show ended: asks the station for a fresh show */
+  restart(): void;
 }
