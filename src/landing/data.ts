@@ -171,6 +171,38 @@ export const VOICE_GROUPS: { station: Station; voices: CastVoice[] }[] = STATION
   return { station, voices };
 });
 
+export interface ChainStep {
+  key: string;
+  title: string;
+  body: string;
+  model?: string;
+}
+
+/** The call-in loop, in order. */
+export const CALL_CHAIN: ChainStep[] = [
+  { key: 'you', title: 'You', body: 'Hold the button and talk, up to 15 s.' },
+  { key: 'stt', title: 'Saaras v4', body: 'Hears you. Hinglish stays Hinglish.', model: 'saaras:v4' },
+  { key: 'llm', title: 'Sarvam-105B', body: 'Writes the RJ’s reply.', model: 'sarvam-105b' },
+  { key: 'tts', title: 'Bulbul v4 Flash', body: 'Speaks it on air, streamed.', model: 'bulbul:v4-flash' },
+];
+
+export interface ModelRow {
+  name: string;
+  id: string;
+  job: string;
+}
+
+/** The supporting models behind Bulbul. */
+export const MODELS: ModelRow[] = [
+  { name: 'Sarvam-105B', id: 'sarvam-105b', job: 'Writes every script, call-in reply and English subtitle' },
+  { name: 'Saaras v4', id: 'saaras:v4', job: 'Transcribes callers, code-mixed or native' },
+  { name: 'Sarvam Transliterate', id: 'transliterate', job: 'Writes listener and caller names in each script' },
+];
+
+export const MANIFESTO =
+  'Radio was always one voice, talking to everyone. Tonight it knows your name, speaks your language, and answers when you call.';
+export const MANIFESTO_ACCENT = ['name', 'language', 'answers'];
+
 export const VOICE_COUNT = new Set(VOICE_GROUPS.flatMap((g) => g.voices.map((v) => v.speaker))).size;
 
 /** English gloss for each station's tagline. */

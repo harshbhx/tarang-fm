@@ -1,6 +1,7 @@
-import { m } from 'motion/react';
 import type { CSSProperties, ReactNode } from 'react';
+import BlurText from '../components/bits/BlurText';
 import ClickSpark from '../components/bits/ClickSpark';
+import { Ripple } from '../components/bits/MagicUi';
 import type { SamplePhase } from './useVoicePlayer';
 import { PlayIcon, RetryIcon, StopIcon } from './icons';
 
@@ -20,21 +21,12 @@ export function TuneButton({ onClick, label = 'Tune in now' }: { onClick: () => 
   );
 }
 
-/** How every section opens: a mono kicker, the title (one quiet rise, once), one line under it. */
+/** How every section opens: a mono kicker, the title blurring in word by word, one line under it. */
 export function SectionHead({ id, title, kicker, children }: { id: string; title: string; kicker?: string; children?: ReactNode }) {
   return (
     <div className="lp-open">
       {kicker && <p className="lp-kicker">{kicker}</p>}
-      <m.h2
-        id={id}
-        className="lp-h2"
-        initial={{ opacity: 0, y: 10 }}
-        whileInView={{ opacity: 1, y: 0 }}
-        viewport={{ once: true, amount: 0.5 }}
-        transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-      >
-        {title}
-      </m.h2>
+      <BlurText as="h2" id={id} className="lp-h2" text={title} />
       {children && <p className="lp-sub">{children}</p>}
     </div>
   );
@@ -57,3 +49,13 @@ export function PlayGlyph({ phase, size = 18 }: { phase: SamplePhase | 'idle'; s
 }
 
 export const STUDIO_LANGUAGES = 'Hindi, Marathi, Gujarati, Tamil, Bangla or English';
+
+/** Rings that pulse out from the studio phone, like a line that is ringing. */
+export function RingingPhone({ children }: { children: ReactNode }) {
+  return (
+    <span className="lp-phone-icon">
+      <Ripple size={40} step={20} rings={3} opacity={0.3} color="var(--lp-amber-hi, #ffd38a)" />
+      {children}
+    </span>
+  );
+}

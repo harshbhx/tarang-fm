@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerE
 import { PAUSE_AFTER_MS, STUDIO_NUMBER, STUDIO_NUMBER_DISPLAY } from '../../shared/constants';
 import type { Line, PhoneCall } from '../../shared/types';
 import { createRecorder } from '../audio';
+import AnimatedBeam from '../components/bits/AnimatedBeam';
+import { BorderBeam } from '../components/bits/MagicUi';
 import { getPhoneRecent, postCall, type LiveCallResponse } from '../radio/api';
 import { listenerContext, loadListenerName } from '../radio/listener';
-import { CALL_EXAMPLE, CALL_TYPE_LABEL } from './data';
+import { CALL_CHAIN, CALL_EXAMPLE, CALL_TYPE_LABEL } from './data';
 import { MicIcon } from './icons';
 import { SceneCallIn, SceneStudioLine } from './scenes';
-import { PlayGlyph, SectionHead, SpeakerId, STUDIO_LANGUAGES, type Vars } from './ui';
+import { PlayGlyph, RingingPhone, SectionHead, SpeakerId, STUDIO_LANGUAGES, type Vars } from './ui';
 import type { VoicePlayer } from './useVoicePlayer';
 
 export const DEMO_ID = 'call-demo';
@@ -19,8 +21,7 @@ const BAR_WEIGHTS = [0.6, 0.85, 1, 0.8, 0.65];
 type Mode = 'mic' | 'sample';
 type Phase = 'idle' | 'holding' | 'short' | 'thinking' | 'speaking' | 'done' | 'error';
 
-/** The four stops a call makes; which one is lit in each phase. */
-const STEPS = ['You', 'Saaras v4 hears', 'Sarvam-105B writes', 'Bulbul speaks'];
+/** Which stop of the call (index into CALL_CHAIN) is lit in each phase. */
 const STAGE: Record<Phase, number> = { idle: -1, holding: 0, short: 0, thinking: 2, speaking: 3, done: 3, error: 3 };
 
 const sampleLine = (text: string, en?: string): Line => ({
@@ -63,6 +64,9 @@ export default function TalkBack({ player }: { player: VoicePlayer }) {
   const pressedAt = useRef(0);
   // Whether the button is down right now: a ref, so a press shorter than a render still ends properly
   const holdingRef = useRef(false);
+  const pipe = useRef<HTMLDivElement>(null);
+  const nodes = useRef<(HTMLSpanElement | null)[]>([]);
+  const nodeRef = (i: number) => ({ current: nodes.current[i] ?? null });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
   const meterFrame = useRef(0);
@@ -323,13 +327,28 @@ export default function TalkBack({ player }: { player: VoicePlayer }) {
             </span>
           </button>
 
-          <ol className="lp-steps" aria-label="Where your call is">
-            {STEPS.map((step, i) => (
-              <li key={step} data-on={stage >= i} data-active={stage === i}>
-                {step}
-              </li>
+          <div ref={pipe} className="lp-pipe" role="list" aria-label="Where your call is">
+            {CALL_CHAIN.map((step, i) => (
+              <div key={step.key} role="listitem" className="lp-pipe-step" data-on={stage >= i} data-active={stage === i}>
+                <span
+                  ref={(el) => {
+                    nodes.current[i] = el;
+                  }}
+                  className="lp-pipe-node"
+                  aria-hidden="true"
+                >
+                  {i === 0 ? <MicIcon size={16} /> : i}
+                </span>
+                <span className="lp-pipe-text">
+                  <span className="lp-pipe-title">{step.title}</span>
+                  <span className="lp-pipe-body">{step.body}</span>
+                </span>
+              </div>
             ))}
-          </ol>
+            {CALL_CHAIN.slice(1).map((step, i) => (
+              <AnimatedBeam key={step.key} containerRef={pipe} fromRef={nodeRef(i)} toRef={nodeRef(i + 1)} lit={stage > i} duration={1.6} delay={i * 0.25} color="#ffd08a" />
+            ))}
+          </div>
           <p id="hold-hint" className="lp-talk-hint" data-kind={phase === 'short' || phase === 'error' ? 'error' : phase === 'done' ? 'ttfa' : undefined} aria-live="polite">
             {hint}
           </p>
@@ -363,6 +382,7 @@ export default function TalkBack({ player }: { player: VoicePlayer }) {
               </div>
               {rjLine && (
                 <div className="lp-line lp-line--rj" data-on={stage >= 3}>
+                  {stage >= 3 && <BorderBeam size={110} duration={8} colorFrom="#ffd38a" colorTo="#ff6b2c" />}
                   <p className="lp-line-who">
                     RJ Sunny <SpeakerId id={rjLine.speaker ?? voice.speaker} />
                   </p>
@@ -384,7 +404,9 @@ export default function TalkBack({ player }: { player: VoicePlayer }) {
       <div className="lp-wrap">
         <div className="lp-studio-row">
           <div className="lp-studio-scene" aria-hidden="true">
-            <SceneStudioLine size={72} />
+            <RingingPhone>
+              <SceneStudioLine size={72} />
+            </RingingPhone>
           </div>
           <div className="lp-studio-text">
             <p className="lp-studio-lead">Or ring the studio from any phone.</p>

@@ -59,15 +59,19 @@ test('API answers with JSON errors, never HTML', async ({ request }) => {
   expect((await health.json()).ok).toBe(true);
 });
 
-test('landing page: the dial band and the four section titles, in order', async ({ page }) => {
+test('landing page: the waves, the dial band and every section title', async ({ page }) => {
   const errors = trackErrors(page);
   await page.goto('/');
+  // WebGL waves behind the hero (lazy-loaded)
+  await expect(page.locator('.lp-hero-waves canvas')).toBeAttached();
   // The band names every station for screen readers
   const band = page.getByRole('img', { name: /Five stations: Hindi 91\.1, Marathi 94\.3, Tamil 98\.3, Bangla 102\.7, Gujarati 106\.1/ });
   await band.scrollIntoViewIfNeeded();
   await expect(band).toBeVisible();
-  const titles = await page.getByRole('heading', { level: 2 }).allTextContents();
-  expect(titles).toEqual(['Tonight’s show, written for you.', 'Talk back.', 'Five languages. Twenty-seven voices.', 'Dil se suniye.']);
+  // Blur-in headings keep their accessible names
+  for (const name of ['Tonight’s show, written for you.', 'Five languages, one show.', 'Hear every voice.', 'Talk back.', 'Built on Sarvam.', 'Dil se suniye.']) {
+    await expect(page.getByRole('heading', { level: 2, name })).toBeAttached();
+  }
   await noHorizontalScroll(page);
   expect(errors).toEqual([]);
 });
@@ -94,6 +98,9 @@ test('the evening: scrolling the beats changes what the on-air stage shows', asy
   await expect(stage.locator('.lp-stage-lamps li[data-on="true"]')).toHaveText('Kahani');
   await expect(stage.getByText('shubh_hi_stories_dramatic')).toBeVisible();
   await expect(beats.nth(3)).toHaveAttribute('data-active', 'true');
+  // Let the stage finish fading in first, or the click would scroll the pinned stage "into view" and move the page
+  await expect(stage.locator('.lp-stage-script')).toHaveCSS('opacity', '1');
+  await expect(stage.locator('.lp-stage-script')).toHaveCSS('transform', 'none');
   const monsoon = stage.getByRole('button', { name: /Monsoon romance/ });
   await monsoon.click();
   await expect(monsoon).toHaveAttribute('aria-pressed', 'true');
@@ -112,15 +119,20 @@ test('the evening: scrolling the beats changes what the on-air stage shows', asy
   expect(errors).toEqual([]);
 });
 
-test('five stations on one light page, each with its own voice', async ({ page }) => {
+test('five stations stack as you scroll; the sign-off dial follows the station you point at', async ({ page }) => {
   const errors = trackErrors(page);
   await page.goto('/');
-  const rows = page.locator('.lp-station-row');
-  await expect(rows).toHaveCount(5);
-  await expect(rows.nth(2).locator('.lp-station-native')).toHaveText('தரங் தமிழ்');
-  await expect(rows.nth(2).getByRole('button', { name: /Hear the Tamil 98\.3 station ID/ })).toBeAttached();
-  await expect(rows.nth(2).getByRole('button', { name: /Tune in.*Tamil/ })).toBeAttached();
-  // The sign-off button wears its star
+  const cards = page.locator('.lp-scard');
+  await expect(cards).toHaveCount(5);
+  await expect(cards.nth(2).getByRole('heading', { level: 3 })).toHaveText('தரங் தமிழ்');
+  await expect(cards.nth(2).getByRole('button', { name: /Tune in to Tamil/ })).toBeAttached();
+  await expect(cards.nth(2).getByRole('button', { name: /Hear the Tamil station ID/ })).toBeAttached();
+  // The sign-off: focusing a preset key moves the needle and retitles the one big button
+  const keys = page.locator('.lp-ckey');
+  await expect(keys).toHaveCount(5);
+  await keys.nth(3).focus();
+  await expect(keys.nth(3)).toHaveAttribute('data-on', 'true');
+  await expect(page.locator('.lp-console-go .lp-cta')).toHaveText(/Tune in to Bangla 102\.7/);
   await expect(page.locator('.lp-final .star-border-star')).toBeAttached();
   await noHorizontalScroll(page);
   expect(errors).toEqual([]);
@@ -135,16 +147,16 @@ test('hold to talk: the caller is heard while held and the call moves stop by st
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await expect(hold).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('.lp-steps li').nth(0)).toHaveAttribute('data-on', 'true');
+  await expect(page.locator('.lp-pipe-step').nth(0)).toHaveAttribute('data-on', 'true');
   await page.waitForTimeout(900);
   // Words arrive while the button is held (no microphone here, so the sample caller speaks)
   const you = page.locator('.lp-line--you .lp-native');
   await expect(you).toContainText('आज');
   await page.mouse.up();
-  await expect(page.locator('.lp-steps li').nth(2)).toHaveAttribute('data-on', 'true');
+  await expect(page.locator('.lp-pipe-step').nth(2)).toHaveAttribute('data-on', 'true');
   await expect(you).toContainText('special बोल दो ना!');
   // The reply stop lights, then the sample reply plays (or, without a Sarvam key here, reports no signal)
-  await expect(page.locator('.lp-steps li').nth(3)).toHaveAttribute('data-on', 'true', { timeout: 5000 });
+  await expect(page.locator('.lp-pipe-step').nth(3)).toHaveAttribute('data-on', 'true', { timeout: 5000 });
   await expect(page.locator('.lp-talk-hint')).not.toHaveText(/Press and hold/);
   // Too short a press is told so
   const again = (await hold.boundingBox())!;

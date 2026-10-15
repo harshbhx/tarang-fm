@@ -1,0 +1,55 @@
+.animated-beam {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.animated-beam path {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.animated-beam-track {
+  stroke: var(--beam-track);
+  transition: stroke 300ms ease;
+}
+
+.animated-beam[data-lit='true'] .animated-beam-track {
+  stroke: color-mix(in oklab, var(--beam-color) 32%, var(--beam-track));
+}
+
+.animated-beam-comet {
+  stroke: var(--beam-color);
+  stroke-dasharray: 0.22 1;
+  stroke-dashoffset: 1.22;
+  filter: drop-shadow(0 0 4px var(--beam-color));
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.animated-beam[data-lit='true'] .animated-beam-comet {
+  opacity: 1;
+  animation: animated-beam-run var(--beam-duration, 3s) linear var(--beam-delay, 0s) infinite;
+}
+
+.animated-beam[data-lit='true'][data-reverse] .animated-beam-comet {
+  animation-direction: reverse;
+}
+
+@keyframes animated-beam-run {
+  from {
+    stroke-dashoffset: 1.22;
+  }
+  to {
+    stroke-dashoffset: -0.22;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animated-beam-comet {
+    animation: none !important;
+    stroke-dasharray: none;
+    opacity: 0.55;
+  }
+}

@@ -1,0 +1,56 @@
+/* BorderBeam: the light is clipped to the border ring of the parent. */
+.mui-beam {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: var(--beam-width) solid transparent;
+  pointer-events: none;
+  -webkit-mask:
+    linear-gradient(transparent, transparent) padding-box,
+    linear-gradient(#000, #000) border-box;
+  -webkit-mask-composite: source-in;
+  mask:
+    linear-gradient(transparent, transparent) padding-box intersect,
+    linear-gradient(#000, #000) border-box;
+}
+
+.mui-beam-light {
+  position: absolute;
+  aspect-ratio: 1;
+  background: linear-gradient(to left, var(--beam-from), var(--beam-to), transparent);
+}
+
+/* Ripple */
+.mui-ripple {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+.mui-ripple-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 50%;
+  border: 1px solid var(--ripple-color);
+  background: color-mix(in oklab, var(--ripple-color) 10%, transparent);
+  transform: translate(-50%, -50%) scale(1);
+  animation: mui-ripple 3.2s ease infinite;
+}
+
+@keyframes mui-ripple {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(0.88);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mui-ripple-ring {
+    animation: none;
+  }
+}
