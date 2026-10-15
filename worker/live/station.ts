@@ -199,6 +199,11 @@ function attachmentOf(ws: WebSocket): Attachment | undefined {
   }
 }
 
+/** A listener's edge coordinates in this city (the RJ link's weather and air quality). */
+function geoOf(sockets: WebSocket[], city: string | undefined): Attachment | undefined {
+  return city ? sockets.map(attachmentOf).find((a) => a?.city === city && a.latitude) : undefined;
+}
+
 function send(ws: WebSocket, message: LiveServerMessage): void {
   try {
     ws.send(JSON.stringify(message));
@@ -667,6 +672,8 @@ export class LiveStation extends DurableObject<Env> {
             const slate = await newsroomHeadlines(this.env, { station, mode: req.mode === 'update' ? 'update' : 'full', city: local, regionName: local ? req.listener.region : undefined, waitUntil: (p) => this.ctx.waitUntil(p) });
             return slate.length ? slate : getHeadlines(station, origin, undefined, local);
           },
+          // The RJ link's fact packet: the audience's most common city and its edge coordinates
+          geo: { city, region: req.listener.region, lat: geoOf(this.ctx.getWebSockets(), city)?.latitude, lon: geoOf(this.ctx.getWebSockets(), city)?.longitude },
         });
       } catch (err) {
         console.error(`[live] ${station.id} ${type} failed (attempt ${attempt + 1}): ${String(err)}`);

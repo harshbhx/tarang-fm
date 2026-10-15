@@ -132,6 +132,12 @@ app.get('/context', async (c) => {
   return c.json(context, 200, { 'Cache-Control': 'private, no-store' });
 });
 
+/** The listener's city, state and coordinates from Cloudflare's edge (the RJ link's fact packet). */
+function edgeGeo(request: Request): { city?: string; region?: string; lat?: string; lon?: string } {
+  const cf = (request as Request & { cf?: IncomingRequestCfProperties }).cf;
+  return { city: cf?.city || undefined, region: cf?.region || undefined, lat: cf?.latitude || undefined, lon: cf?.longitude || undefined };
+}
+
 /** A bulletin's mode from the clock; anything else is a full bulletin. */
 function newsMode(mode: string | undefined): 'full' | 'update' {
   return mode === 'update' ? 'update' : 'full';
@@ -182,6 +188,8 @@ app.post('/segment', rateLimit((e) => e.RL_SEGMENT), requireKey, async (c) => {
     },
     // What this station already aired, for every listener, so stories and ads don't repeat
     memory: kvShowMemory(c.env.PHONE, waitUntil(c)),
+    // The RJ link's fact packet (weather, air, alerts) is scoped to where the listener is
+    geo: edgeGeo(c.req.raw),
   });
   // Calls the script left out go straight back in the queue
   const read = new Set(segment.fallback ? [] : (segment.dedicated ?? []));
@@ -421,7 +429,7 @@ export { NewsRefresh } from './news/workflow';
 
 export default {
   fetch: app.fetch,
-  /** Every 3 hours: refresh a station's news pool only if it was consumed (see worker/news/policy.ts). */
+  /** Every hour: refresh a station's news pool only if it was consumed (see worker/news/policy.ts). */
   async scheduled(_controller, env, ctx) {
     ctx.waitUntil(scheduledNews(env).then((ids) => console.log(`[news] cron started ${ids.length} refresh(es)`)));
   },

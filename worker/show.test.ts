@@ -96,6 +96,9 @@ describe('dropOrphanKicker', () => {
     expect(dropOrphanKicker(lines).map((l) => l.text)).toEqual(['खबर एक।', 'ये थीं अभी तक की खबरें।']);
     const withStory = [{ text: 'और आखिर में, एक अच्छी खबर।' }, { text: 'गरबा में रिकॉर्ड भीड़।' }, { text: 'ये थीं अभी तक की खबरें।' }];
     expect(dropOrphanKicker(withStory)).toHaveLength(3);
+    // The cue and the story on one line, right before the sign-off: that is the kicker, not an orphan
+    const oneLine = [{ text: 'खबर एक।' }, { text: 'और आख़िर में, एक अच्छी खबर: इसरो ने छात्रों के उपग्रह का परीक्षण किया।' }, { text: 'ये थीं अभी तक की खबरें।' }];
+    expect(dropOrphanKicker(oneLine)).toHaveLength(3);
   });
 });
 

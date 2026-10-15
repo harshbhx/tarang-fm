@@ -27,7 +27,7 @@ export const SEGMENT_ROLES: Record<LlmSegmentType, Role[]> = {
 
 export const SEGMENT_PLAN: Record<LlmSegmentType, LlmPlan> = {
   rj_link: { temperature: 0.7, maxTokens: 1400, reasoningEffort: null, timeoutMs: 10_000 },
-  news: { temperature: 0.3, maxTokens: 1800, reasoningEffort: null, timeoutMs: 10_000 },
+  news: { temperature: 0.3, maxTokens: 3000, reasoningEffort: null, timeoutMs: 16_000 },
   ad_break: { temperature: 0.9, maxTokens: 1400, reasoningEffort: null, timeoutMs: 13_000 },
   // A serial part (prefetched as soon as the previous part is accepted); the outline and the one-shot story have their own plans in ../fiction
   kahani: { temperature: 0.8, maxTokens: 3200, reasoningEffort: null, timeoutMs: 25_000 },
@@ -52,6 +52,8 @@ export function segmentJsonSchema(type: LlmSegmentType, subtitles = false): Reco
   const plan = PLAN_FIELDS[type];
   const lines = {
     type: 'array',
+    // A bounded array: a bulletin with no upper bound has run on to the token cap under strict decoding
+    ...(type === 'news' ? { maxItems: MAX_LINES.news } : {}),
     items: {
       type: 'object',
       additionalProperties: false,
@@ -70,7 +72,7 @@ export function segmentJsonSchema(type: LlmSegmentType, subtitles = false): Reco
     additionalProperties: false,
     required: [...plan, 'title', 'lines', ...extra, 'summary_en'],
     properties: {
-      ...Object.fromEntries(plan.map((k) => [k, { type: 'string' }])),
+      ...Object.fromEntries(plan.map((k) => [k, type === 'news' ? { type: 'string', maxLength: 160 } : { type: 'string' }])),
       title: { type: 'string' },
       lines,
       ...(type === 'news' ? { mood: { type: 'string', enum: ['light', 'heavy'] } } : {}),

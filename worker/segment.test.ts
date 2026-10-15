@@ -215,7 +215,9 @@ describe('English subtitles written with the script', () => {
     const on = scriptWriter(fail);
     const segment = await buildSegment(on.sarvam, hindi, linkReq({ subtitles: true }), new Timings());
     expect(segment.fallback).toBe(true);
-    expect(fallbacksFor('hi').fillerEn).toContain(segment.lines[0].en);
+    // An RJ link that can't be written airs the honest 2-line template (handover + station ID), with its own English
+    expect(segment.lines[0].en).toBe("You're listening to Tarang FM 91.1.");
+    expect(fallbacksFor('hi').fillerEn.length).toBeGreaterThan(0);
     expect(on.translations()).toBe(0);
     const off = await buildSegment(scriptWriter(fail).sarvam, hindi, linkReq(), new Timings());
     expect(off.lines[0].en).toBeUndefined();

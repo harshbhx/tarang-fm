@@ -6,7 +6,7 @@ import type { Delivery, Line, Mood, Role, Segment, SegmentType, Source, Station,
 import { randomFiller, SOMEONE_EN, someoneFor, studioCallLine, studioCallLineEn } from './fallbacks';
 import { callerPlaceholder, MAX_LINES, NEWS_HEADLINES, newsFrameText, rjOnAir, maxTokensFor, subtitlesOn, type SegmentPlans, type StoryPlan, SEGMENT_PLAN, SEGMENT_ROLES, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
 import type { Sarvam } from './sarvam';
-import { gapAfter, isDelivery, timePhrase, voiceFor } from './show';
+import { gapAfter, isDelivery, rjBibleFor, timePhrase, voiceFor } from './show';
 import { normalizeTitle, type ShowMemory } from './memory';
 import { buildFiction } from './fiction';
 import { modelSubtitle } from './subtitle';
@@ -14,6 +14,9 @@ import { cleanText, processLines, type RawLine } from './text';
 import type { Timings } from './timing';
 import { copiesExample, validateScript } from './validate';
 import { newsFidelity } from './checks/news';
+import { rjLinkChecks } from './checks/rj';
+import { planRjLink, type EdgeGeo, type RjLinkPlan } from './linkPlan';
+import { rjCheckContext, rjLinkJsonSchema, rjLinkMessages, templateLinkLines } from './prompts/rj';
 
 /** Total budget for one segment request, including the retry. */
 const SEGMENT_BUDGET_MS = 19_000;
@@ -74,9 +77,16 @@ export function applyGaps(lines: Line[], type: SegmentType, random = Math.random
 
 const KICKER = /(आखिर में|आख़िर में)[^।]*अच्छी ख़?बर/u;
 
-/** Drops a kicker intro ("…एक अच्छी खबर।") that is not followed by a story before the sign-off. */
+/**
+ * Drops a kicker intro ("…एक अच्छी खबर।") that is not followed by a story before the sign-off. A line that carries
+ * the story after its cue ("और आख़िर में, एक अच्छी खबर: इसरो ने…") is the kicker itself and stays.
+ */
 export function dropOrphanKicker<T extends { text: string }>(lines: T[]): T[] {
-  return lines.filter((line, i) => !(KICKER.test(line.text) && i >= lines.length - 2));
+  return lines.filter((line, i) => {
+    const m = KICKER.exec(line.text);
+    if (!m || i < lines.length - 2) return true;
+    return line.text.slice(m.index + m[0].length).replace(/[\s:,।.!–-]+/gu, '').length >= 12;
+  });
 }
 
 const nameCache = new Map<string, string>();
@@ -116,6 +126,26 @@ export function fallbackSegment(station: Station, type: SegmentType, subtitles =
     type,
     title: station.nativeName,
     lines: [line],
+    fallback: true,
+  };
+}
+
+/**
+ * The RJ link's last resort (bible §5.3): the honest handover plus a station-ID line, no payload. The rotation
+ * state stays as it was, so the payload goes back in the rotation.
+ */
+function templateLink(station: Station, link: RjLinkPlan, subtitles: boolean): Segment {
+  const texts = templateLinkLines(station, link);
+  if (!texts.length) return fallbackSegment(station, 'rj_link', subtitles);
+  return {
+    id: crypto.randomUUID(),
+    station: station.id,
+    type: 'rj_link',
+    title: station.nativeName,
+    lines: applyGaps(
+      texts.map((t) => ({ ...toLine(station, 'rj', t.text, 'rj_link', { delivery: 'warm' }), ...(subtitles ? { en: t.en } : {}) })),
+      'rj_link',
+    ),
     fallback: true,
   };
 }
@@ -244,17 +274,21 @@ async function writeScript(
   timings: Timings,
   listenerName: string | undefined,
   plans: SegmentPlans = {},
+  link?: RjLinkPlan,
 ): Promise<Script> {
   const deadline = Date.now() + SEGMENT_BUDGET_MS;
   const plan = SEGMENT_PLAN[type];
   const roles = SEGMENT_ROLES[type];
   const subtitles = subtitlesOn(station, req.subtitles);
-  const schema = segmentJsonSchema(type, subtitles);
+  const schema = link ? rjLinkJsonSchema(subtitles) : segmentJsonSchema(type, subtitles);
   // News may draw on each item's title, detail and publisher, and nothing else
   const headlinesText = headlines.map((h) => [h.title, h.detail, h.source].filter(Boolean).join(' ')).join(' ');
   const newsFrame = type === 'news' ? newsFrameText(station, req) : '';
   const time = timePhrase(station, req.listener);
-  const greet = type === 'rj_link' && Boolean(req.producer?.greetListener || req.producer?.firstLink || !req.showLog?.some((e) => e.type === 'rj_link'));
+  const greet = type === 'rj_link' && (link ? link.payload.greet : Boolean(req.producer?.greetListener || req.producer?.firstLink || !req.showLog?.some((e) => e.type === 'rj_link')));
+  // The RJ link's own checks: what it was given, what the handover may say, the payload it must deliver
+  const rjCtx = link ? rjCheckContext(station, req, link) : undefined;
+  let note: string | undefined;
   const calls = type === 'rj_link' ? (req.dedications ?? []) : [];
   const callers = calls.length ? await timings.measure('name', () => nativeCallers(sarvam, calls, station.language)) : [];
   let lastError: unknown;
@@ -264,11 +298,13 @@ async function writeScript(
     if (remaining < MIN_ATTEMPT_MS) break;
     try {
       const raw = await timings.measure('llm', () =>
-        sarvam.chatJson(segmentMessages(station, type, req, headlines, plans), schema, LenientSegmentSchema, {
+        sarvam.chatJson(link ? rjLinkMessages(station, req, link, note) : segmentMessages(station, type, req, headlines, plans), schema, LenientSegmentSchema, {
           name: `tarang_${type}`,
           // The pack's retry: one more try at a slightly lower temperature.
-          temperature: Math.max(0.1, plan.temperature - attempt * 0.1),
-          maxTokens: maxTokensFor(plan, subtitles),
+          // (the RJ link rewrites at the same temperature, with a producer note instead)
+          temperature: Math.max(0.1, plan.temperature - (link ? 0 : attempt * 0.1)),
+          // (the RJ link's plan fields need room; a cut-off draft is wasted)
+          maxTokens: maxTokensFor(link ? { ...plan, maxTokens: Math.max(plan.maxTokens, 2000) } : plan, subtitles),
           reasoningEffort: plan.reasoningEffort,
           timeoutMs: Math.min(plan.timeoutMs + attempt * 3000, remaining),
         }),
@@ -288,9 +324,14 @@ async function writeScript(
       calls.forEach((_c, i) => {
         if (!read.has(i + 1)) problems.push(`studio call ${i + 1} not read (no ${callerPlaceholder(i + 1)})`);
       });
-      if (problems.length && attempt === 0) throw new Error(`validation: ${problems.slice(0, 3).join(' | ')}`);
+      const rjCheck = rjCtx ? rjLinkChecks(raw.lines, rjCtx) : undefined;
+      if (rjCheck) problems.push(...rjCheck.hard);
+      if (problems.length && attempt === 0) {
+        if (rjCheck) note = [...problems, ...rjCheck.soft].map((p) => `- ${p}`).join('\n');
+        throw new Error(`validation: ${problems.slice(0, 3).join(' | ')}`);
+      }
       // After the retry, drop any line that still copies a prompt example (the Kahani may echo its own scene line).
-      let scriptLines = type === 'kahani' ? raw.lines : raw.lines.filter((l) => !copiesExample(l.text));
+      let scriptLines = type === 'kahani' ? raw.lines : raw.lines.filter((l, i) => !copiesExample(l.text) && !rjCheck?.dropLines.includes(i));
       if (type === 'news') {
         const checked = newsFidelity(scriptLines, headlinesText, newsFrame);
         for (const d of checked.dropped) console.warn(`[segment] ${station.id}/news dropped a line (${d.reason}): ${d.text.slice(0, 80)}`);
@@ -325,7 +366,7 @@ export async function buildSegment(
   station: Station,
   req: SegmentRequest,
   timings: Timings,
-  opts: { fetchHeadlines?: () => Promise<Source[]>; storyPlan?: StoryPlan; memory?: ShowMemory } = {},
+  opts: { fetchHeadlines?: () => Promise<Source[]>; storyPlan?: StoryPlan; memory?: ShowMemory; geo?: EdgeGeo } = {},
 ): Promise<Segment> {
   const type = req.type;
   const subtitles = subtitlesOn(station, req.subtitles);
@@ -361,11 +402,20 @@ export async function buildSegment(
   const plans = await timings.measure('memory', () => planSegment(station, type, req, opts.memory));
   if (opts.storyPlan) plans.story = opts.storyPlan;
   const story = plans.story;
+  // The RJ link's point is chosen in code first (./linkPlan), with the fact packet for this listener's city
+  let link: RjLinkPlan | undefined;
+  let writeReq = req;
+  if (type === 'rj_link') {
+    const bible = rjBibleFor(station, rjOnAir(station, req.listener).name);
+    link = await timings.measure('facts', () => planRjLink(station, req, { geo: opts.geo, rjKey: bible?.key }));
+    // A tease into the story reads no studio calls: they go back in the queue for the next link
+    if (link.mode === 'kahani_in' && req.dedications?.length) writeReq = { ...req, dedications: undefined };
+  }
   let script: Script;
   try {
-    script = await writeScript(sarvam, station, type, req, headlines, timings, listenerName, plans);
+    script = await writeScript(sarvam, station, type, writeReq, headlines, timings, listenerName, plans, link);
   } catch {
-    return fallbackSegment(station, type, subtitles);
+    return link ? templateLink(station, link, subtitles) : fallbackSegment(station, type, subtitles);
   }
 
   const rjVoice = rjOnAir(station, req.listener).voice;
@@ -389,6 +439,7 @@ export async function buildSegment(
   if (script.summary) segment.summary = script.summary.slice(0, 200);
   if (script.mood) segment.mood = script.mood;
   if (script.dedicated?.length) segment.dedicated = script.dedicated;
+  if (link) segment.linkState = link.nextLinkState;
   if (type === 'news') {
     segment.sources = headlines;
     const ids = headlines.map((h) => h.id).filter((id): id is string => Boolean(id));
