@@ -368,7 +368,8 @@ Plan rules:
 - Every part ends on a NEW concrete fact. Part 1 opens the question; part 2 makes it worse or personal; part 3 resolves it and ends on a smile or a one-line moral in a character's own words (never a question, never "the lesson is").
 - The want, the clue and the twist belong to the same story: the twist explains the central question, and the payoff answers it. A listener who heard all 3 parts can retell it in two sentences.
 - Write the three last lines in full now, each at most 20 words, with who says them (*_role). The scene writer ends each part on them. A character's ending line never calls out that character's own name. payoff_native is one narrator line that plays the payoff (not a summary like "everyone was happy"). final_line_native is a character's own spoken words.
-- relations_en says who calls whom what, with each kinship word in ${script(station)} script in quotes, in the form: <name> calls <name> "<word>". People who are not family are "neighbours", "colleagues" or "strangers": they use names.
+- relations_en says who calls whom what, with each kinship word in ${script(station)} script in single quotes, in the form: <name> calls <name> '<word>'. People who are not family are neighbours, colleagues or strangers: they use names.
+- Never put a double quote (") inside any value: use single quotes.
 - Fields for a role marked "not in this story" are "none"; never give that role lines or a name.
 - tease_native: one true, spoiler-free line the RJ may say before part 1 (at most 14 words).`;
 }
@@ -468,7 +469,7 @@ Last. The ending line below. It is never a question.`;
  * A part's task. `short` is the rescue prompt, sent once when a rewrite timed out: the same story, ending and
  * shape with only the core rules (no examples, no field notes beyond one line each).
  */
-export function partPrompt(station: Station, outline: SerialOutline, cast: SerialCast, part: 1 | 2 | 3, recap?: RecapSource, opts: { short?: boolean } = {}): string {
+export function partPrompt(station: Station, outline: SerialOutline, cast: SerialCast, part: 1 | 2 | 3, recap?: RecapSource, opts: { short?: boolean; lines?: number } = {}): string {
   const end = expectedLast(outline, part);
   const names = namesOf(outline, cast);
   const head = `SERIAL: "${outline.title_native}" · part ${part} of 3 · about 90 seconds
@@ -482,7 +483,7 @@ ${part > 1 && recap ? `\n${recapBlock(recap, names)}\n` : ''}
 THIS PART'S JOB: ${outline[`part${part}_goal_en`]}
 IT ENDS ON THIS LINE (speaker ${speakerOf(end.role, names)}; make it the very last line, adjusting the wording only to fit): "${end.text}"
 
-Write 12-16 lines in this shape:
+Write 12-${opts.lines ?? 16} lines (never more than ${opts.lines ?? 16}) in this shape:
 ${partBeats(station, outline, part)}
 
 Rules:

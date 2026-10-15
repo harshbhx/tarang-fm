@@ -4,9 +4,9 @@ import { SerialStateSchema, type SegmentRequest } from '../shared/schemas';
 import { CAST_SPEAKERS, STATION_BY_ID } from '../shared/stations';
 import type { RecapSource, Station } from '../shared/types';
 import { castRecord, castSerial } from './casting';
-import { buildFiction, kahaniMode, outlineProblems, producerNote, withSafetyNet } from './fiction';
+import { buildFiction, kahaniMode, LENGTH_NOTE, outlineProblems, producerNote, withSafetyNet } from './fiction';
 import type { SerialOutline } from './prompts/kahani';
-import type { ChatJsonOptions, ChatMessage, Sarvam } from './sarvam';
+import { SarvamError, type ChatJsonOptions, type ChatMessage, type Sarvam } from './sarvam';
 import { buildSegment } from './segment';
 import { Timings } from './timing';
 
@@ -19,13 +19,13 @@ interface Call {
 }
 
 /** A script writer that answers each call by its name (and how many times that name was called). */
-function writer(reply: (name: string, n: number) => unknown) {
+function writer(reply: (name: string, n: number, schema: Record<string, unknown>) => unknown) {
   const calls: Call[] = [];
   const sarvam = {
-    chatJson: async (messages: ChatMessage[], _schema: unknown, zod: z.ZodType, opts: ChatJsonOptions) => {
+    chatJson: async (messages: ChatMessage[], schema: Record<string, unknown>, zod: z.ZodType, opts: ChatJsonOptions) => {
       calls.push({ name: opts.name, messages, opts });
       const n = calls.filter((c) => c.name === opts.name).length;
-      return zod.parse(reply(opts.name, n));
+      return zod.parse(reply(opts.name, n, schema));
     },
     transliterate: async (t: string) => t,
   } as unknown as Sarvam;
@@ -177,6 +177,22 @@ describe('Kahani serial: part 1 writes the outline first', () => {
     expect(w.calls.some((c) => c.name === 'tarang_kahani_story')).toBe(true);
     expect(segment.serial).toBeUndefined();
   });
+
+  it('retries a part cut off at the token cap once, on the short task with only the length note', async () => {
+    const w = writer((name, n) => {
+      if (name === 'tarang_kahani_outline') return OUTLINE;
+      if (n === 1) throw new SarvamError('model output hit the 4096-token cap', 502, 'output_truncated');
+      return part(PART1);
+    });
+    const segment = await buildFiction(w.sarvam, hindi, kahani({ part: 1, subtitles: true }), new Timings());
+    const parts = w.calls.filter((c) => c.name === 'tarang_kahani_part1');
+    expect(parts).toHaveLength(2);
+    expect(w.user(parts[0])).toContain('never more than 14');
+    expect(w.user(parts[1])).toContain(LENGTH_NOTE);
+    expect(w.user(parts[1])).not.toContain('PRODUCER NOTE');
+    expect(w.user(parts[1]).length).toBeLessThan(w.user(parts[0]).length);
+    expect(segment.serial?.part).toBe(1);
+  });
 });
 
 const cast = castSerial(hindi, { hour: 20 }).cast;
@@ -262,9 +278,22 @@ describe('one complete story', () => {
     summary_en: 'Meher’s tiffin kept emptying; the thief was a stray cat, which now gets its own bowl.',
   };
 
+  /**
+   * A one-shot's names are drawn in code (and offered as the speaker enum), so the writer answers with those
+   * names: the fixture's own names could otherwise be drawn for a different role and read as a wrong speaker.
+   */
+  const FIXTURE_NAMES: Record<string, 'char_a' | 'char_b' | 'char_kid'> = { कबीर: 'char_a', मेहर: 'char_b', पीहू: 'char_kid' };
+  const withCodeNames = <T,>(value: T, schema: Record<string, unknown>): T => {
+    const lines = (schema.properties as Record<string, { items?: { properties?: { speaker?: { enum?: string[] } } } }>).lines;
+    const [, a, b, kid] = lines?.items?.properties?.speaker?.enum ?? [];
+    const drawn = { char_a: a, char_b: b, char_kid: kid };
+    const swap = (text: string) => text.replace(/कबीर|मेहर|पीहू/gu, (n) => drawn[FIXTURE_NAMES[n]] ?? n);
+    return JSON.parse(JSON.stringify(value), (_k, v) => (typeof v === 'string' ? swap(v) : v)) as T;
+  };
+
   it('is what an older client (no part, no serial) and the live show get: one call, no outline', async () => {
     for (const patch of [{}, { oneShot: true, part: 2 as const }, { part: 3 as const }]) {
-      const w = writer(() => story);
+      const w = writer((_name, _n, schema) => withCodeNames(story, schema));
       const segment = await buildFiction(w.sarvam, hindi, kahani(patch), new Timings());
       expect(w.calls.length).toBeGreaterThanOrEqual(1);
       expect(w.calls.every((c) => c.name === 'tarang_kahani_story')).toBe(true);
@@ -306,6 +335,12 @@ describe('outline problems', () => {
     expect(problems.some((p) => p.includes('final_line_native is a question'))).toBe(true);
     expect(problems.some((p) => p.includes('part1_last_line_native is empty'))).toBe(true);
     expect(problems.some((p) => p.includes('already aired'))).toBe(true);
+  });
+
+  it('flags any Latin word in a native field, but not an acronym', () => {
+    const latin = outlineProblems({ ...OUTLINE, setting_native: 'शिमला की खिलौना रेलगाड़ी में दोपहर, आदित्य उर्फ़ Aditya की खिड़की वाली सीट।' }, cast);
+    expect(latin.some((p) => p.startsWith('setting_native has Latin text'))).toBe(true);
+    expect(outlineProblems({ ...OUTLINE, setting_native: 'रात के नौ बजे, रेडियो पर FM की धुन।' }, cast)).toEqual([]);
   });
 });
 

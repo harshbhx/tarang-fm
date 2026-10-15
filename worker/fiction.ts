@@ -51,7 +51,7 @@ import {
   type SerialOutline,
   type StoryPlan,
 } from './prompts/kahani';
-import type { ChatMessage, Sarvam } from './sarvam';
+import { SarvamError, type ChatMessage, type Sarvam } from './sarvam';
 import { applyGaps, fallbackSegment, limitNameTokens, toLine } from './segment';
 import { isDelivery } from './show';
 import { isSpooky, STORY_NAMES_NATIVE, storyBrief } from './story';
@@ -81,6 +81,8 @@ const RESCUE_TIMEOUT_MS = { story: 22_000, ad: 10_000 };
 
 /** Line counts: a part 12-16 (accept up to 18), a one-shot 16-18 (accept 14-20). Never truncated. */
 const PART_LINES = { min: 12, max: 18 };
+/** Most lines a part is asked for: 16, or 14 with subtitles (a rewrite with 16 subtitled lines hit the 4096-token cap). */
+const PART_ASK = { plain: 16, subtitled: 14 };
 const ONE_SHOT_LINES = { min: 14, max: 20 };
 
 /** How many recent stories' ingredients a new brief avoids, and how many recent ads' formats/problems. */
@@ -167,6 +169,15 @@ export interface Draft<T> {
   check: CheckResult;
 }
 
+/**
+ * Sent instead of a producer note after an answer ran into the token cap (finish=length): a note on top of the
+ * full task is what ran out of room, so the retry gets the shorter task and only this.
+ */
+export const LENGTH_NOTE =
+  'LENGTH: your last answer ran past the length limit and was cut off. One short line per plan field, the fewest lines the shape allows, short sentences, and stop right after the last line.';
+
+const cutOff = (err: unknown): boolean => err instanceof SarvamError && err.code === 'output_truncated';
+
 /** The note appended to the writer's message on a rewrite (prompt pack §8.4). */
 export function producerNote(check: CheckResult): string {
   const items = [...check.hard, ...check.soft].slice(0, 8);
@@ -190,6 +201,9 @@ async function writeChecked<T>(sarvam: Sarvam, timings: Timings, spec: WriteSpec
   let note = '';
   let plan = spec.plan;
   let rewriteFailed = false;
+  /** The task for the next attempt when it differs from the first (the shorter one after a cut-off answer) */
+  let task: string | undefined;
+  let truncated = false;
   const call = async (messages: ChatMessage[], now: LlmPlan, timeoutMs: number): Promise<Draft<T> & { sent: CheckResult }> => {
     const answer = await timings.measure('llm', () =>
       sarvam.chatJson(messages, spec.schema, spec.zod, {
@@ -214,7 +228,7 @@ async function writeChecked<T>(sarvam: Sarvam, timings: Timings, spec: WriteSpec
       break;
     }
     try {
-      const draft = await call(withNote(undefined, note), plan, Math.min(plan.timeoutMs, remaining));
+      const draft = await call(withNote(task, note), plan, Math.min(plan.timeoutMs, remaining));
       if (attempt === 0) first = draft;
       if (!best || atLeastAsGood(draft.check, best.check)) best = draft;
       if (!draft.sent.hard.length) break;
@@ -223,7 +237,13 @@ async function writeChecked<T>(sarvam: Sarvam, timings: Timings, spec: WriteSpec
     } catch (err) {
       if (attempt === 1 && first) rewriteFailed = true;
       if (spec.afterError) plan = spec.afterError;
-      console.error(`[fiction] ${spec.name} attempt ${attempt + 1} failed: ${String(err)}`);
+      if (cutOff(err)) {
+        // Its own error: one retry on the shorter task with only the length note, never a longer rewrite note
+        truncated = true;
+        task = spec.rescue?.user;
+        note = LENGTH_NOTE;
+      }
+      console.error(`[fiction] ${spec.name} attempt ${attempt + 1} failed${truncated ? ' (cut off at the token cap)' : ''}: ${String(err)}`);
     }
   }
   const done = (path: Written<T>['path'], draft?: Draft<T>): Written<T> => {
@@ -240,7 +260,9 @@ async function writeChecked<T>(sarvam: Sarvam, timings: Timings, spec: WriteSpec
   const left = spec.deadline + spec.rescue.graceMs - Date.now();
   if (left < MIN_ATTEMPT_MS) return done('rescue_failed');
   try {
-    const draft = await call(withNote(spec.rescue.user, producerNote(first.check)), spec.plan, Math.min(spec.rescue.timeoutMs, left));
+    // After a cut-off rewrite the rescue carries the length note and only the top hard problems
+    const rescueNote = truncated ? [LENGTH_NOTE, ...first.check.hard.slice(0, 3).map((p) => `- ${p}`)].join('\n') : producerNote(first.check);
+    const draft = await call(withNote(spec.rescue.user, rescueNote), spec.plan, Math.min(spec.rescue.timeoutMs, left));
     return done('rescue', draft);
   } catch (err) {
     console.error(`[fiction] ${spec.name} rescue failed: ${String(err)}`);
@@ -377,6 +399,9 @@ function castNames(outline: SerialOutline, cast: SerialCast): Partial<Record<Cha
   return Object.fromEntries(castCharacters(cast).map((r) => [r, (outline[`${r}_name_native`] ?? '').trim()]));
 }
 
+/** Latin words in a native field, leaving out short all-caps acronyms (FM, ATM). */
+const latinWords = (text: string): string[] => (text.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).filter((w) => !/^[A-Z]{2,5}$/.test(w));
+
 /** Problems with an outline that would break the parts. */
 export function outlineProblems(outline: SerialOutline, cast: SerialCast, airedTitles?: ReadonlySet<string>): string[] {
   const problems: string[] = [];
@@ -392,10 +417,13 @@ export function outlineProblems(outline: SerialOutline, cast: SerialCast, airedT
   for (const key of ['part1_last_line_native', 'part2_last_line_native', 'final_line_native', 'payoff_native']) {
     if (outline[key] && leaksDirection(outline[key])) problems.push(`${key} has a stage direction or bracket: spoken words only.`);
   }
-  // Names and spoken lines in the station script: an English line here would air in English
+  // Names and spoken lines in the station script: Latin here airs as English, and the part writer copies it
+  // (a Latin "Aditya" in the setting came back inside Hindi lines). Only short all-caps acronyms (FM, ATM) may stay.
   for (const key of Object.keys(outline).filter((k) => k.endsWith('_native'))) {
     const v = outline[key];
-    if (v && !/^none$/i.test(v) && latinShare(v) > 0.5) problems.push(`${key} is in English ("${v.slice(0, 40)}"): write it in the station language and script.`);
+    if (!v || /^none$/i.test(v)) continue;
+    if (latinShare(v) > 0.5) problems.push(`${key} is in English ("${v.slice(0, 40)}"): write it in the station language and script.`);
+    else if (latinWords(v).length) problems.push(`${key} has Latin text ("${latinWords(v).slice(0, 3).join(', ')}"): write every word in the station script.`);
   }
   return problems;
 }
@@ -434,7 +462,8 @@ async function writeOutline(sarvam: Sarvam, station: Station, req: SegmentReques
     if (!draft) return undefined;
     const outline = tidy(draft.raw);
     // The parts can be written from an outline with small flaws, never from one without names or endings
-    const critical = outlineProblems(outline, plan.cast).filter((p) => /has no name|_last_line_native is|final_line_native is|payoff_native is|name_native is in English|is a question/.test(p));
+    // Latin anywhere in a native field is critical too: the parts copy it and the safe close would air it
+    const critical = outlineProblems(outline, plan.cast).filter((p) => /has no name|_last_line_native is|final_line_native is|payoff_native is|_native is in English|_native has Latin text|is a question/.test(p));
     return critical.length ? undefined : outline;
   } catch {
     return undefined;
@@ -648,7 +677,8 @@ async function buildOneShot(sarvam: Sarvam, station: Station, req: SegmentReques
     modelLines = withSafetyNet(raw.lines, { last: str(raw.last_line_native), lastRole: str(raw.last_line_role) }, (role, text, delivery) => ({ role, text, delivery })).lines;
   } else {
     // Never air a draft that failed: the narrator tells the planned beats instead (or the station fills the gap)
-    modelLines = oneShotCloseLines(station, written.first?.raw);
+    const planned = oneShotCloseLines(station, written.first?.raw);
+    modelLines = reassignSlips(planned, addressSlips(planned, names, people.kin), characters);
     console.log(`[fiction] tarang_kahani_story safe close (${modelLines.length} lines)`);
     if (modelLines.length < 4) return fallbackSegment(station, 'kahani', subtitles);
     summary = str(written.first?.raw.plan_story_en);
@@ -710,6 +740,7 @@ async function buildPart(
   const names = castNames(outline, cast);
   const kin = kinTargets(outline.relations_en ?? '', Object.fromEntries(characters.map((r) => [r, [names[r] ?? '', ...latinSpellings(station, names[r])]])));
   const end = expectedLast(outline, part);
+  const ask = subtitles ? PART_ASK.subtitled : PART_ASK.plain;
   const recap: RecapSource | undefined =
     part > 1
       ? (req.recapSource ?? {
@@ -734,7 +765,7 @@ async function buildPart(
   try {
     written = await writeChecked(sarvam, timings, {
       name: `tarang_kahani_part${part}`,
-      messages: storyMessages(station, cast, names, partPrompt(station, outline, cast, part, recap), subtitles),
+      messages: storyMessages(station, cast, names, partPrompt(station, outline, cast, part, recap, { lines: ask }), subtitles),
       schema: partJsonSchema(cast, subtitles, outline),
       zod: scriptSchema(['plan_scene', 'plan_names', 'plan_turn', 'lines', 'summary_en', 'cliffhanger_en']) as unknown as z.ZodType<ModelScript>,
       plan: SEGMENT_PLAN.kahani,
@@ -743,7 +774,7 @@ async function buildPart(
       normalize: (raw) => speakersToRoles(raw, names),
       repair: storyRepair(names, kin, characters, check),
       deadline: Date.now() + STORY_BUDGET_MS,
-      rescue: { user: partPrompt(station, outline, cast, part, recap, { short: true }), graceMs: RESCUE_GRACE_MS.story, timeoutMs: RESCUE_TIMEOUT_MS.story },
+      rescue: { user: partPrompt(station, outline, cast, part, recap, { short: true, lines: ask }), graceMs: RESCUE_GRACE_MS.story, timeoutMs: RESCUE_TIMEOUT_MS.story },
     });
   } catch {
     written = { path: 'none' };
@@ -758,7 +789,10 @@ async function buildPart(
   const title = partTitle(station.id, cleanTitle(outline.title_native, station.nativeName, station), part);
   if (!raw) {
     // Never air a part that failed: the serial closes here, on the outline's payoff and last line
-    const close = safeCloseLines(station, outline, part);
+    // The outline's own ending lines get the wrong-speaker check too: narration in a character's voice ("Aditya
+    // said, smiling: …") goes to the narrator, a line calling out its own speaker to the other character
+    const planned = safeCloseLines(station, outline, part);
+    const close = reassignSlips(planned, addressSlips(planned, names, kin), characters);
     console.log(`[fiction] tarang_kahani_part${part} safe close (${close.length} lines)`);
     if (!close.length) return fallbackSegment(station, 'kahani', subtitles);
     const lines = toAir(station, 'kahani', close, roles, subtitles, cast);
