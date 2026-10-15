@@ -15,9 +15,9 @@ import { capStream, maxPcmBytes } from './show';
 import type { LiveStation } from './live/station';
 import { kvShowMemory } from './memory';
 import { STATE_NAMES, stateCodeOf } from './news/catalog';
-import { newsroomHeadlines, scheduledNews, startRefresh } from './news/newsroom';
+import { markNewsAired, newsroomHeadlines, scheduledNews, startRefresh } from './news/newsroom';
 import type { NewsRefreshParams } from './news/workflow';
-import { buildSegment } from './segment';
+import { buildSegment, producerFor } from './segment';
 import { Timings } from './timing';
 
 type AppEnv = { Bindings: Env; Variables: { timings: Timings } };
@@ -180,17 +180,29 @@ app.post('/segment', rateLimit((e) => e.RL_SEGMENT), requireKey, async (c) => {
     const name = code ? STATE_NAMES[code]?.en : undefined;
     if (name) parsed.data.listener.region = name;
   }
+  const bulletin = { station, mode: newsMode(parsed.data.mode), ...newsPlace(c.req.raw, parsed.data.listener), airedNews: parsed.data.airedNews, waitUntil: waitUntil(c) };
+  let fromNewsroom = false;
   const segment = await buildSegment(sarvam, station, parsed.data, c.var.timings, {
     // The newsroom's slate for this listener (never a story this session heard); live headlines while its pool fills
     fetchHeadlines: async () => {
-      const slate = await newsroomHeadlines(c.env, { station, mode: newsMode(parsed.data.mode), ...newsPlace(c.req.raw, parsed.data.listener), airedNews: parsed.data.airedNews, waitUntil: waitUntil(c) });
+      const slate = await newsroomHeadlines(c.env, bulletin);
+      fromNewsroom = slate.length > 0;
       return slate.length ? slate : getHeadlines(station, origin, waitUntil(c), localNewsCity(parsed.data.listener.city, edgeCountry(c.req.raw)));
     },
+    // The producer check: free checks, then the judge (Workers AI); free checks only without the AI binding
+    producer: producerFor(c.env),
     // What this station already aired, for every listener, so stories and ads don't repeat
     memory: kvShowMemory(c.env.PHONE, waitUntil(c)),
     // The RJ link's fact packet (weather, air, alerts) is scoped to where the listener is
     geo: edgeGeo(c.req.raw),
   });
+  // The stories a written bulletin read are marked aired for the station (a fallback bulletin read none)
+  if (segment.type === 'news' && fromNewsroom && !segment.fallback && segment.newsIds?.length) {
+    const marking = markNewsAired(c.env, bulletin, segment.newsIds);
+    const wait = waitUntil(c);
+    if (wait) wait(marking);
+    else await marking;
+  }
   // Calls the script left out go straight back in the queue
   const read = new Set(segment.fallback ? [] : (segment.dedicated ?? []));
   const unread = claimed.filter((id) => !read.has(id));
@@ -431,7 +443,13 @@ export default {
   fetch: app.fetch,
   /** Every hour: refresh a station's news pool only if it was consumed (see worker/news/policy.ts). */
   async scheduled(_controller, env, ctx) {
-    ctx.waitUntil(scheduledNews(env).then((ids) => console.log(`[news] cron started ${ids.length} refresh(es)`)));
+    // Without the newsroom's bindings (a local run), there is nothing to refresh
+    if (!env.NEWS_DB || !env.NEWS_REFRESH) return;
+    ctx.waitUntil(
+      scheduledNews(env)
+        .then((ids) => console.log(`[news] cron started ${ids.length} refresh(es)`))
+        .catch((err: unknown) => console.error(`[news] cron failed: ${String(err)}`)),
+    );
   },
 } satisfies ExportedHandler<Env>;
 

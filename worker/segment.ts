@@ -8,7 +8,7 @@ import { callerPlaceholder, MAX_LINES, NEWS_HEADLINES, newsFrameText, rjOnAir, m
 import type { Sarvam } from './sarvam';
 import { gapAfter, isDelivery, rjBibleFor, timePhrase, voiceFor } from './show';
 import { normalizeTitle, type ShowMemory } from './memory';
-import { buildFiction } from './fiction';
+import { buildFiction, type FictionJudge } from './fiction';
 import { modelSubtitle } from './subtitle';
 import { cleanText, processLines, type RawLine } from './text';
 import type { Timings } from './timing';
@@ -17,6 +17,10 @@ import { newsFidelity } from './checks/news';
 import { rjLinkChecks } from './checks/rj';
 import { planRjLink, type EdgeGeo, type RjLinkPlan } from './linkPlan';
 import { rjCheckContext, rjLinkJsonSchema, rjLinkMessages, templateLinkLines } from './prompts/rj';
+import type { RjCheckContext } from './checks/rj';
+import { betterReview, PREFETCH_TIME_BOX_MS, producerBackend, reviewScript, rewriteNote, type ProducerEnv, type Review, type ReviewContext, type ReviewLine } from './producer';
+import { runJudge, type JudgeBackend } from './judge/backends';
+import type { ChatMessage } from './sarvam';
 
 /** Total budget for one segment request, including the retry. */
 const SEGMENT_BUDGET_MS = 19_000;
@@ -275,6 +279,7 @@ async function writeScript(
   listenerName: string | undefined,
   plans: SegmentPlans = {},
   link?: RjLinkPlan,
+  producerNote?: string,
 ): Promise<Script> {
   const deadline = Date.now() + SEGMENT_BUDGET_MS;
   const plan = SEGMENT_PLAN[type];
@@ -288,7 +293,7 @@ async function writeScript(
   const greet = type === 'rj_link' && (link ? link.payload.greet : Boolean(req.producer?.greetListener || req.producer?.firstLink || !req.showLog?.some((e) => e.type === 'rj_link')));
   // The RJ link's own checks: what it was given, what the handover may say, the payload it must deliver
   const rjCtx = link ? rjCheckContext(station, req, link) : undefined;
-  let note: string | undefined;
+  let note: string | undefined = producerNote;
   const calls = type === 'rj_link' ? (req.dedications ?? []) : [];
   const callers = calls.length ? await timings.measure('name', () => nativeCallers(sarvam, calls, station.language)) : [];
   let lastError: unknown;
@@ -298,7 +303,7 @@ async function writeScript(
     if (remaining < MIN_ATTEMPT_MS) break;
     try {
       const raw = await timings.measure('llm', () =>
-        sarvam.chatJson(link ? rjLinkMessages(station, req, link, note) : segmentMessages(station, type, req, headlines, plans), schema, LenientSegmentSchema, {
+        sarvam.chatJson(link ? rjLinkMessages(station, req, link, note) : withNote(segmentMessages(station, type, req, headlines, plans), producerNote), schema, LenientSegmentSchema, {
           name: `tarang_${type}`,
           // The pack's retry: one more try at a slightly lower temperature.
           // (the RJ link rewrites at the same temperature, with a producer note instead)
@@ -327,7 +332,7 @@ async function writeScript(
       const rjCheck = rjCtx ? rjLinkChecks(raw.lines, rjCtx) : undefined;
       if (rjCheck) problems.push(...rjCheck.hard);
       if (problems.length && attempt === 0) {
-        if (rjCheck) note = [...problems, ...rjCheck.soft].map((p) => `- ${p}`).join('\n');
+        if (rjCheck) note = [producerNote, [...problems, ...rjCheck.soft].map((p) => `- ${p}`).join('\n')].filter(Boolean).join('\n');
         throw new Error(`validation: ${problems.slice(0, 3).join(' | ')}`);
       }
       // After the retry, drop any line that still copies a prompt example (the Kahani may echo its own scene line).
@@ -361,12 +366,92 @@ async function writeScript(
   throw lastError ?? new Error('segment budget exhausted');
 }
 
+/** Appends the producer's note to the writer's user message (a rewrite after the producer check). */
+export function withNote(messages: ChatMessage[], note?: string): ChatMessage[] {
+  if (!note) return messages;
+  const last = messages.length - 1;
+  return messages.map((m, i) => (i === last && m.role === 'user' ? { ...m, content: `${m.content}\n\n${note}` } : m));
+}
+
+/** The RJ link's review context: what the writer was given (from the free checks' context). */
+export function rjReviewContext(c: RjCheckContext): ReviewContext {
+  return {
+    ...(c.factText ? { blocks: [{ label: 'PAYLOAD', text: c.factText }] } : {}),
+    showLog: c.showLog,
+    ...(c.nextType ? { next: { type: c.nextType, allowed: c.nextAllowed } } : {}),
+    payloadType: c.payloadType,
+    keptTokens: c.kept,
+    frame: c.frame,
+    ...(c.nowPhrase ? { timePhrase: c.nowPhrase } : {}),
+    ...(c.listenerName ? { listenerName: c.listenerName } : {}),
+    ...(c.catchphrase ? { catchphrase: c.catchphrase } : {}),
+    calls: c.calls,
+  };
+}
+
+/** The bulletin's review context: the slate and the frame text, nothing else (the newsreader saw nothing else). */
+export function newsReviewContext(headlines: Source[], frame: string): ReviewContext {
+  return {
+    slate: headlines.map((h) => ({ id: h.id, slot: h.slot, title: h.title, detail: h.detail, source: h.source, light: h.light })),
+    frame: frame ? [frame] : [],
+  };
+}
+
+const reviewLinesOf = (lines: Line[]): ReviewLine[] => lines.map((l) => ({ role: l.role, text: l.text, delivery: l.delivery, ...(l.en ? { en: l.en } : {}) }));
+
+/**
+ * The producer's judge for ./fiction: coherence decides whether a draft that failed its free checks may air. The
+ * judge's heard summary is reported to `heard` (it replaces the writer's summary once the draft airs).
+ */
+export function fictionJudge(backend: JudgeBackend, heard: (summary: string) => void): FictionJudge {
+  return async (input) => {
+    const r = await runJudge(backend, input, { timeoutMs: PREFETCH_TIME_BOX_MS });
+    if (!r.verdict) {
+      console.warn(`[producer] fiction judge skipped: ${r.error ?? 'no verdict'} (${r.ms} ms)`);
+      return undefined;
+    }
+    if (r.verdict.heardSummaryEn) heard(r.verdict.heardSummaryEn);
+    return { coherence: r.verdict.scores.coherence ?? undefined };
+  };
+}
+
+/**
+ * The producer check for this deployment: the configured judge (Workers AI Gemma 4 by default) when the AI binding
+ * is there or Sarvam was asked for; with no AI binding, the free checks only (never a surprise Sarvam judge).
+ * PRODUCER_JUDGE=off turns the check off.
+ */
+export function producerFor(env: ProducerEnv): { backend: JudgeBackend | null } | undefined {
+  const choice = (env.PRODUCER_JUDGE ?? '').toLowerCase();
+  if (choice === 'off') return undefined;
+  const ai = env.AI as { run?: unknown } | undefined;
+  const hasAi = Boolean(ai && typeof ai.run === 'function');
+  try {
+    return { backend: hasAi || choice === 'sarvam' ? producerBackend(env) : null };
+  } catch (err) {
+    console.error(`[producer] no judge backend: ${String(err)}`);
+    return { backend: null };
+  }
+}
+
+/** Whether the producer reviews this segment: every RJ link but the opener and the story tease, every bulletin. */
+function reviewed(type: SegmentType, link?: RjLinkPlan): boolean {
+  if (type === 'news') return true;
+  return type === 'rj_link' && Boolean(link) && link!.mode !== 'opener' && link!.mode !== 'kahani_in';
+}
+
 export async function buildSegment(
   sarvam: Sarvam,
   station: Station,
   req: SegmentRequest,
   timings: Timings,
-  opts: { fetchHeadlines?: () => Promise<Source[]>; storyPlan?: StoryPlan; memory?: ShowMemory; geo?: EdgeGeo } = {},
+  opts: {
+    fetchHeadlines?: () => Promise<Source[]>;
+    storyPlan?: StoryPlan;
+    memory?: ShowMemory;
+    geo?: EdgeGeo;
+    /** The producer check (producerFor(env)): backend null runs the free checks only; absent, no producer check */
+    producer?: { backend: JudgeBackend | null };
+  } = {},
 ): Promise<Segment> {
   const type = req.type;
   const subtitles = subtitlesOn(station, req.subtitles);
@@ -385,7 +470,13 @@ export async function buildSegment(
   }
 
   // The Kahani (serial part or one complete story) and the ad break are written in ./fiction
-  if (type === 'kahani' || type === 'ad_break') return buildFiction(sarvam, station, req, timings, { memory: opts.memory });
+  if (type === 'kahani' || type === 'ad_break') {
+    let heard: string | undefined;
+    const judge = opts.producer?.backend ? fictionJudge(opts.producer.backend, (s) => (heard = s)) : undefined;
+    const segment = await buildFiction(sarvam, station, req, timings, { memory: opts.memory, judge });
+    if (heard && !segment.fallback) segment.heardSummary = heard.slice(0, 400);
+    return segment;
+  }
 
   let headlines: Source[] = [];
   if (type === 'news') {
@@ -419,26 +510,66 @@ export async function buildSegment(
   }
 
   const rjVoice = rjOnAir(station, req.listener).voice;
-  const lines = script.lines.map((l) => {
-    const line = toLine(station, l.role, l.text, type, {
-      delivery: isDelivery(l.delivery) ? l.delivery : 'normal',
-      voice: l.role === 'rj' ? rjVoice : story ? story.cast[l.role as keyof StoryPlan['cast']] : undefined,
+  const assemble = (s: Script): Segment => {
+    const lines = s.lines.map((l) => {
+      const line = toLine(station, l.role, l.text, type, {
+        delivery: isDelivery(l.delivery) ? l.delivery : 'normal',
+        voice: l.role === 'rj' ? rjVoice : story ? story.cast[l.role as keyof StoryPlan['cast']] : undefined,
+      });
+      // The subtitle the script writer wrote with the line, through the profanity guard
+      const en = modelSubtitle(l.en);
+      if (en) line.en = en;
+      return line;
     });
-    // The subtitle the script writer wrote with the line, through the profanity guard
-    const en = modelSubtitle(l.en);
-    if (en) line.en = en;
-    return line;
-  });
-  const segment: Segment = {
-    id: crypto.randomUUID(),
-    station: station.id,
-    type,
-    title: cleanTitle(fillName(script.title, listenerName).replace(CALLER_SLOT, someoneFor(station.id)), station.nativeName, station.language),
-    lines: applyGaps(lines, type, Math.random, script.lines.map((l) => Boolean(l.continuation))),
+    const out: Segment = {
+      id: crypto.randomUUID(),
+      station: station.id,
+      type,
+      title: cleanTitle(fillName(s.title, listenerName).replace(CALLER_SLOT, someoneFor(station.id)), station.nativeName, station.language),
+      lines: applyGaps(lines, type, Math.random, s.lines.map((l) => Boolean(l.continuation))),
+    };
+    if (s.summary) out.summary = s.summary.slice(0, 200);
+    if (s.mood) out.mood = s.mood;
+    if (s.dedicated?.length) out.dedicated = s.dedicated;
+    return out;
   };
-  if (script.summary) segment.summary = script.summary.slice(0, 200);
-  if (script.mood) segment.mood = script.mood;
-  if (script.dedicated?.length) segment.dedicated = script.dedicated;
+  let segment = assemble(script);
+
+  // The producer check (bible §5): free checks, then the judge; one rewrite with its note; the better attempt airs
+  if (opts.producer && reviewed(type, link)) {
+    const context = link ? rjReviewContext(rjCheckContext(station, writeReq, link)) : newsReviewContext(headlines, newsFrameText(station, req));
+    const review = (seg: Segment, s: Script): Promise<Review> =>
+      timings.measure('producer', () =>
+        reviewScript(
+          { type: type as 'rj_link' | 'news', mode: link?.mode ?? req.mode, lines: reviewLinesOf(seg.lines), context, plan: { title: s.title, ...(s.summary ? { summary_en: s.summary } : {}) }, station },
+          { backend: opts.producer!.backend, timeoutMs: PREFETCH_TIME_BOX_MS },
+        ),
+      );
+    let best = await review(segment, script);
+    if (!best.pass) {
+      console.warn(`[producer] ${station.id}/${type} sent back: ${[...best.hardFailures, ...best.scoreFailures].slice(0, 3).join(' | ') || best.fixNote}`);
+      try {
+        const note = rewriteNote(best, reviewLinesOf(segment.lines));
+        const again = await writeScript(sarvam, station, type, writeReq, headlines, timings, listenerName, plans, link, note);
+        const second = assemble(again);
+        const secondReview = await review(second, again);
+        if (betterReview(best, secondReview) === 'b') {
+          segment = second;
+          best = secondReview;
+        }
+      } catch (err) {
+        console.error(`[producer] ${station.id}/${type} rewrite failed: ${String(err)}`);
+      }
+    }
+    // Lines the free checks cut (an invented news line, a catchphrase that was not allowed) never air
+    if (best.dropLines.length) {
+      const kept = segment.lines.filter((_l, i) => !best.dropLines.includes(i));
+      if (kept.length >= 2) segment.lines = kept;
+    }
+    segment.heardSummary = best.heardSummaryEn.slice(0, 400);
+    console.log(`[producer] ${station.id}/${type} ${best.pass ? 'passed' : 'kept the better failing draft'} (judged: ${best.judged}, mean: ${best.mean ?? '-'}, ${best.ms} ms)`);
+  }
+
   if (link) segment.linkState = link.nextLinkState;
   if (type === 'news') {
     segment.sources = headlines;
