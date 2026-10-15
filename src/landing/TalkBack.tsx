@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { PAUSE_AFTER_MS } from '../../shared/constants';
-import type { Line } from '../../shared/types';
+import { PAUSE_AFTER_MS, STUDIO_NUMBER, STUDIO_NUMBER_DISPLAY } from '../../shared/constants';
+import type { Line, PhoneCall } from '../../shared/types';
 import { createRecorder } from '../audio';
-import AnimatedBeam from '../components/bits/AnimatedBeam';
-import { BorderBeam } from '../components/bits/MagicUi';
-import { postCall, type LiveCallResponse } from '../radio/api';
+import { getPhoneRecent, postCall, type LiveCallResponse } from '../radio/api';
 import { listenerContext, loadListenerName } from '../radio/listener';
-import { CALL_CHAIN, CALL_EXAMPLE } from './data';
+import { CALL_EXAMPLE, CALL_TYPE_LABEL } from './data';
 import { MicIcon } from './icons';
-import { PlayGlyph, SpeakerId, type Vars } from './ui';
+import { SceneCallIn, SceneStudioLine } from './scenes';
+import { PlayGlyph, SectionHead, SpeakerId, STUDIO_LANGUAGES, type Vars } from './ui';
 import type { VoicePlayer } from './useVoicePlayer';
 
 export const DEMO_ID = 'call-demo';
@@ -20,10 +19,10 @@ const BAR_WEIGHTS = [0.6, 0.85, 1, 0.8, 0.65];
 type Mode = 'mic' | 'sample';
 type Phase = 'idle' | 'holding' | 'short' | 'thinking' | 'speaking' | 'done' | 'error';
 
-/** Which stage of the pipeline is lit in each phase (index into CALL_CHAIN). */
-const STAGE: Record<Phase, number> = { idle: -1, holding: 1, short: 0, thinking: 2, speaking: 3, done: 3, error: 3 };
+/** The four stops a call makes; which one is lit in each phase. */
+const STEPS = ['You', 'Saaras v4 hears', 'Sarvam-105B writes', 'Bulbul speaks'];
+const STAGE: Record<Phase, number> = { idle: -1, holding: 0, short: 0, thinking: 2, speaking: 3, done: 3, error: 3 };
 
-/** The sample reply as a playable line in the RJ's voice. */
 const sampleLine = (text: string, en?: string): Line => ({
   role: 'rj',
   speaker: CALL_EXAMPLE.voice.speaker,
@@ -34,8 +33,7 @@ const sampleLine = (text: string, en?: string): Line => ({
   pauseAfterMs: PAUSE_AFTER_MS.rj_link,
 });
 
-const micSupported = () =>
-  typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
+const micSupported = () => typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
 
 function micProblem(err: unknown): string {
   if (err instanceof Error && err.name === 'NotAllowedError') return 'the microphone was not allowed';
@@ -44,12 +42,11 @@ function micProblem(err: unknown): string {
 }
 
 /**
- * The call-in, for real: hold the button and your voice is recorded, let go and it goes through the same
- * pipeline as the radio's own call button (Saaras hears you, Sarvam-105B writes, Bulbul speaks the reply on
- * this page), the pipeline lighting up stage by stage. Without a microphone, a sample caller stands in and
- * the page says so. Nothing is stored.
+ * Talk back: hold the one button and your voice goes through the radio's own call pipeline (Saaras hears,
+ * Sarvam-105B writes, Bulbul speaks the reply here). Without a microphone a sample caller stands in, and
+ * the page says so. Beneath it, the studio phone line, the only place the number appears.
  */
-export default function HoldToTalk({ player }: { player: VoicePlayer }) {
+export default function TalkBack({ player }: { player: VoicePlayer }) {
   const { voice, station, caller, reply: sampleReply } = CALL_EXAMPLE;
   const recorder = useMemo(() => createRecorder(), []);
   const [mode, setMode] = useState<Mode>(() => (micSupported() ? 'mic' : 'sample'));
@@ -61,21 +58,33 @@ export default function HoldToTalk({ player }: { player: VoicePlayer }) {
   const [reply, setReply] = useState<Line | null>(null);
   const [replyEn, setReplyEn] = useState<string | undefined>();
   const [problem, setProblem] = useState<string | null>(null);
+  const [lastCall, setLastCall] = useState<PhoneCall | null>(null);
 
   const pressedAt = useRef(0);
+  // Whether the button is down right now: a ref, so a press shorter than a render still ends properly
+  const holdingRef = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
   const meterFrame = useRef(0);
   const abort = useRef<AbortController | null>(null);
   const run = useRef(0);
   const bars = useRef<(HTMLSpanElement | null)[]>([]);
-  const container = useRef<HTMLDivElement>(null);
-  const nodes = useRef<(HTMLSpanElement | null)[]>([]);
-  const nodeRef = (i: number) => ({ current: nodes.current[i] ?? null });
 
   const chars = [...caller.text];
   const playerPhase = player.state.id === DEMO_ID ? player.state.phase : null;
   const ttfa = player.state.ttfa[DEMO_ID];
+
+  useEffect(() => {
+    let on = true;
+    getPhoneRecent()
+      .then((res) => {
+        if (on) setLastCall(res.calls[0] ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      on = false;
+    };
+  }, []);
 
   const clear = () => {
     if (timer.current) clearTimeout(timer.current);
@@ -85,51 +94,14 @@ export default function HoldToTalk({ player }: { player: VoicePlayer }) {
     ticker.current = null;
     meterFrame.current = 0;
   };
-
   const setBars = (level: number) => {
     bars.current.forEach((el, i) => {
       if (el) el.style.transform = `scaleY(${Math.max(0.12, Math.min(1, level * BAR_WEIGHTS[i] * 1.3))})`;
     });
   };
-
   const speak = (line: Line) => {
     setPhase('speaking');
     player.toggle({ id: DEMO_ID, station: station.id, speaker: line.speaker, text: line.text, pace: line.pace, temperature: line.temperature });
-  };
-
-  const start = () => {
-    if (phase === 'holding') return;
-    clear();
-    abort.current?.abort();
-    if (playerPhase) player.stop();
-    run.current += 1;
-    pressedAt.current = performance.now();
-    setHeld(0);
-    setHeard(0);
-    setProblem(null);
-    setTranscript(null);
-    setReply(null);
-    setReplyEn(undefined);
-    setPhase('holding');
-    ticker.current = setInterval(() => setHeld(performance.now() - pressedAt.current), 100);
-
-    if (mode === 'mic') {
-      const attempt = run.current;
-      recorder.start().catch((err) => {
-        if (attempt !== run.current) return;
-        // No microphone: the sample caller takes over, this time and after
-        setMode('sample');
-        setNote(`A sample caller speaks for you, since ${micProblem(err)}.`);
-        startSampleTyping();
-      });
-      const meter = () => {
-        setBars(recorder.level());
-        meterFrame.current = requestAnimationFrame(meter);
-      };
-      meterFrame.current = requestAnimationFrame(meter);
-    } else {
-      startSampleTyping();
-    }
   };
 
   const startSampleTyping = () => {
@@ -143,30 +115,38 @@ export default function HoldToTalk({ player }: { player: VoicePlayer }) {
     meterFrame.current = requestAnimationFrame(type);
   };
 
-  const end = () => {
-    if (phase !== 'holding') return;
+  const start = () => {
+    if (holdingRef.current) return;
+    holdingRef.current = true;
     clear();
-    setBars(0);
-    const ms = performance.now() - pressedAt.current;
-    if (ms < MIN_HOLD_MS) {
-      if (mode === 'mic') recorder.cancel();
-      setPhase('short');
-      timer.current = setTimeout(() => setPhase('idle'), 2200);
-      return;
+    abort.current?.abort();
+    if (playerPhase) player.stop();
+    run.current += 1;
+    pressedAt.current = performance.now();
+    setHeld(0);
+    setHeard(0);
+    setProblem(null);
+    setTranscript(null);
+    setReply(null);
+    setReplyEn(undefined);
+    setPhase('holding');
+    ticker.current = setInterval(() => setHeld(performance.now() - pressedAt.current), 100);
+    if (mode === 'mic') {
+      const attempt = run.current;
+      recorder.start().catch((err) => {
+        if (attempt !== run.current) return;
+        setMode('sample');
+        setNote(`A sample caller speaks for you, since ${micProblem(err)}.`);
+        startSampleTyping();
+      });
+      const meter = () => {
+        setBars(recorder.level());
+        meterFrame.current = requestAnimationFrame(meter);
+      };
+      meterFrame.current = requestAnimationFrame(meter);
+    } else {
+      startSampleTyping();
     }
-    setPhase('thinking');
-    if (mode === 'sample') {
-      setHeard(chars.length);
-      setTranscript({ text: caller.text, en: caller.en });
-      timer.current = setTimeout(() => {
-        const line = sampleLine(sampleReply.text, sampleReply.en);
-        setReply(line);
-        setReplyEn(sampleReply.en);
-        speak(line);
-      }, THINK_MS);
-      return;
-    }
-    void sendRecording();
   };
 
   const sendRecording = async () => {
@@ -215,7 +195,33 @@ export default function HoldToTalk({ player }: { player: VoicePlayer }) {
     }
   };
 
-  // The reply finishing (or failing) ends the demo
+  const end = () => {
+    if (!holdingRef.current) return;
+    holdingRef.current = false;
+    clear();
+    setBars(0);
+    const ms = performance.now() - pressedAt.current;
+    if (ms < MIN_HOLD_MS) {
+      if (mode === 'mic') recorder.cancel();
+      setPhase('short');
+      timer.current = setTimeout(() => setPhase('idle'), 2200);
+      return;
+    }
+    setPhase('thinking');
+    if (mode === 'sample') {
+      setHeard(chars.length);
+      setTranscript({ text: caller.text, en: caller.en });
+      timer.current = setTimeout(() => {
+        const line = sampleLine(sampleReply.text, sampleReply.en);
+        setReply(line);
+        setReplyEn(sampleReply.en);
+        speak(line);
+      }, THINK_MS);
+      return;
+    }
+    void sendRecording();
+  };
+
   useEffect(() => {
     if (phase !== 'speaking') return;
     if (playerPhase === 'error') {
@@ -257,82 +263,77 @@ export default function HoldToTalk({ player }: { player: VoicePlayer }) {
   const seconds = (held / 1000).toFixed(1);
   const youText = mode === 'sample' && (holding || stage < 2) ? chars.slice(0, heard).join('') : (transcript?.text ?? '');
   const youEn = mode === 'sample' ? (stage >= 2 ? caller.en : '') : (transcript?.en ?? '');
-  const rjLine = reply ?? (mode === 'sample' ? sampleLine(sampleReply.text, sampleReply.en) : null);
+  const rjLine = reply;
 
-  let hint = mode === 'mic' ? 'Press and hold, say anything in your language, let go. Your voice goes to the RJ.' : 'Press and hold, like the real button. A sample caller speaks for you here.';
+  let hint = mode === 'mic' ? 'Press and hold, say anything in your language, let go.' : 'Press and hold, like the real button. A sample caller speaks for you here.';
   if (phase === 'holding') hint = mode === 'mic' ? 'Listening… speak, then let go.' : 'Listening… let go when you’re done.';
   else if (phase === 'short') hint = 'That was too short. Hold the button while you speak.';
-  else if (phase === 'thinking') hint = mode === 'mic' ? 'Saaras v4 is listening back, Sarvam-105B is writing the reply…' : 'Sarvam-105B is writing the RJ’s reply…';
+  else if (phase === 'thinking') hint = 'Saaras v4 is listening back, Sarvam-105B is writing the reply…';
   else if (phase === 'speaking') hint = playerPhase === 'loading' ? 'Bulbul v4 Flash is on the line…' : ttfa !== undefined ? `On air. First audio in ${ttfa} ms.` : 'On air.';
   else if (phase === 'done') hint = `Reply on air ${ttfa} ms after it was written. Hold again to say something else.`;
   else if (phase === 'error') hint = problem ?? 'Something went wrong. Try again.';
 
-  return (
-    <div className="lp-demo" data-phase={phase} data-mode={mode} style={{ '--st': station.accent } as Vars}>
-      <div ref={container} className="lp-pipe" aria-label="How a call travels">
-        {CALL_CHAIN.map((step, i) => (
-          <div key={step.key} className="lp-pipe-step" data-on={stage >= i} data-active={stage === i}>
-            <span
-              ref={(el) => {
-                nodes.current[i] = el;
-              }}
-              className="lp-pipe-node"
-              aria-hidden="true"
-            >
-              {i === 0 ? <MicIcon size={16} /> : i}
-            </span>
-            <span className="lp-pipe-text">
-              <span className="lp-pipe-title">{step.title}</span>
-              <span className="lp-pipe-body">{step.body}</span>
-              {step.model && <SpeakerId id={step.model} />}
-            </span>
-          </div>
-        ))}
-        {CALL_CHAIN.slice(1).map((step, i) => (
-          <AnimatedBeam key={step.key} containerRef={container} fromRef={nodeRef(i)} toRef={nodeRef(i + 1)} lit={stage > i} duration={1.6} delay={i * 0.25} color="#ffd08a" />
-        ))}
-      </div>
+  const lastWhen = lastCall ? (lastCall.airedAt ? 'read on air' : 'in the queue') : '';
 
-      <div className="lp-demo-row">
-        <button
-          type="button"
-          className="lp-hold"
-          data-holding={holding}
-          onPointerDown={onPointerDown}
-          onPointerUp={end}
-          onPointerCancel={end}
-          onLostPointerCapture={end}
-          onKeyDown={onKeyDown}
-          onKeyUp={onKeyUp}
-          onContextMenu={(e) => e.preventDefault()}
-          aria-pressed={holding}
-          aria-label="Hold to talk to the RJ"
-          aria-describedby="hold-hint"
-        >
-          <span className="lp-hold-fill" aria-hidden="true" />
-          <span className="lp-hold-icon" aria-hidden="true">
-            <MicIcon size={18} />
-          </span>
-          <span className="lp-hold-label">{holding ? 'Listening' : 'Hold to talk'}</span>
-          <span className="lp-hold-pill" aria-hidden="true">
-            <span className="lp-hold-eq">
-              {BAR_WEIGHTS.map((_, i) => (
-                <span
-                  key={i}
-                  ref={(el) => {
-                    bars.current[i] = el;
-                  }}
-                />
-              ))}
+  return (
+    <section className="lp-section lp-talk" aria-labelledby="talk-title">
+      <div className="lp-wrap lp-talk-grid" style={{ '--st': station.accent } as Vars}>
+        <div className="lp-talk-copy">
+          <div className="lp-talk-scene" aria-hidden="true">
+            <SceneCallIn size={96} />
+          </div>
+          <SectionHead id="talk-title" kicker="7:16 PM · Call-in" title="Talk back.">
+            Hold the button, say anything in your language, let go. The RJ answers on air in about two seconds.
+          </SectionHead>
+        </div>
+
+        <div className="lp-talk-demo" data-phase={phase} data-mode={mode}>
+          <button
+            type="button"
+            className="lp-hold"
+            data-holding={holding}
+            onPointerDown={onPointerDown}
+            onPointerUp={end}
+            onPointerCancel={end}
+            onLostPointerCapture={end}
+            onKeyDown={onKeyDown}
+            onKeyUp={onKeyUp}
+            onContextMenu={(e) => e.preventDefault()}
+            aria-pressed={holding}
+            aria-label="Hold to talk to the RJ"
+            aria-describedby="hold-hint"
+          >
+            <span className="lp-hold-fill" aria-hidden="true" />
+            <span className="lp-hold-icon" aria-hidden="true">
+              <MicIcon size={20} />
             </span>
-            <span className="lp-hold-time">{seconds}s</span>
-          </span>
-        </button>
-        <div className="lp-demo-hints">
-          <p id="hold-hint" className="lp-demo-hint" data-kind={phase === 'short' || phase === 'error' ? 'error' : phase === 'done' ? 'ttfa' : undefined} aria-live="polite">
+            <span className="lp-hold-label">{holding ? 'Listening' : 'Hold to talk'}</span>
+            <span className="lp-hold-pill" aria-hidden="true">
+              <span className="lp-hold-eq">
+                {BAR_WEIGHTS.map((_, i) => (
+                  <span
+                    key={i}
+                    ref={(el) => {
+                      bars.current[i] = el;
+                    }}
+                  />
+                ))}
+              </span>
+              <span className="lp-hold-time">{seconds}s</span>
+            </span>
+          </button>
+
+          <ol className="lp-steps" aria-label="Where your call is">
+            {STEPS.map((step, i) => (
+              <li key={step} data-on={stage >= i} data-active={stage === i}>
+                {step}
+              </li>
+            ))}
+          </ol>
+          <p id="hold-hint" className="lp-talk-hint" data-kind={phase === 'short' || phase === 'error' ? 'error' : phase === 'done' ? 'ttfa' : undefined} aria-live="polite">
             {hint}
           </p>
-          <p className="lp-demo-note">
+          <p className="lp-talk-note">
             {note ??
               (mode === 'mic' ? (
                 <>
@@ -349,39 +350,57 @@ export default function HoldToTalk({ player }: { player: VoicePlayer }) {
                 )
               ))}
           </p>
+
+          {(youText || holding || phase === 'thinking') && (
+            <div className="lp-lines" data-stage={stage}>
+              <div className="lp-line lp-line--you">
+                <p className="lp-line-who">{mode === 'mic' ? 'You, heard by Saaras v4' : 'A sample caller, heard by Saaras v4'}</p>
+                <p className="lp-native" lang={station.language}>
+                  {youText}
+                  {!youText && <span className="lp-caret" aria-hidden="true" />}
+                </p>
+                {youEn && <p className="lp-english">{youEn}</p>}
+              </div>
+              {rjLine && (
+                <div className="lp-line lp-line--rj" data-on={stage >= 3}>
+                  <p className="lp-line-who">
+                    RJ Sunny <SpeakerId id={rjLine.speaker ?? voice.speaker} />
+                  </p>
+                  <p className="lp-native" lang={station.language}>
+                    {rjLine.text}
+                  </p>
+                  {replyEn && <p className="lp-english">{replyEn}</p>}
+                  <button type="button" className="lp-ghost lp-ghost--sm" data-phase={playerPhase ?? 'idle'} onClick={() => speak(rjLine)}>
+                    <PlayGlyph phase={playerPhase ?? 'idle'} size={16} />
+                    {playerPhase === 'loading' || playerPhase === 'playing' ? 'Stop' : playerPhase === 'error' ? 'Try again' : 'Play the reply'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="lp-exchange" data-stage={stage}>
-        <figure className="lp-bubble lp-bubble--you" data-on={stage >= 1}>
-          <figcaption>{mode === 'mic' ? 'You, heard by Saaras v4' : 'A sample caller, heard by Saaras v4'}</figcaption>
-          <p className="lp-native" lang={station.language}>
-            {youText || (holding ? '' : mode === 'mic' ? 'Your words appear here.' : '')}
-            {(holding || phase === 'thinking') && !youText && <span className="lp-caret" aria-hidden="true" />}
-          </p>
-          <p className="lp-english" data-on={!!youEn}>
-            {youEn}
-          </p>
-        </figure>
-        <figure className="lp-bubble lp-bubble--rj" data-on={stage >= 3}>
-          {stage >= 3 && <BorderBeam size={110} duration={8} colorFrom="#ffd38a" colorTo="#ff6b2c" />}
-          <figcaption>
-            RJ reply, written by Sarvam-105B <SpeakerId id={rjLine?.speaker ?? voice.speaker} />
-          </figcaption>
-          <p className="lp-native" lang={station.language}>
-            {rjLine?.text ?? 'The RJ answers here, in the voice of the station.'}
-          </p>
-          <p className="lp-english">{replyEn ?? (mode === 'sample' ? sampleReply.en : '')}</p>
-          {rjLine && (
-            <div className="lp-bubble-actions">
-              <button type="button" className="lp-ghost lp-ghost--sm" data-phase={playerPhase ?? 'idle'} onClick={() => speak(rjLine)}>
-                <PlayGlyph phase={playerPhase ?? 'idle'} size={16} />
-                {playerPhase === 'loading' || playerPhase === 'playing' ? 'Stop' : playerPhase === 'error' ? 'Try again' : 'Play the reply'}
-              </button>
-            </div>
-          )}
-        </figure>
+      <div className="lp-wrap">
+        <div className="lp-studio-row">
+          <div className="lp-studio-scene" aria-hidden="true">
+            <SceneStudioLine size={72} />
+          </div>
+          <div className="lp-studio-text">
+            <p className="lp-studio-lead">Or ring the studio from any phone.</p>
+            <a className="lp-studio-number" href={`tel:${STUDIO_NUMBER}`}>
+              {STUDIO_NUMBER_DISPLAY}
+            </a>
+            <p className="lp-studio-sub">RJ Sunny picks up in {STUDIO_LANGUAGES}, and your message is on the air within minutes.</p>
+            {lastCall && (
+              <p className="lp-studio-last">
+                Last call: {lastCall.name?.trim() || 'a listener'}
+                {lastCall.city ? `, ${lastCall.city}` : ''} · {CALL_TYPE_LABEL[lastCall.type] ?? 'message'} · {lastWhen}
+              </p>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }

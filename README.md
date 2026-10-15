@@ -6,16 +6,19 @@
 
 Every voice is [Sarvam **Bulbul v4 Flash**](https://docs.sarvam.ai/api/api-guides-tutorials/text-to-speech/best-practice-guide-for-bulbul-v-4-flash). Each line on screen shows exactly which of its personas is speaking.
 
-**▶ Live:** https://tarang-fm.dualmindlab.tech (the landing page: scroll through an evening on the station with your name, tonight's headlines and a story you pick in it; stack the five stations; hold the button and talk to the RJ with your own voice) · **Straight to the radio:** https://tarang-fm.dualmindlab.tech/listen · **Listen together:** https://tarang-fm.dualmindlab.tech/live · Works on any phone or laptop, with no install or login.
+**▶ Live:** https://tarang-fm.dualmindlab.tech (the landing page: an evening on the station in five screens, with your name, tonight's headlines and a story you pick in it, and a button you hold to talk to the RJ with your own voice) · **Straight to the radio:** https://tarang-fm.dualmindlab.tech/listen · **Listen together:** https://tarang-fm.dualmindlab.tech/live · Works on any phone or laptop, with no install or login.
 
 > 🎬 Demo video: _recording in progress; the shot list is in [docs/BUILD-PLAN.md §6](./docs/BUILD-PLAN.md#6-demo-video-7590-s-shot-list)_
 
 <p align="center">
-  <img src="docs/images/landing.jpg" alt="The Tarang FM landing page: an amber-dial radio tuned to Hindi 91.1, with Tune in and Call the studio" width="66%" />
+  <img src="docs/images/landing.jpg" alt="The Tarang FM landing page: an amber-dial radio tuned to Hindi 91.1 and one Tune in now button" width="66%" />
   <img src="docs/images/radio-phone.jpg" alt="The radio on a phone: Hindi 91.1 playing a Kahani, with the speaker's Bulbul voice ID and an English subtitle under the Hindi caption" width="24%" />
 </p>
 <p align="center">
-  <img src="docs/images/evening.jpg" alt="One evening on Tarang FM: the ad break beat on the left, and the pinned on-air stage on the right showing Mukul and Ritu's lines with Hear it" width="90%" />
+  <img src="docs/images/evening.jpg" alt="Tonight's show, written for you: the ad break beat on the left, and the pinned on-air stage on the right with tonight's product and Mukul and Ritu's lines" width="90%" />
+</p>
+<p align="center">
+  <img src="docs/images/stations.jpg" alt="Five languages, twenty-seven voices: five station rows on a cream page, each with its native name, frequency, voices and a play button" width="90%" />
 </p>
 <p align="center">
   <img src="docs/images/studio-line.jpg" alt="The studio line panel: how to call, and three recent calls marked On air now, Up next and Read on air" width="90%" />
@@ -315,7 +318,7 @@ src/
   radio/         show clock, controller (scheduler + prefetch, "Still listening?" pause), API client, state
   components/    the radio UI (tuner dial, captions, call panel, studio line)
   live/          Listen together: socket + clock sync, name chips, welcome banner, Studio controls
-  landing/       the landing page and voice gallery
+  landing/       the landing page: the radio, the evening, talk back, the stations, the sign-off, scene illustrations
 docs/          PRD, technical spec, voice casting, build plan
 scripts/       API spike and voice audition tools
 ```
@@ -336,5 +339,5 @@ Tests sit next to the code they cover (`*.test.ts`).
 
 - Hosts, ads and stories are AI-generated and fictional. News lines rephrase real headlines, and the original sources are linked on screen.
 - Caller audio is sent to Sarvam for transcription and is never stored.
-- UI effects adapted from [React Bits](https://reactbits.dev) (Threads, BlurText, SpotlightCard, ClickSpark, DecryptedText, ShinyText; MIT + Commons Clause), [Magic UI](https://magicui.design) (BorderBeam, Ripple, NumberTicker; MIT) and [motion-primitives](https://motion-primitives.com) (TextLoop; MIT). Written fresh for Tarang FM on Motion or plain CSS after the ideas in React Bits (Variable Proximity, Magnet, Tilted Card, Scroll Velocity, Scroll Stack, Star Border, Hold Button and Voice Pill) and Magic UI (Scroll Progress, Text Reveal, Animated Beam, Animated List): `src/components/bits/` and `src/landing/`. Each file names its source and what changed.
+- UI effects adapted from [React Bits](https://reactbits.dev) (BlurText, ClickSpark, DecryptedText, ShinyText; MIT + Commons Clause) and [motion-primitives](https://motion-primitives.com) (TextLoop; MIT); written fresh for Tarang FM after the ideas in React Bits (Scroll Velocity for the dial band, Star Border, Hold Button and Voice Pill) and Magic UI (Animated List): `src/components/bits/` and `src/landing/`. Each file names its source and what changed. The landing page's six scene illustrations are original line art in `src/landing/scenes.tsx`.
 - Headlines via BBC, Bing News and Google News. Weather by [Open-Meteo](https://open-meteo.com). Voices, transcription, scripts, subtitles and transliteration by [Sarvam AI](https://www.sarvam.ai).

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Form
 import { LazyMotion, MotionConfig, domAnimation } from 'motion/react';
 import BlurText from './bits/BlurText';
 import ClickSpark from './bits/ClickSpark';
-import Magnet from './bits/Magnet';
 import { LISTENER_NAME_MAX, STUDIO_NUMBER, STUDIO_NUMBER_DISPLAY } from '../../shared/constants';
 import { STATIONS, getStation } from '../../shared/stations';
 import type { Station, StationId } from '../../shared/types';
@@ -282,23 +281,21 @@ function TunePanel({
             }}
           />
         </label>
-        <Magnet reach={70} strength={0.22} limit={10} style={{ display: 'flex', width: '100%' }}>
-          <ClickSpark
-            sparkColor={TUNE_SPARKS}
-            sparkCount={10}
-            sparkRadius={40}
-            sparkSize={10}
-            duration={520}
-            glow={0.6}
-            className="tune-spark"
-            style={{ height: 'auto' }}
-          >
-            <button type="submit" className="tune-btn">
-              <PlayIcon width={18} height={18} />
-              Tune in to {station.languageName} {station.frequency}
-            </button>
-          </ClickSpark>
-        </Magnet>
+        <ClickSpark
+          sparkColor={TUNE_SPARKS}
+          sparkCount={10}
+          sparkRadius={40}
+          sparkSize={10}
+          duration={520}
+          glow={0.6}
+          className="tune-spark"
+          style={{ height: 'auto' }}
+        >
+          <button type="submit" className="tune-btn">
+            <PlayIcon width={18} height={18} />
+            Tune in to {station.languageName} {station.frequency}
+          </button>
+        </ClickSpark>
         {online ? (
           <p className="tune-hint">
             <span className="tune-hint-dot" aria-hidden="true" />

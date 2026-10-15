@@ -1,10 +1,8 @@
+import { m } from 'motion/react';
 import type { CSSProperties, ReactNode } from 'react';
-import BlurText from '../components/bits/BlurText';
 import ClickSpark from '../components/bits/ClickSpark';
-import { Ripple } from '../components/bits/MagicUi';
-import { STUDIO_NUMBER, STUDIO_NUMBER_DISPLAY } from '../../shared/constants';
 import type { SamplePhase } from './useVoicePlayer';
-import { PhoneIcon, PlayIcon, RetryIcon, StopIcon } from './icons';
+import { PlayIcon, RetryIcon, StopIcon } from './icons';
 
 export type Vars = CSSProperties & Record<`--${string}`, string>;
 
@@ -22,10 +20,21 @@ export function TuneButton({ onClick, label = 'Tune in now' }: { onClick: () => 
   );
 }
 
-export function SectionHead({ id, title, children }: { id: string; title: string; children?: ReactNode }) {
+/** How every section opens: a mono kicker, the title (one quiet rise, once), one line under it. */
+export function SectionHead({ id, title, kicker, children }: { id: string; title: string; kicker?: string; children?: ReactNode }) {
   return (
-    <div className="lp-head">
-      <BlurText as="h2" id={id} className="lp-h2" text={title} />
+    <div className="lp-open">
+      {kicker && <p className="lp-kicker">{kicker}</p>}
+      <m.h2
+        id={id}
+        className="lp-h2"
+        initial={{ opacity: 0, y: 10 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.5 }}
+        transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+      >
+        {title}
+      </m.h2>
       {children && <p className="lp-sub">{children}</p>}
     </div>
   );
@@ -48,31 +57,3 @@ export function PlayGlyph({ phase, size = 18 }: { phase: SamplePhase | 'idle'; s
 }
 
 export const STUDIO_LANGUAGES = 'Hindi, Marathi, Gujarati, Tamil, Bangla or English';
-
-/** The studio phone line as a tap-to-call link (dials on a phone). */
-export function StudioCall({ variant = 'line' }: { variant?: 'line' | 'button' }) {
-  if (variant === 'button') {
-    return (
-      <a className="lp-ghost lp-studio-btn" href={`tel:${STUDIO_NUMBER}`}>
-        <PhoneIcon size={18} />
-        Call the studio: <span className="lp-studio-number">{STUDIO_NUMBER_DISPLAY}</span>
-      </a>
-    );
-  }
-  return (
-    <a className="lp-phone" href={`tel:${STUDIO_NUMBER}`}>
-      <span className="lp-phone-icon" aria-hidden="true">
-        <Ripple size={36} step={18} rings={3} opacity={0.3} color="var(--lp-amber-hi, #ffd38a)" />
-        <PhoneIcon size={18} />
-      </span>
-      <span className="lp-phone-text">
-        <span className="lp-phone-title">
-          Call the studio: <span className="lp-studio-number">{STUDIO_NUMBER_DISPLAY}</span>
-        </span>
-        <span className="lp-phone-sub">
-          From any phone. Talk to RJ Sunny in {STUDIO_LANGUAGES}, and your dedication is read on the live show.
-        </span>
-      </span>
-    </a>
-  );
-}

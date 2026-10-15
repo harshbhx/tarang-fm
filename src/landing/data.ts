@@ -1,6 +1,5 @@
 import { getStation, ROLES, STATIONS } from '../../shared/stations';
-import type { PhoneCall, Role, Source, Station, StationId } from '../../shared/types';
-import { STUDIO_NUMBER_DISPLAY } from '../../shared/constants';
+import type { Role, Source, Station, StationId } from '../../shared/types';
 
 export interface SampleLine {
   text: string;
@@ -212,34 +211,6 @@ export const CALL_EXAMPLE = {
 
 export const GITHUB_URL = 'https://github.com/harshbhx/tarang-fm';
 
-export interface ChainStep {
-  key: string;
-  title: string;
-  body: string;
-  model?: string;
-}
-
-/** The call-in loop, in order. */
-export const CALL_CHAIN: ChainStep[] = [
-  { key: 'you', title: 'You', body: 'Hold Call RJ and talk, up to 15 s.' },
-  { key: 'stt', title: 'Saaras v4', body: 'Hears you. Hinglish stays Hinglish.', model: 'saaras:v4' },
-  { key: 'llm', title: 'Sarvam-105B', body: 'Writes the RJ’s reply.', model: 'sarvam-105b' },
-  { key: 'tts', title: 'Bulbul v4 Flash', body: 'Speaks it on air, streamed.', model: 'bulbul:v4-flash' },
-];
-
-export interface ModelRow {
-  name: string;
-  id: string;
-  job: string;
-}
-
-/** The supporting models behind Bulbul. */
-export const MODELS: ModelRow[] = [
-  { name: 'Sarvam-105B', id: 'sarvam-105b', job: 'Writes every script, call-in reply and English subtitle' },
-  { name: 'Saaras v4', id: 'saaras:v4', job: 'Transcribes callers, code-mixed or native' },
-  { name: 'Sarvam Transliterate', id: 'transliterate', job: 'Writes listener and caller names in each script' },
-];
-
 /** One spoken line in the story, cast from the Hindi station's voices. */
 export interface StoryLine {
   speaker: string;
@@ -251,7 +222,7 @@ export interface StoryLine {
   temperature: number;
 }
 
-export type StoryLamp = 'id' | 'rj' | 'news' | 'ad' | 'kahani' | 'call' | 'phone';
+export type StoryLamp = 'rj' | 'news' | 'ad' | 'kahani';
 
 /** One beat of "an evening on Tarang FM": what you read on the left, what the on-air stage shows on the right. */
 export interface StoryBeat {
@@ -262,23 +233,16 @@ export interface StoryBeat {
   title: string;
   body: string;
   lines: StoryLine[];
-  /** What the caller said (call-in beat) */
-  caller?: SampleLine;
-  /** The studio-line card the RJ is reading from (phone beat) */
-  studio?: { name: string; city: string; number: string; type: string; live?: boolean };
   /** Live headlines shown on the stage (news beat) */
   headlines?: Source[];
   city?: string;
 }
 
 export const STORY_LAMPS: { key: StoryLamp; label: string }[] = [
-  { key: 'id', label: 'ID' },
   { key: 'rj', label: 'RJ' },
   { key: 'news', label: 'News' },
   { key: 'ad', label: 'Ad' },
   { key: 'kahani', label: 'Kahani' },
-  { key: 'call', label: 'Call' },
-  { key: 'phone', label: 'Studio' },
 ];
 
 function castLine(role: Role, text: string, en: string): StoryLine {
@@ -297,23 +261,15 @@ export function greetingLine(name?: string): StoryLine {
   );
 }
 
+/** Four beats of the evening, each with one spoken line in the real voice. */
 export const STORY_BEATS: StoryBeat[] = [
-  {
-    key: 'id',
-    lamp: 'id',
-    clock: '7:00 PM',
-    kicker: 'Station ID',
-    title: 'You tune in.',
-    body: 'A sting rings out, synthesized in your browser, and the station announces itself in your language. Nothing is pre-recorded: every word tonight is written and voiced the moment you arrive.',
-    lines: [castLine('station_id', hindi.stationIdText, hindi.stationIdEn)],
-  },
   {
     key: 'rj',
     lamp: 'rj',
     clock: '7:01 PM',
     kicker: 'RJ link',
     title: 'The RJ knows your name.',
-    body: 'RJ Sunny greets you by name and city, with the weather outside your window, then teases what’s coming up. Your name comes up once in a while, the way a real host would use it, never every link.',
+    body: 'Sunny greets you by name and city, with the weather outside your window. Type yours.',
     lines: [greetingLine()],
   },
   {
@@ -322,7 +278,7 @@ export const STORY_BEATS: StoryBeat[] = [
     clock: '7:04 PM',
     kicker: 'News',
     title: 'The news from your city.',
-    body: 'Real headlines, pulled live from BBC, Bing News and Google News, with two from your own city when you are in India. Read in your language by a newsreader’s voice, grim stories left out.',
+    body: 'Real headlines from your city and India, read in your language. Grim stories left out.',
     lines: [castLine('news', 'अब समय है ताज़ा खबरों का। आपके शहर और देश की बड़ी सुर्खियाँ, सबसे पहले तरंग पर।', 'Time for the latest news. The big headlines from your city and the country, first on Tarang.')],
   },
   {
@@ -331,7 +287,7 @@ export const STORY_BEATS: StoryBeat[] = [
     clock: '7:07 PM',
     kicker: 'Ad break',
     title: 'An ad that makes you laugh.',
-    body: 'A gloriously silly desi product, an announcer who believes in it completely, and one very happy customer. Two voices, one joke, never the same product twice on a station.',
+    body: 'A gloriously silly desi product and one very happy customer. Never the same product twice.',
     lines: [
       castLine('ad_announcer', 'पेश है चटपटा चूरन 3000! एक चम्मच, और बोरिंग मीटिंग भी मज़ेदार!', 'Presenting Chatpata Churan 3000! One spoonful, and even boring meetings are fun!'),
       castLine('ad_customer', 'सच बताऊँ? पहले मैं मीटिंग में सो जाती थी, अब सबसे आगे बैठती हूँ!', 'Honestly? I used to nod off in meetings. Now I sit right up front!'),
@@ -343,41 +299,13 @@ export const STORY_BEATS: StoryBeat[] = [
     clock: '7:10 PM',
     kicker: 'Kahani Corner',
     title: 'A story drops you straight in.',
-    body: 'A short radio drama with a narrator, a full cast and a twist. It opens on the first line of the scene, no “today’s story is about…”, and the station remembers every tale it has told, so none comes back.',
+    body: 'A short drama with a narrator, a cast and a twist. Pick tonight’s and hear how it opens.',
     lines: [castLine('narrator', 'उस रात पूरी हवेली सो चुकी थी… सिवाय एक जलती हुई लालटेन के।', 'That night the whole haveli was asleep… except for one burning lantern.')],
-  },
-  {
-    key: 'call',
-    lamp: 'call',
-    clock: '7:16 PM',
-    kicker: 'Call-in',
-    title: 'You call in. The RJ answers.',
-    body: 'Hold the button and speak, Hinglish and all. Saaras v4 hears you, Sarvam-105B writes the reply, and Bulbul says it on air about two seconds later. Ask for a story and the next Kahani is yours.',
-    caller: CALL_EXAMPLE.caller,
-    lines: [castLine('rj', CALL_EXAMPLE.reply.text, CALL_EXAMPLE.reply.en)],
-  },
-  {
-    key: 'phone',
-    lamp: 'phone',
-    clock: '7:19 PM',
-    kicker: 'Studio line',
-    title: 'Someone rings the studio.',
-    body: `A real phone line, ${STUDIO_NUMBER_DISPLAY}. RJ Sunny picks up from any phone, no app, no internet, and within a minute the dedication is on the website and on its way to air. Every call is read once, for every listener.`,
-    studio: { name: 'Priya', city: 'Vadodara', number: '+91 ••••• 4148', type: 'Dedication' },
-    lines: [
-      castLine(
-        'rj',
-        'और अभी-अभी studio line पर Vadodara से Priya का फ़ोन आया। Priya कहती हैं: मम्मी को जन्मदिन की ढेर सारी बधाई! मम्मी जी, आज का पूरा शो आपके नाम।',
-        'And just now Priya called the studio line from Vadodara. Priya says: a very happy birthday to Mummy! Mummy ji, tonight’s whole show is for you.',
-      ),
-    ],
   },
 ];
 
-/** The sign-off, revealed word by word on the way to the last Tune in. */
-export const MANIFESTO =
-  'Radio was always one voice, talking to everyone. Tonight it knows your name, speaks your language, and answers when you call.';
-export const MANIFESTO_ACCENT = ['name', 'language', 'answers'];
+/** The ad break's product, set large on the stage like a jingle card. */
+export const AD_PRODUCT = { name: 'चटपटा चूरन 3000', en: 'Chatpata Churan 3000' };
 
 /** The stories a listener can pick on the Kahani beat: each opens in a different voice from the cast. */
 export const KAHANI_THEMES: { key: string; label: string; labelEn: string; role: Role; text: string; en: string }[] = [
@@ -425,18 +353,6 @@ export function newsLine(city: string | undefined, headline: Source | undefined)
     'news',
     `अब समय है ताज़ा खबरों का। ${where ? `${where} और देश की` : 'देश की'} बड़ी सुर्खियाँ, सबसे पहले तरंग पर। आज की एक बड़ी खबर: ${title}`,
     `Time for the latest news. The big headlines from ${where ? `${where} and ` : ''}the country, first on Tarang. One big story today: ${title}`,
-  );
-}
-
-/** The studio beat read from a real call on the line (number already masked by the Worker). */
-export function studioLine(call: Pick<PhoneCall, 'name' | 'city' | 'message'>): StoryLine {
-  const name = call.name?.trim();
-  const city = call.city?.trim();
-  const message = squeeze(call.message, 140);
-  return castLine(
-    'rj',
-    `और अभी-अभी studio line पर ${city ? `${city} से ` : ''}${name || 'एक श्रोता'} का फ़ोन आया। संदेश है: ${message}`,
-    `And just now ${name || 'a listener'} called the studio line${city ? ` from ${city}` : ''}. The message: ${message}`,
   );
 }
 
