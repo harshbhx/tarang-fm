@@ -33,5 +33,34 @@
     { "name": "RL_SEGMENT", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
     { "name": "RL_TTS", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },
     { "name": "RL_CALL", "namespace_id": "1003", "simple": { "limit": 8, "period": 60 } }
-  ]
+  ],
+  // The preview Worker (tarang-fm-preview.creharsh.workers.dev). Workflow names are account-wide, so the preview
+  // runs its own; every binding is redeclared because environments don't inherit them.
+  // Build and deploy: CLOUDFLARE_ENV=preview npx vite build && npx wrangler deploy
+  "env": {
+    "preview": {
+      "name": "tarang-fm-preview",
+      "kv_namespaces": [{ "binding": "PHONE", "id": "e6fbf31533664a5c8d3872ef86298183" }],
+      "durable_objects": {
+        "bindings": [
+          { "name": "STUDIO", "class_name": "StudioLine" },
+          { "name": "LIVE", "class_name": "LiveStation" }
+        ]
+      },
+      "migrations": [
+        { "tag": "studio-line-v1", "new_sqlite_classes": ["StudioLine"] },
+        { "tag": "live-station-v1", "new_sqlite_classes": ["LiveStation"] }
+      ],
+      "d1_databases": [{ "binding": "NEWS_DB", "database_name": "tarang-news", "database_id": "37effed5-3eb6-41af-ba54-62e179b1f135", "migrations_dir": "migrations" }],
+      "vectorize": [{ "binding": "NEWS_INDEX", "index_name": "tarang-news-dedupe" }],
+      "ai": { "binding": "AI" },
+      "workflows": [{ "name": "tarang-news-refresh-preview", "binding": "NEWS_REFRESH", "class_name": "NewsRefresh" }],
+      "triggers": { "crons": ["0 * * * *"] },
+      "ratelimits": [
+        { "name": "RL_SEGMENT", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_TTS", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },
+        { "name": "RL_CALL", "namespace_id": "1003", "simple": { "limit": 8, "period": 60 } }
+      ]
+    }
+  }
 }
