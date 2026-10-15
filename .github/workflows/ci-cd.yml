@@ -58,6 +58,10 @@ jobs:
     name: Browser tests (desktop + phone)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The preview runs every binding locally: Workers AI and Vectorize would need Cloudflare credentials, which
+    # branch pushes, Dependabot and fork pull requests don't have. The Worker falls back without them.
+    env:
+      LOCAL_BINDINGS: '1'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

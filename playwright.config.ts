@@ -2,7 +2,8 @@ import { defineConfig, devices } from '@playwright/test';
 
 /**
  * Browser tests against the production build served by `vite preview` (app + Worker, no Sarvam key needed).
- * CI installs Chromium; locally an existing Playwright Chromium is used.
+ * The preview runs every binding locally (LOCAL_BINDINGS=1, see vite.config.ts), so no Cloudflare credentials are
+ * needed and no test touches the real Workers AI or Vectorize. CI installs Chromium; locally an existing one is used.
  */
 const PORT = 4173;
 
@@ -23,6 +24,7 @@ export default defineConfig({
   ],
   webServer: {
     command: `npx vite preview --port ${PORT} --strictPort`,
+    env: { LOCAL_BINDINGS: '1' },
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
