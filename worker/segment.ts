@@ -4,7 +4,7 @@ import { PAUSE_AFTER_MS } from '../shared/constants';
 import { LlmSegmentSchema, type Dedication, type SegmentRequest } from '../shared/schemas';
 import type { Delivery, Line, Mood, Role, Segment, SegmentType, Source, Station, TtsLanguage, Voice } from '../shared/types';
 import { randomFiller, SOMEONE_EN, someoneFor, studioCallLine, studioCallLineEn } from './fallbacks';
-import { callerPlaceholder, MAX_LINES, NEWS_HEADLINES, newsFrameText, rjOnAir, maxTokensFor, subtitlesOn, type SegmentPlans, type StoryPlan, SEGMENT_PLAN, SEGMENT_ROLES, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
+import { callerPlaceholder, MAX_LINES, NEWS_HEADLINES, newsFrameText, rjOnAir, maxTokensFor, subtitlesOn, type SegmentPlans, type StoryPlan, SEGMENT_ROLES, segmentPlanFor, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
 import type { Sarvam } from './sarvam';
 import { gapAfter, isDelivery, rjBibleFor, timePhrase, voiceFor } from './show';
 import { normalizeTitle, type ShowMemory } from './memory';
@@ -282,7 +282,7 @@ async function writeScript(
   producerNote?: string,
 ): Promise<Script> {
   const deadline = Date.now() + SEGMENT_BUDGET_MS;
-  const plan = SEGMENT_PLAN[type];
+  const plan = segmentPlanFor(type, req);
   const roles = SEGMENT_ROLES[type];
   const subtitles = subtitlesOn(station, req.subtitles);
   const schema = link ? rjLinkJsonSchema(subtitles) : segmentJsonSchema(type, subtitles);
