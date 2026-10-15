@@ -1,4 +1,4 @@
-import { LIVE_OFF_AIR_NOTE, type LiveLine, type LiveListener } from '../../../shared/live';
+import { LIVE_ENDED_NOTE, LIVE_OFF_AIR_NOTE, type LiveLine, type LiveListener } from '../../../shared/live';
 import type { SegmentType, Station } from '../../../shared/types';
 import type { Caption } from '../../radio/state';
 import type { LiveStatus, LiveViewState } from '../types';
@@ -115,14 +115,25 @@ export function isOffAir(state: Pick<LiveViewState, 'status' | 'enabled' | 'note
   return state.status === 'sleeping' && (state.note === LIVE_OFF_AIR_NOTE || !state.enabled);
 }
 
+/** Sleeping because the show reached its six-minute limit ("Tune in again" starts a fresh one). */
+export function isShowEnded(state: Pick<LiveViewState, 'status' | 'enabled' | 'note'>): boolean {
+  return state.status === 'sleeping' && state.note === LIVE_ENDED_NOTE && !isOffAir(state);
+}
+
 export const OFF_AIR_COPY: StatusCopy = {
   title: 'Off air right now',
   detail: 'The studio will start the show soon, stay tuned.',
 };
 
+export const ENDED_COPY: StatusCopy = {
+  title: 'The show took a short break',
+  detail: 'Each live show runs for six minutes. Tune in again to start a fresh one for everyone here.',
+};
+
 /** Plain-language studio status shown in place of the caption while nothing is on air. */
-export function statusCopy(status: LiveStatus, station: Station, offAir = false): StatusCopy | undefined {
+export function statusCopy(status: LiveStatus, station: Station, offAir = false, ended = false): StatusCopy | undefined {
   if (offAir && status === 'sleeping') return OFF_AIR_COPY;
+  if (ended && status === 'sleeping') return ENDED_COPY;
   switch (status) {
     case 'connecting':
       return { title: 'Connecting to the studio…', detail: `Finding the live ${station.languageName} show on ${station.frequency}.` };

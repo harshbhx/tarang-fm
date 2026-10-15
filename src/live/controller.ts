@@ -188,20 +188,19 @@ function initialState(station: StationId): LiveViewState {
   };
 }
 
-/** The studio switch fields of a snapshot or status message, keeping only the ones present and valid. */
+/** The switch fields of a snapshot or status message (auto-start, the show's end, the note), keeping only the ones present and valid. */
 function studioPatch(msg: { state: LiveState; enabled?: unknown; enabledUntil?: unknown; note?: unknown }): Partial<LiveViewState> {
   const patch: Partial<LiveViewState> = {};
-  if (typeof msg.enabled === 'boolean') {
-    patch.enabled = msg.enabled;
-    if (!msg.enabled) patch.enabledUntil = undefined;
-  }
+  if (typeof msg.enabled === 'boolean') patch.enabled = msg.enabled;
   if (typeof msg.enabledUntil === 'number' && Number.isFinite(msg.enabledUntil)) patch.enabledUntil = msg.enabledUntil;
+  // A sleeping or stopped station has no show to count down
+  else if (msg.state === 'sleeping' || msg.enabled === false) patch.enabledUntil = undefined;
   if (typeof msg.note === 'string' && msg.note) patch.note = msg.note;
   else if (msg.state !== 'sleeping') patch.note = undefined;
   return patch;
 }
 
-/** What a new connection starts from: off air until the server says otherwise. */
+/** What a new connection starts from, until the server's snapshot says otherwise. */
 const STUDIO_RESET: Pick<LiveViewState, 'enabled' | 'enabledUntil' | 'note'> = {
   enabled: false,
   enabledUntil: undefined,
@@ -347,6 +346,12 @@ export class LiveController implements LiveActions {
     // Pick the line on air back up from where the show is now
     const entry = this.onAir;
     if (entry) void this.playEntry(entry);
+  };
+
+  restart = (): void => {
+    if (this.name === null || !this.socketJoined) return;
+    this.set({ error: undefined });
+    this.send({ type: 'restart' });
   };
 
   leave = (): void => {

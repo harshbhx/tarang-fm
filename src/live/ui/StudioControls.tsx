@@ -13,10 +13,11 @@ const FAILED = 'Could not reach the studio. Try again.';
 type Action = LiveControlRequest['action'];
 
 interface StationRow {
+  /** Starts by itself when someone joins; false while stopped (blocked) */
   enabled: boolean;
   state: LiveState;
   listeners: number;
-  /** Local epoch ms when the station switches itself off */
+  /** Local epoch ms when the show on air ends (its six-minute limit) */
   offAt?: number;
 }
 
@@ -26,7 +27,7 @@ interface StudioControlsProps {
   onForget: () => void;
 }
 
-/** Owner-only switch for every station: on/off, who is listening, the auto-off countdown. */
+/** Owner-only override for every station: stop (blocks auto-start) or start again, who is listening, the show's countdown. */
 export default function StudioControls({ adminKey, onForget }: StudioControlsProps) {
   const [open, setOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia || window.matchMedia(DESKTOP).matches);
   const [rows, setRows] = useState<Partial<Record<StationId, StationRow>>>({});
@@ -98,11 +99,13 @@ export default function StudioControls({ adminKey, onForget }: StudioControlsPro
     if (failed.length) setPanelError([...new Set(failed)].join(' '));
   };
 
-  const onCount = STATIONS.filter((s) => rows[s.id]?.enabled).length;
+  const blockedCount = STATIONS.filter((s) => rows[s.id]?.enabled === false).length;
+  const liveCount = STATIONS.filter((s) => rows[s.id]?.offAt !== undefined).length;
+  const summary = blockedCount ? `${blockedCount} of ${STATIONS.length} blocked` : liveCount ? `${liveCount} on air` : 'All auto';
 
-  // The auto-off countdown runs in seconds while a station is on and the panel is open
+  // The show countdown runs in seconds while a show is on and the panel is open
   const [now, setNow] = useState(() => Date.now());
-  const counting = open && onCount > 0;
+  const counting = open && liveCount > 0;
   useEffect(() => {
     if (!counting) return;
     setNow(Date.now());
@@ -118,8 +121,8 @@ export default function StudioControls({ adminKey, onForget }: StudioControlsPro
           <h2 id="studio-title" className="ctl-title">
             Studio controls
           </h2>
-          <span className="ctl-summary" data-on={onCount > 0}>
-            {onCount ? `${onCount} of ${STATIONS.length} on` : 'All off'}
+          <span className="ctl-summary" data-on={liveCount > 0}>
+            {summary}
           </span>
         </div>
         <div className="ctl-actions">
@@ -158,7 +161,9 @@ export default function StudioControls({ adminKey, onForget }: StudioControlsPro
         <ul className="ctl-grid">
           {STATIONS.map((station) => {
             const row = rows[station.id];
-            const action: Action = row?.enabled ? 'stop' : 'start';
+            // Stop blocks auto-start; Start lifts the block
+            const action: Action = row?.enabled === false ? 'start' : 'stop';
+            const live = row?.offAt !== undefined;
             const pending = busy[station.id];
             const error = errors[station.id];
             const errorId = `studio-error-${station.id}`;
@@ -166,7 +171,7 @@ export default function StudioControls({ adminKey, onForget }: StudioControlsPro
               <li
                 key={station.id}
                 className="ctl-tile"
-                data-on={row?.enabled ?? false}
+                data-on={live}
                 style={{ '--station': station.accent } as CSSProperties}
               >
                 <div className="ctl-info">
@@ -175,7 +180,7 @@ export default function StudioControls({ adminKey, onForget }: StudioControlsPro
                     <span className="ctl-freq">{station.frequency}</span>
                   </span>
                   <span className="ctl-meta">
-                    <span className="ctl-pill" data-on={row?.enabled ?? false}>
+                    <span className="ctl-pill" data-on={live}>
                       {row ? stateLabel(row) : unreachable[station.id] ? 'No reading' : 'Checking'}
                     </span>
                     {row ? (
@@ -183,9 +188,9 @@ export default function StudioControls({ adminKey, onForget }: StudioControlsPro
                         {row.listeners} listening
                       </span>
                     ) : null}
-                    {row?.enabled && row.offAt !== undefined ? (
+                    {row?.offAt !== undefined ? (
                       <span className="ctl-countdown tabular-nums">
-                        {row.offAt > now ? `auto-off in ${formatAutoOff(row.offAt - now)}` : 'switching off…'}
+                        {row.offAt > now ? `show ends in ${formatAutoOff(row.offAt - now)}` : 'ending…'}
                       </span>
                     ) : null}
                   </span>
@@ -219,29 +224,35 @@ export default function StudioControls({ adminKey, onForget }: StudioControlsPro
   );
 }
 
+/** A show's end time, only while it is awake. */
+function showEnd(state: LiveState, until: unknown, offsetMs: number): number | undefined {
+  return state !== 'sleeping' && Number.isFinite(until) ? (until as number) - offsetMs : undefined;
+}
+
 function fromSnapshot(snapshot: LiveSnapshot, offsetMs: number): StationRow {
   return {
-    enabled: snapshot.enabled === true,
+    enabled: snapshot.enabled !== false,
     state: snapshot.state,
     listeners: Array.isArray(snapshot.listeners) ? snapshot.listeners.length : 0,
-    offAt: snapshot.enabled && Number.isFinite(snapshot.enabledUntil) ? (snapshot.enabledUntil as number) - offsetMs : undefined,
+    offAt: showEnd(snapshot.state, snapshot.enabledUntil, offsetMs),
   };
 }
 
 function fromControl(res: LiveControlResponse, offsetMs: number): StationRow {
   return {
-    enabled: res.enabled === true,
+    enabled: res.enabled !== false,
     state: res.state,
     listeners: Number.isFinite(res.listeners) ? res.listeners : 0,
-    offAt: res.enabled && Number.isFinite(res.enabledUntil) ? (res.enabledUntil as number) - offsetMs : undefined,
+    offAt: showEnd(res.state, res.enabledUntil, offsetMs),
   };
 }
 
+/** Blocked (stopped by the studio), on air, warming up, or Auto: asleep and starts when someone joins. */
 function stateLabel(row: StationRow): string {
-  if (!row.enabled) return 'Off';
+  if (!row.enabled) return 'Blocked';
   if (row.state === 'on_air') return 'On air';
   if (row.state === 'warming_up') return 'Warming up';
-  return 'On, no listeners';
+  return 'Auto';
 }
 
 function ChevronIcon({ open }: { open: boolean }) {

@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { SHOW_CLOCK } from '../../shared/constants';
-import type { LiveLine } from '../../shared/live';
+import {
+  LIVE_AUTO_OFF_MS,
+  LIVE_ENDED_NOTE,
+  LIVE_IDLE_SLEEP_MS,
+  LIVE_OFF_AIR_NOTE,
+  LIVE_RESTART_GAP_MS,
+  type LiveLine,
+} from '../../shared/live';
 import type { Line } from '../../shared/types';
 import {
   appendLine,
+  awakeAlarm,
   bufferedAheadMs,
   endedLines,
   Gate,
   insertLine,
   istClock,
+  joinWakes,
   MIN_LEAD_MS,
   mostCommon,
   nextClockIndex,
@@ -16,6 +25,7 @@ import {
   onAirAt,
   pcmDurationMs,
   producerPlan,
+  restartAllowed,
   upcomingLines,
   welcomeNotBefore,
   type Placed,
@@ -187,5 +197,51 @@ describe('Gate', () => {
     expect(order).toEqual(['a', 'b', 'w', 'c']);
     expect(peak).toBe(2);
     expect(gate.inFlight).toBe(0);
+  });
+});
+
+describe('auto-start rules', () => {
+  const now = 1_760_000_000_000;
+
+  it('a join wakes a sleeping station unless the studio stopped it', () => {
+    expect(joinWakes({ state: 'sleeping' }, now)).toBe(true);
+    expect(joinWakes({ state: 'sleeping', note: LIVE_OFF_AIR_NOTE }, now)).toBe(true);
+    expect(joinWakes({ state: 'sleeping', blocked: true }, now)).toBe(false);
+    expect(joinWakes({ state: 'on_air' }, now)).toBe(false);
+  });
+
+  it('a join or reconnect never restarts an ended show its listeners are still on', () => {
+    expect(joinWakes({ state: 'sleeping', note: LIVE_ENDED_NOTE }, now)).toBe(false);
+    expect(joinWakes({ state: 'sleeping', note: LIVE_ENDED_NOTE, emptySince: now - LIVE_IDLE_SLEEP_MS + 1 }, now)).toBe(false);
+    // Empty for the idle window: the next join starts a fresh show
+    expect(joinWakes({ state: 'sleeping', note: LIVE_ENDED_NOTE, emptySince: now - LIVE_IDLE_SLEEP_MS }, now)).toBe(true);
+    expect(joinWakes({ state: 'sleeping', note: LIVE_ENDED_NOTE, emptySince: 0, blocked: true }, now)).toBe(false);
+  });
+
+  it('Tune in again starts at most one fresh show per restart gap, never while stopped or awake', () => {
+    expect(restartAllowed({ state: 'sleeping', note: LIVE_ENDED_NOTE }, now)).toBe(true);
+    expect(restartAllowed({ state: 'sleeping', startedAt: now - LIVE_AUTO_OFF_MS }, now)).toBe(true);
+    expect(restartAllowed({ state: 'sleeping', startedAt: now - LIVE_RESTART_GAP_MS + 1 }, now)).toBe(false);
+    expect(restartAllowed({ state: 'sleeping', startedAt: now - LIVE_RESTART_GAP_MS }, now)).toBe(true);
+    expect(restartAllowed({ state: 'sleeping', blocked: true }, now)).toBe(false);
+    expect(restartAllowed({ state: 'warming_up' }, now)).toBe(false);
+  });
+
+  it('ends the show at its limit, switches off a minute after the last listener, else keeps producing', () => {
+    const until = now + LIVE_AUTO_OFF_MS;
+    expect(awakeAlarm({ state: 'on_air', enabledUntil: until }, 3, now)).toBe('run');
+    expect(awakeAlarm({ state: 'on_air', enabledUntil: until }, 3, until)).toBe('ended');
+    // Nobody left to tell: just switch off
+    expect(awakeAlarm({ state: 'on_air', enabledUntil: until, emptySince: now }, 0, until)).toBe('idle');
+    expect(awakeAlarm({ state: 'on_air', enabledUntil: until, emptySince: now }, 0, now + LIVE_IDLE_SLEEP_MS - 1)).toBe('run');
+    expect(awakeAlarm({ state: 'on_air', enabledUntil: until, emptySince: now }, 0, now + LIVE_IDLE_SLEEP_MS)).toBe('idle');
+    // A show without an end time never runs on
+    expect(awakeAlarm({ state: 'on_air' }, 1, now)).toBe('ended');
+  });
+
+  it('switches off after one minute alone and caps a show at six minutes', () => {
+    expect(LIVE_IDLE_SLEEP_MS).toBe(60_000);
+    expect(LIVE_AUTO_OFF_MS).toBe(6 * 60_000);
+    expect(LIVE_RESTART_GAP_MS).toBe(30_000);
   });
 });

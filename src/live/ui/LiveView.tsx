@@ -14,7 +14,7 @@ import { STATIONS, getStation, rjVoiceAt } from '../../../shared/stations';
 import type { Station } from '../../../shared/types';
 import type { Caption } from '../../radio/state';
 import type { LiveActions, LiveViewState } from '../types';
-import { isOffAir, liveCaption, statusCopy } from './format';
+import { isOffAir, isShowEnded, liveCaption, statusCopy } from './format';
 import { useAiredLines } from './hooks';
 import JoinPanel from './JoinPanel';
 import LiveDock from './LiveDock';
@@ -166,6 +166,7 @@ function LiveShell({
                 online={online}
                 onToggleSubtitles={() => setShowSubtitles((on) => !on)}
                 onRetry={retry}
+                onRestart={() => actions.restart()}
               />
 
               <div className="below">
@@ -225,6 +226,7 @@ function LiveStage({
   online,
   onToggleSubtitles,
   onRetry,
+  onRestart,
 }: {
   state: LiveViewState;
   station: Station;
@@ -234,10 +236,12 @@ function LiveStage({
   online: boolean;
   onToggleSubtitles: () => void;
   onRetry: () => void;
+  onRestart: () => void;
 }) {
   const { status } = state;
   const offAir = isOffAir(state);
-  const copy = statusCopy(status, station, offAir);
+  const ended = isShowEnded(state);
+  const copy = statusCopy(status, station, offAir, ended);
   const showLine = status === 'on_air' || status === 'reconnecting';
 
   let stage: ReactNode;
@@ -251,7 +255,22 @@ function LiveStage({
         showSubtitles={showSubtitles}
         lang={station.language}
         live={status === 'on_air' && !state.muted}
-        placeholder={copy ? <StatusNotice title={copy.title} detail={copy.detail} calm={offAir} /> : null}
+        placeholder={
+          copy ? (
+            <StatusNotice
+              title={copy.title}
+              detail={copy.detail}
+              calm={offAir || ended}
+              action={
+                ended ? (
+                  <button type="button" className="tune-btn tune-btn-sm live-restart" disabled={!online} onClick={onRestart}>
+                    Tune in again
+                  </button>
+                ) : null
+              }
+            />
+          ) : null
+        }
       />
     );
   }
@@ -284,8 +303,18 @@ function LiveStage({
   );
 }
 
-/** `calm`: nothing is coming until the studio starts the show, so no busy equalizer. */
-function StatusNotice({ title, detail, calm = false }: { title: string; detail: string; calm?: boolean }) {
+/** `calm`: nothing is coming until the studio (or a listener's "Tune in again") starts the show, so no busy equalizer. */
+function StatusNotice({
+  title,
+  detail,
+  calm = false,
+  action,
+}: {
+  title: string;
+  detail: string;
+  calm?: boolean;
+  action?: ReactNode;
+}) {
   return (
     <div role="status" className="flex flex-col gap-3 pt-1">
       {calm ? (
@@ -297,6 +326,7 @@ function StatusNotice({ title, detail, calm = false }: { title: string; detail: 
         <WaitingLine>{title}</WaitingLine>
       )}
       <p className="text-fg-3 max-w-md">{detail}</p>
+      {action ? <div className="pt-1">{action}</div> : null}
     </div>
   );
 }

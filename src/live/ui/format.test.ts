@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { LIVE_OFF_AIR_NOTE, type LiveLine, type LiveListener } from '../../../shared/live';
+import { LIVE_ENDED_NOTE, LIVE_OFF_AIR_NOTE, type LiveLine, type LiveListener } from '../../../shared/live';
 import { getStation } from '../../../shared/stations';
 import {
+  ENDED_COPY,
   formatAutoOff,
   initial,
   isOffAir,
+  isShowEnded,
   joinNames,
   liveBoard,
   newestFirst,
@@ -86,6 +88,18 @@ describe('live UI format', () => {
     expect(statusCopy('sleeping', hi, true)).toBe(OFF_AIR_COPY);
     expect(statusCopy('sleeping', hi, false)?.title).toMatch(/asleep/);
     expect(statusCopy('warming_up', hi, true)?.title).toMatch(/Waking up/);
+  });
+
+  it('tells a show that reached its limit apart from off air', () => {
+    const hi = getStation('hi');
+    expect(isShowEnded({ status: 'sleeping', enabled: true, note: LIVE_ENDED_NOTE })).toBe(true);
+    expect(isOffAir({ status: 'sleeping', enabled: true, note: LIVE_ENDED_NOTE })).toBe(false);
+    // Stopped by the studio wins over an ended show
+    expect(isShowEnded({ status: 'sleeping', enabled: false, note: LIVE_ENDED_NOTE })).toBe(false);
+    expect(isShowEnded({ status: 'warming_up', enabled: true, note: LIVE_ENDED_NOTE })).toBe(false);
+    expect(statusCopy('sleeping', hi, false, true)).toBe(ENDED_COPY);
+    expect(ENDED_COPY.title).toBe('The show took a short break');
+    expect(statusCopy('sleeping', hi, true, true)).toBe(OFF_AIR_COPY);
   });
 
   it('counts down to the auto-off', () => {
