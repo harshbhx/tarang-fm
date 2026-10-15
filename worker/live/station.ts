@@ -27,11 +27,11 @@ import {
 } from '../../shared/live';
 import type { Dedication, SegmentRequest } from '../../shared/schemas';
 import { rjVoiceAt, STATION_BY_ID } from '../../shared/stations';
-import type { Line, ListenerContext, Mood, PhoneCall, Segment, SegmentType, Station, StationId } from '../../shared/types';
+import type { Line, LinkState, ListenerContext, Mood, PhoneCall, Segment, SegmentType, Station, StationId } from '../../shared/types';
 import { getHeadlines, getWeather, localNewsCity } from '../context';
-import { newsroomHeadlines } from '../news/newsroom';
+import { markNewsAired, newsroomHeadlines } from '../news/newsroom';
 import { createSarvam, type Sarvam } from '../sarvam';
-import { buildSegment, nativeListenerName, toLine } from '../segment';
+import { buildSegment, nativeListenerName, producerFor, toLine } from '../segment';
 import { capStream, maxPcmBytes } from '../show';
 import { studioLine } from '../studio';
 import { Timings } from '../timing';
@@ -126,6 +126,12 @@ interface StationState {
   lastCatchphrase: boolean;
   aired: Aired[];
   storyLog: string[];
+  /** The RJ links' rotation state, echoed on the next link (this show only) */
+  linkState?: LinkState;
+  /** Newsroom story ids this show's bulletins read (≤ 40): never read twice in one show */
+  airedNews?: string[];
+  /** Bulletins written this show: full first, then update, alternating */
+  bulletins?: number;
   /** A studio caller's story request for the next Kahani */
   storyTheme?: string;
   /** Studio calls this show's RJ links will read: claimed in the shared call table, marked aired when the link starts */
@@ -587,6 +593,9 @@ export class LiveStation extends DurableObject<Env> {
       links: 0,
       lastCatchphrase: false,
       aired: [],
+      linkState: undefined,
+      airedNews: [],
+      bulletins: 0,
       pendingWelcomes: [],
       lastWelcomeAt: undefined,
       emptySince: undefined,
@@ -695,16 +704,22 @@ export class LiveStation extends DurableObject<Env> {
     const sarvam = this.sarvam();
     const origin = this.s.origin ?? 'https://tarang-fm.local';
     let segment: Segment | undefined;
+    const local = localNewsCity(city, country);
+    const bulletin = { station, mode: req.mode === 'update' ? ('update' as const) : ('full' as const), city: local, regionName: local ? req.listener.region : undefined, airedNews: req.airedNews, waitUntil: (p: Promise<unknown>) => this.ctx.waitUntil(p) };
+    let fromNewsroom = false;
+    const producer = producerFor(this.env);
     // One retry, then the clock moves on to the next entry
     for (let attempt = 0; attempt < 2 && !segment; attempt++) {
       try {
         segment = await buildSegment(sarvam, station, req, new Timings(), {
           // The newsroom's slate (the station never airs a story twice); live headlines while its pool fills
           fetchHeadlines: async () => {
-            const local = localNewsCity(city, country);
-            const slate = await newsroomHeadlines(this.env, { station, mode: req.mode === 'update' ? 'update' : 'full', city: local, regionName: local ? req.listener.region : undefined, waitUntil: (p) => this.ctx.waitUntil(p) });
+            const slate = await newsroomHeadlines(this.env, bulletin);
+            fromNewsroom = slate.length > 0;
             return slate.length ? slate : getHeadlines(station, origin, undefined, local);
           },
+          // The producer check: free checks, then the judge (Workers AI); free checks only without the AI binding
+          producer,
           // The RJ link's fact packet: the audience's most common city and its edge coordinates
           geo: { city, region: req.listener.region, lat: geoOf(this.ctx.getWebSockets(), city)?.latitude, lon: geoOf(this.ctx.getWebSockets(), city)?.longitude },
         });
@@ -715,6 +730,8 @@ export class LiveStation extends DurableObject<Env> {
     }
     if (!segment) return false;
 
+    // A written bulletin's stories are aired for the station (a fallback bulletin read none)
+    if (segment.type === 'news' && fromNewsroom && !segment.fallback && segment.newsIds?.length) this.ctx.waitUntil(markNewsAired(this.env, bulletin, segment.newsIds));
     this.recordWritten(segment, calls);
     await this.save();
     this.enqueue(work, station, segment);
@@ -741,6 +758,9 @@ export class LiveStation extends DurableObject<Env> {
     if (following) req.upNext = following;
     let calls: PhoneCall[] = [];
     if (type === 'rj_link') {
+      // The first link of a show opens it (time, weather, greeting); every later one delivers a payload
+      req.mode = this.s.links === 0 ? 'opener' : 'payload';
+      if (this.s.linkState) req.linkState = this.s.linkState;
       const producer = producerPlan(this.s.links, this.s.lastCatchphrase);
       this.s.links += 1;
       this.s.lastCatchphrase = producer.useCatchphrase;
@@ -767,7 +787,15 @@ export class LiveStation extends DurableObject<Env> {
     if (showLog.length) req.showLog = showLog;
     const previous = this.s.aired[this.s.aired.length - 1];
     if (previous?.mood) req.moodAfterPrevious = previous.mood;
+    if (type === 'news') {
+      // A full bulletin first, then a short update, alternating; never a story this show already read
+      req.mode = (this.s.bulletins ?? 0) % 2 === 0 ? 'full' : 'update';
+      this.s.bulletins = (this.s.bulletins ?? 0) + 1;
+      if (this.s.airedNews?.length) req.airedNews = this.s.airedNews.slice(-40);
+    }
     if (type === 'kahani') {
+      // Listen together airs one complete story (owner decision); the 3-part serial is for /listen only
+      req.oneShot = true;
       if (this.s.storyLog.length) req.recentStories = this.s.storyLog.slice(-STORY_LOG_MAX);
       if (this.s.storyTheme) {
         req.theme = this.s.storyTheme;
@@ -779,7 +807,12 @@ export class LiveStation extends DurableObject<Env> {
 
   /** Show log, story log and studio calls, once a segment is written. */
   private recordWritten(segment: Segment, calls: PhoneCall[]): void {
-    const summary = segment.summary?.trim().slice(0, SUMMARY_CHARS);
+    // What the producer heard air, else the writer's own summary
+    const summary = (segment.heardSummary ?? segment.summary)?.trim().slice(0, SUMMARY_CHARS);
+    if (segment.linkState) this.s.linkState = segment.linkState;
+    if (segment.type === 'news' && !segment.fallback && segment.newsIds?.length) {
+      this.s.airedNews = [...new Set([...(this.s.airedNews ?? []), ...segment.newsIds])].slice(-40);
+    }
     const aired: Aired = { type: segment.type };
     if (summary) aired.summary = summary;
     if (segment.mood) aired.mood = segment.mood;
