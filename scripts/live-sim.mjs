@@ -3,6 +3,8 @@
  * "Listen together" simulator: several listeners share one live show on a running server.
  *
  *   node scripts/live-sim.mjs [--base http://localhost:5191] [--station hi] [--quick]
+ *   Stations are off by default: set LIVE_ADMIN_TOKEN in the environment and the script starts the station
+ *   first (and stops it at the end).
  *
  * Scenario (t = when the first listener connects):
  *   t=0     Harsh joins
@@ -920,6 +922,16 @@ function printReport({ aired, welcomeLines }) {
 
 // ---------------------------------------------------------------- main
 
+/** POST the studio switch (start/stop) with the admin key from the environment. */
+async function control(action) {
+  const res = await fetch(`${origin}/api/live/${station}/control`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.LIVE_ADMIN_TOKEN}` },
+    body: JSON.stringify({ action }),
+  });
+  return { status: res.status, text: await res.text() };
+}
+
 async function main() {
   if (typeof WebSocket !== 'function') {
     console.error('This script needs a global WebSocket (Node 22 or newer).');
@@ -927,6 +939,15 @@ async function main() {
   }
   console.log(`Listen-together simulation: station "${station}" at ${origin}${opts.quick ? ' (quick)' : ''}`);
   console.log(`WebSocket ${wsUrl}\n`);
+
+  // Stations are off by default: switch this one on for the run when an admin key is given
+  if (process.env.LIVE_ADMIN_TOKEN) {
+    const started = await control('start');
+    console.log(`Studio switch: start -> HTTP ${started.status} ${clip(started.text, 120)}\n`);
+    if (started.status !== 200) process.exit(2);
+  } else {
+    console.log('No LIVE_ADMIN_TOKEN set: the station must already be started, or joins will wait off air.\n');
+  }
 
   // Pre-flight: the station must answer /now
   let pre;
@@ -1061,6 +1082,11 @@ async function main() {
 
   const summary = evaluate(leaveServerMs);
   printReport(summary);
+  // Never leave a test station spending credits
+  if (process.env.LIVE_ADMIN_TOKEN) {
+    const stopped = await control('stop').catch((err) => ({ status: 0, text: String(err) }));
+    console.log('Studio switch: stop -> HTTP ' + stopped.status);
+  }
   process.exit(results.some((r) => r.status === 'FAIL') ? 1 : 0);
 }
 
@@ -1093,7 +1119,8 @@ function parseArgs(argv) {
   return o;
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error(err);
+  if (process.env.LIVE_ADMIN_TOKEN) await control('stop').catch(() => {});
   process.exit(1);
 });
