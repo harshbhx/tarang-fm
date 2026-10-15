@@ -66,7 +66,7 @@ export const LANGUAGE_STYLE: Partial<Record<TtsLanguage, LanguageStyle>> = {
     name: 'Bangla',
     script: 'Bengali',
     register:
-      'Natural, grammatical spoken Bangla as on a Kolkata FM station (চলিত ভাষা, never সাধু ভাষা), witty and full of adda energy. Use only real, common Bangla words. Common English words (FM, phone, traffic, weekend) may stay in Latin script, but every Bangla word must be in Bengali script.',
+      'Natural, grammatical spoken Bangla as on a Kolkata FM station (চলিত ভাষা, never সাধু ভাষা), witty, with adda energy. Use only real, common Bangla words. Common English words (FM, phone, traffic, weekend) may stay in Latin script, but every Bangla word must be in Bengali script.',
     punctuation: 'End every sentence with । or ! or ?.',
   },
   'mr-IN': {
@@ -141,7 +141,7 @@ export function spokenTime(listener: ListenerContext, language?: TtsLanguage): s
   return `${hour12}:${String(m).padStart(2, '0')} ${part}${native ? ` (${native})` : ''}`;
 }
 
-const NEWSREADER_NAMES: Partial<Record<string, string>> = { hi: 'सिमरन', mr: 'नेहा', ta: 'விஜய்', bn: 'রূপা', gu: 'પૂજા' };
+const NEWSREADER_NAMES: Partial<Record<string, string>> = { hi: 'सिमरन', mr: 'नेहा', ta: 'விஜய்', bn: 'রূপা', gu: 'નીતા' };
 
 export function newsreaderName(station: Station): string {
   return NEWSREADER_NAMES[station.id] ?? voiceName(station.cast.news);
@@ -163,13 +163,6 @@ export function cityFor(station: Station, listener: ListenerContext): string | u
   return listener.city;
 }
 
-function localGreet(station: Station, listener: ListenerContext): string {
-  const pack = localPackFor(listener.city);
-  const city = cityFor(station, listener);
-  if (station.language === 'hi-IN') return pack?.greetHi ?? (city ? `${city} वालों, नमस्ते` : 'नमस्ते');
-  return city ? `a warm local hello to ${city}` : 'a warm hello';
-}
-
 /** The pack's cast sheet: the RJ bible for the RJ on air, then the other roles with their genders. */
 function castSheet(station: Station, roles: Role[], listener: ListenerContext, cast?: Partial<Record<Role, Voice>>): string {
   const rows: string[] = [];
@@ -178,19 +171,11 @@ function castSheet(station: Station, roles: Role[], listener: ListenerContext, c
       const rj = rjOnAir(station, listener);
       const bible = rjBibleFor(station, rj.name);
       if (bible) {
-        rows.push(bible.block);
-        const greeting =
-          station.id === 'hi' && rj.name === 'रतन'
-            ? `"रात की बात में आपका स्वागत है, मैं हूँ रतन।"`
-            : station.language === 'hi-IN'
-              ? `"${localGreet(station, listener)}! ${rj.name} है आपके साथ, ${onAirName(station)} पे।"`
-              : `${localGreet(station, listener)}, then "${rj.name} here with you on ${onAirName(station)}" (in ${languageName(station)})`;
-        rows.push(`  Greeting (only when greet_listener is yes): ${greeting}`);
-        rows.push(`  Catchphrase (only when use_catchphrase is yes): "${bible.catchphrase}"`);
-        rows.push(`  Running bits (only the one the producer names):`);
-        for (const bit of bible.bits) rows.push(`    ${bit.id} — ${bit.text}`);
+        rows.push(`RJ BIBLE (the RJ's own life is fiction, and the only fiction an RJ may tell; stay consistent with it):\n${bible.block}`);
+        rows.push('  Greeting: only in the opener, built on the line the task gives.');
+        rows.push('  Catchphrase: only when the task says CATCHPHRASE yes.');
       } else {
-        rows.push(`rj — ${rj.name}, ${genderWord(rj.voice)}. Warm, quick-witted city RJ.`);
+        rows.push(`rj — ${rj.name}, ${genderWord(rj.voice)}. A warm, quick-witted city RJ who works from the Tarang studio.`);
       }
       continue;
     }
@@ -204,108 +189,119 @@ function castSheet(station: Station, roles: Role[], listener: ListenerContext, c
   return `Role values to use (ONLY these): ${roles.join(', ')}.\n${rows.join('\n')}`;
 }
 
-// ---- §3 systemPreamble ----------------------------------------------------------------------
+// ---- §3 systemPreamble (v3: truth first, fillers on a budget, no quoted example lines) -------------------------
 
-function hindiPreamble(station: Station, castSheetText: string): string {
-  return `You write live on-air scripts for ${onAirName(station)}, a Hindi city FM station. Every word you write is spoken aloud by a voice actor, live, to one listener. Write for the ear, not the eye.
-
-## The station
-- On air it is always "${onAirName(station)}". Jingle: "${station.stationIdText}".
-- It is a talk station: बातें, खबरें, कहानियाँ. There is no music. Never mention songs, गाने, playlists or "अगला गाना". A dedication becomes a shout-out.
-- It should sound like a real Indian city FM station in 2026: quick, warm, a little cheeky, never cringe, never preachy.
-
-## How real RJs talk (most important section)
-1. Talk to one person. Use "आप" with normal plural verbs ("आप सुन रहे हैं"). Never "प्रिय श्रोताओं".
-2. Spoken Hindi, not textbook Hindi. Use: अरे, यार, वैसे, चलिए, सोचिए, मतलब, हाँ जी, सच बताऊँ तो. Avoid: अतः, किंतु, तत्पश्चात, उपरोक्त, निम्नलिखित, हेतु.
-3. Mix English the way a city RJ does. Everyday words stay English in Latin script (traffic, office, weekend, plan, mood, scene, phone, late). Sentences stay Hindi. About one English word every 6–8 words. Never a full English sentence, except a tagline or "T&C apply".
-4. Vary rhythm. Mix tiny lines ("अरे बाप रे!", "सच में।", "हाँ हाँ, वही।") with longer ones. No two lines in a row the same length.
-5. Specific beats generic. Weak: "आज बहुत गर्मी है।" Radio: "35 डिग्री, मतलब scooter की seat पे बैठना अब adventure sport है।"
-6. One idea per line. If a line needs "और" plus two commas, split it.
-7. Never explain a joke. Never announce one ("एक मज़ेदार बात सुनिए").
-8. Banned phrases (they sound like AI or YouTube): "चलिए जानते हैं", "आइए नज़र डालते हैं", "उम्मीद है आपको पसंद आया होगा", "इस रोमांचक सफ़र में", "आज के डिजिटल युग में", "दोस्तों, आज हम बात करेंगे". "दोस्तों" at most once per segment.
-
-## Script and TTS rules (hard rules: the voice breaks otherwise)
-- Hindi in Devanagari, English in Latin. Never romanized Hindi ("aap", "kya", "yaar" are errors).
-- End Hindi sentences with "।". Use "!" and "?" as normal, "," for a short breath, and "…" at most once per segment.
-- Numbers, prices, temperatures and dates as digits: "35 डिग्री", "₹99", "20 अक्टूबर". Do not spell numbers out. Exception: copy the TIME phrase exactly as given.
-- Each line is 8–140 characters, with at most 2 sentences per line.
-- No SSML, emojis, hashtags, brackets, asterisks, stage directions or sound-effect notes. If something happens, a character says it.
-- The listener's name is precious: real RJs use it rarely. Write the token {name} ONLY where the task says to greet the listener, and then exactly once. Everywhere else say "you". Never write their name yourself.
-
-## Grammar
-- Verb gender follows the speaker in the cast sheet: male "मैं आ रहा हूँ", female "मैं आ रही हूँ".
-- When a character talks about someone else, follow that person's gender: "वो आ रही है" for a woman.
-- Address the listener with the standard "आप सुन रहे हैं" form. Never guess the listener's gender.
-
-## Content
-- Family-friendly, always. A kid might be listening.
-- No real brands, celebrities, politicians, businesses or film titles. Invent names.
-- Never invent real-world facts: no made-up news, local events, statistics or quotes. Facts come only from the INPUT. Real places in the listener's city come only from LOCAL PACK.
-- Tease situations (traffic, heat, Mondays, exams, mummy's phone calls), never groups of people. No jokes about religion, caste, region, gender, body or accent.
-- No opinions on politics or religion. Festival greetings are fine.
-
-## Delivery
-Every line has "delivery": one of normal | warm | excited | fast | hushed | shout | dramatic | sad. Pick what an actor would do. Most lines are "normal". Use at most 2 "shout" per segment.
-
-## Cast sheet
-${castSheetText}
-
-Return only JSON matching the schema. Fill the "plan" fields first, in English.`;
+interface PreambleLocale {
+  /** How to address the one listener */
+  address: string;
+  /** Spoken fillers counted by the budget (bible §3.1) */
+  fillers: string[];
+  /** About one English word in this many */
+  englishEvery: number;
+  /** Phrases that sound like AI or YouTube, in the language */
+  banned: string[];
+  /** Textbook words to avoid */
+  stiff?: string;
 }
 
-/** The same preamble for the other stations: only the language block and the examples change. */
-function otherPreamble(station: Station, castSheetText: string): string {
+const PREAMBLE_LOCALE: Partial<Record<TtsLanguage, PreambleLocale>> = {
+  'hi-IN': {
+    address: '"आप" with plural verbs ("आप सुन रहे हैं"); never "प्रिय श्रोताओं"',
+    fillers: ['अरे', 'यार', 'वैसे', 'सच में', 'बिल्कुल', 'मतलब', 'हाँ जी', 'उफ़्फ़'],
+    englishEvery: 8,
+    banned: ['चलिए जानते हैं', 'आइए नज़र डालते हैं', 'उम्मीद है आपको पसंद आया होगा', 'इस रोमांचक सफ़र में', 'आज के डिजिटल युग में', 'दोस्तों, आज हम बात करेंगे'],
+    stiff: 'अतः, किंतु, तत्पश्चात, उपरोक्त, निम्नलिखित, हेतु',
+  },
+  'mr-IN': {
+    address: '"तुम्ही" with plural verbs; never "प्रिय श्रोतेहो"',
+    fillers: ['अरे', 'बरं', 'म्हणजे', 'खरंच'],
+    englishEvery: 10,
+    banned: ['चला जाणून घेऊया', 'चला नजर टाकूया', 'आशा आहे तुम्हाला आवडलं असेल', 'या रोमांचक प्रवासात', 'आजच्या डिजिटल युगात', 'मित्रांनो, आज आपण बोलणार आहोत'],
+  },
+  'ta-IN': {
+    address: '"நீங்க" (colloquial, respectful); never "அன்பார்ந்த நேயர்களே"',
+    fillers: ['அட', 'சரி', 'ஆமா', 'அப்புறம்'],
+    englishEvery: 5,
+    banned: ['வாங்க தெரிஞ்சுக்கலாம்', 'ஒரு பார்வை பார்ப்போம்', 'உங்களுக்கு பிடிச்சிருக்கும்னு நம்பறேன்', 'இந்த அற்புதமான பயணத்துல', 'இன்றைய டிஜிட்டல் யுகத்தில்', 'நண்பர்களே, இன்னைக்கு நாம பேசப்போறது'],
+  },
+  'bn-IN': {
+    address: '"আপনি"; never "প্রিয় শ্রোতাবন্ধুরা"',
+    fillers: ['আরে', 'আসলে', 'মানে', 'সত্যি'],
+    englishEvery: 8,
+    banned: ['চলুন জেনে নেওয়া যাক', 'চলুন একবার চোখ বুলিয়ে নিই', 'আশা করি আপনাদের ভালো লেগেছে', 'এই রোমাঞ্চকর যাত্রায়', 'আজকের ডিজিটাল যুগে', 'বন্ধুরা, আজ আমরা কথা বলব'],
+  },
+  'gu-IN': {
+    address: '"તમે" with plural verbs; never "પ્રિય શ્રોતાઓ"',
+    fillers: ['અરે', 'હા', 'એટલે', 'ખરેખર'],
+    englishEvery: 10,
+    banned: ['ચાલો જાણીએ', 'ચાલો નજર કરીએ', 'આશા છે તમને ગમ્યું હશે', 'આ રોમાંચક સફરમાં', 'આજના ડિજિટલ યુગમાં', 'મિત્રો, આજે આપણે વાત કરીશું'],
+  },
+};
+
+/** Preamble v3 (prompt pack §2), localized per station. Shared by RJ links, ads and Kahani parts. */
+function preambleV3(station: Station, castSheetText: string): string {
   const lang = languageName(station);
   const style = LANGUAGE_STYLE[station.language];
-  return `You write live on-air scripts for ${onAirName(station)}, a ${lang} city FM station. Every word you write is spoken aloud by a voice actor, live, to one listener. Write for the ear, not the eye.
+  const loc = PREAMBLE_LOCALE[station.language];
+  const hindi = station.language === 'hi-IN';
+  const fillers = loc ? loc.fillers.join(', ') : 'the spoken fillers of the language';
+  const banned = loc ? loc.banned.map((b) => `"${b}"`).join(', ') : `the ${lang} versions of "let's find out", "let's take a look", "hope you liked it", "on this exciting journey", "in today's digital age"`;
+  return `You write live on-air scripts for ${onAirName(station)}, a ${lang} city talk station. Every word you write is spoken aloud by a voice actor to one listener. Write for the ear.
 
 ## The station
 - On air it is always "${onAirName(station)}". Jingle: "${station.stationIdText}".
-- It is a talk station: talk, news and stories. There is no music. Never mention songs, playlists or "the next song". A dedication becomes a shout-out.
-- It should sound like a real Indian city FM station in 2026: quick, warm, a little cheeky, never cringe, never preachy.
+- A talk station: talk, news, parody ads and the Kahani serial. There is no music: never mention songs, playlists or "the next song". A dedication becomes a shout-out.
+- It sounds like a real Indian city FM station in 2026: quick, warm, a little cheeky, never cringe, never preachy.
 
-## How real RJs talk (most important section)
-1. Talk to one person, with the respectful everyday "you" of ${lang}. Never "dear listeners".
-2. Spoken ${lang}, not textbook ${lang}. ${style?.register ?? ''}
-3. Mix English the way a city RJ does. Everyday words stay English in Latin script (traffic, office, weekend, plan, mood, scene, phone, late). Sentences stay ${lang}. About one English word every 6–8 words. Never a full English sentence, except a tagline or "T&C apply".
-4. Vary rhythm. Mix tiny lines (the ${lang} for "Oh my!", "Really.", "Yes yes, that one.") with longer ones. No two lines in a row the same length.
-5. Specific beats generic. Weak: "It is very hot today." Radio: "35 degrees, which means sitting on a scooter seat is now an adventure sport."
-6. One idea per line. If a line needs "and" plus two commas, split it.
-7. Never explain a joke. Never announce one ("here's a funny one").
-8. Banned phrases (they sound like AI or YouTube): the ${lang} versions of "let's find out", "let's take a look", "hope you liked it", "on this exciting journey", "in today's digital age", "friends, today we will talk about". "Friends" at most once per segment.
+## The job
+Each task says what the listener walks away with: one point, one punchline or one story beat. Deliver it early and specifically, then stop. A line that doesn't serve it is cut.
 
-## Script and TTS rules (hard rules: the voice breaks otherwise)
-- ${lang} in ${style?.script ?? 'its own'} script, English in Latin. Never romanized ${lang}.
-- ${style?.punctuation ?? 'End sentences with normal sentence punctuation.'} Use "," for a short breath, and "…" at most once per segment.
-- Numbers, prices, temperatures and dates as digits ("35", "₹99", "20 October"). Do not spell numbers out.
-- Each line is 8–140 characters, with at most 2 sentences per line.
-- No SSML, emojis, hashtags, brackets, asterisks, stage directions or sound-effect notes. If something happens, a character says it.
-- The listener's name is precious: real RJs use it rarely. Write the token {name} ONLY where the task says to greet the listener, and then exactly once. Everywhere else say "you". Never write their name yourself.
+## Truth (most important)
+- You know only what this message tells you. Real-world facts (the city, news, festivals, weather, dates, what aired, what comes next) come only from the blocks in the task. If a block doesn't say it, it didn't happen, and you don't mention it.
+- Fiction is allowed only inside fiction: the RJ's own life as the RJ BIBLE describes it, an ad's invented product, a Kahani.
+- Never describe a segment whose content you were not given. Never claim listeners called, messaged or voted unless the task's STUDIO CALLS say so.
+
+## How it sounds
+1. Talk to one person: ${loc?.address ?? `the respectful everyday "you" of ${lang}`}.
+2. Spoken ${lang}, not textbook ${lang}. ${style?.register ?? ''}${loc?.stiff ? ` Avoid ${loc.stiff}.` : ''}
+3. Fillers (${fillers}) are a budget, not a vocabulary: at most 2 in the whole script. Line 1 never starts with one. No line ends with a filler tag.
+4. Rhythm: at least one short line (under 6 words) and at least one longer line (14-22 words). Never three lines of similar length in a row. Two lines never start with the same word.
+5. One idea per line. Concrete beats general: a number, a name, an object, a time of day, but only ones the task gave you or the RJ's own fiction.
+6. Mix English the way a city RJ does: everyday English nouns in Latin script, about one every ${loc?.englishEvery ?? 8} words. The sentence stays ${lang}. No full English sentence, except an ad's tagline or its fine-print line.
+7. Never explain a joke. Never announce one.
+8. Never write: ${banned}.
+
+## Script rules (the voice breaks otherwise)
+- ${lang} in ${style?.script ?? 'its own'} script, English in Latin script. Never romanized ${lang}${hindi ? ' ("aap", "kya", "yaar" are errors)' : ''}.
+- ${style?.punctuation ?? 'End sentences with normal sentence punctuation.'} Use "," for a short breath, "…" at most once. No "—".
+- Numbers, prices and dates as digits. A time of day only as the task's TIME, copied exactly.
+- Each line is 8-150 characters, with at most 2 sentences.
+- "text" holds only the words that are spoken. Never put role names, the word "delivery", stage directions, brackets, asterisks, emojis, hashtags or sound-effect tags inside "text". Acting goes in "delivery". A sound is said in words by a speaker.
+- The listener's name: write the token {name} only where the task says, and then exactly once. Never write their name yourself.
 
 ## Grammar
 - ${style?.gender ?? 'Verb forms follow the speaker in the cast sheet.'}
-- When a character talks about someone else, follow that person's gender.
+- When talking about someone else, follow that person's gender.
 - Address the listener with the standard respectful form. Never guess the listener's gender.
 
 ## Content
 - Family-friendly, always. A kid might be listening.
-- No real brands, celebrities, politicians, businesses or film titles. Invent names.
-- Never invent real-world facts: no made-up news, local events, statistics or quotes. Facts come only from the INPUT. Real places in the listener's city come only from LOCAL PACK.
-- Tease situations (traffic, heat, Mondays, exams, mother's phone calls), never groups of people. No jokes about religion, caste, region, gender, body or accent.
-- No opinions on politics or religion. Festival greetings are fine.
+- No real brands, celebrities, politicians, businesses, films or slogans. Invent names.
+- Tease situations (traffic, Mondays, exams, a mother's phone call), never groups of people. No jokes about religion, caste, region, gender, body, age or accent.
+- No opinions on politics or religion. Festivals: customs, food and greetings only.
 
 ## Delivery
-Every line has "delivery": one of normal | warm | excited | fast | hushed | shout | dramatic | sad. Pick what an actor would do. Most lines are "normal". Use at most 2 "shout" per segment.
+Every line has "delivery": one of normal | warm | excited | fast | hushed | shout | dramatic | sad. Pick what an actor would do. Most lines are "normal". At most 2 "shout".
 
 ## Cast sheet
 ${castSheetText}
 
-Return only JSON matching the schema. Fill the "plan" fields first, in English.`;
+Return only JSON matching the schema, filling the fields in schema order: plan_* fields in short English first, then lines that carry out that plan.`;
 }
 
 export function systemPreamble(station: Station, roles: Role[], listener: ListenerContext, cast?: Partial<Record<Role, Voice>>): string {
   const sheet = castSheet(station, roles, listener, cast);
-  return station.language === 'hi-IN' ? hindiPreamble(station, sheet) : otherPreamble(station, sheet);
+  return preambleV3(station, sheet);
 }
 
 // ---- §5 shared context block ----------------------------------------------------------------
@@ -326,6 +322,8 @@ function lastCallerLine(req: SegmentRequest): string {
 }
 
 export function contextBlock(station: Station, req: SegmentRequest): string {
+  // The RJ link carries its own scoped context (prompts/rj.ts): no local pack, no occasion, time only in the opener
+  if (req.type === 'rj_link') return '';
   const l = req.listener;
   const city = cityFor(station, l);
   const pack = localPackFor(l.city);
@@ -334,8 +332,7 @@ export function contextBlock(station: Station, req: SegmentRequest): string {
   const degrees = station.language === 'hi-IN' ? 'डिग्री' : 'degrees';
   const weather = req.weather && city ? `WEATHER in ${city}: ${req.weather.tempC} ${degrees}, ${conditionFor(station, req.weather.description)}` : 'WEATHER: unknown';
   // Only RJ links may greet by name; every other segment just knows "a listener".
-  const named = Boolean(l.name) && req.type === 'rj_link';
-  const listener = named ? `{name}${city ? ` from ${city}` : ''}` : `a listener${city ? ` from ${city}` : ''} (never write {name} in this segment)`;
+  const listener = `a listener${city ? ` from ${city}` : ''} (never write {name} in this segment)`;
   return [
     `NOW: ${timePhrase(station, l)} (${DAYPART_NATIVE(station, l)})${weekday ? `, ${weekday}` : ''}`,
     weather,

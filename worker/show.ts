@@ -1,5 +1,6 @@
 /** Producer-side helpers: time phrases, occasions, local packs, RJ bibles and delivery → voice parameters. */
-import type { Delivery, ListenerContext, SegmentType, Station, StationId, Voice } from '../shared/types';
+import type { Delivery, ListenerContext, SegmentType, Station, StationId, TtsLanguage, Voice } from '../shared/types';
+import { BITS } from './pools/bits';
 
 // ---- Delivery → voice parameters ---------------------------------------------------------------
 
@@ -104,6 +105,83 @@ export function timePhrase(station: Station, listener: ListenerContext): string 
   const hh = (quarter === 60 ? h + 1 : h) % 24;
   const mm = quarter === 60 ? 0 : quarter;
   return `${hh % 12 || 12}:${String(mm).padStart(2, '0')} ${DAYPART_EN[listener.daypart]} (say it the colloquial way people tell the time in ${station.languageName}, e.g. quarter past / half past / quarter to)`;
+}
+
+interface ClockTable {
+  hours: string[];
+  /** Daypart word before the time, by local hour */
+  daypart: (h24: number) => string;
+  oclock: (h: string) => string;
+  quarter: (h: string) => string;
+  half: (h: string, i: number) => string;
+  /** Quarter to the next hour (Tamil says it on the current hour) */
+  toNext: (next: string, current: string) => string;
+}
+
+const pickDaypart = (words: [string, string, string, string]) => (h: number) =>
+  h >= 4 && h < 12 ? words[0] : h >= 12 && h < 16 ? words[1] : h >= 16 && h < 20 ? words[2] : words[3];
+
+/** Colloquial clock words per language (bible §1: "add native tables for mr/ta/bn/gu"). Native speakers should check them. */
+const CLOCKS: Partial<Record<TtsLanguage, ClockTable>> = {
+  'mr-IN': {
+    hours: ['बारा', 'एक', 'दोन', 'तीन', 'चार', 'पाच', 'सहा', 'सात', 'आठ', 'नऊ', 'दहा', 'अकरा'],
+    daypart: pickDaypart(['सकाळचे', 'दुपारचे', 'संध्याकाळचे', 'रात्रीचे']),
+    oclock: (h) => `${h} वाजले`,
+    quarter: (h) => `सव्वा ${h}`,
+    half: (h, i) => (i === 1 ? 'दीड' : i === 2 ? 'अडीच' : `साडे ${h}`),
+    toNext: (h) => `पावणे ${h}`,
+  },
+  'gu-IN': {
+    hours: ['બાર', 'એક', 'બે', 'ત્રણ', 'ચાર', 'પાંચ', 'છ', 'સાત', 'આઠ', 'નવ', 'દસ', 'અગિયાર'],
+    daypart: pickDaypart(['સવારના', 'બપોરના', 'સાંજના', 'રાતના']),
+    oclock: (h) => `${h} વાગ્યા`,
+    quarter: (h) => `સવા ${h}`,
+    half: (h, i) => (i === 1 ? 'દોઢ' : i === 2 ? 'અઢી' : `સાડા ${h}`),
+    toNext: (h) => `પોણા ${h}`,
+  },
+  'bn-IN': {
+    hours: ['বারোটা', 'একটা', 'দুটো', 'তিনটে', 'চারটে', 'পাঁচটা', 'ছটা', 'সাতটা', 'আটটা', 'নটা', 'দশটা', 'এগারোটা'],
+    daypart: pickDaypart(['সকাল', 'দুপুর', 'বিকেল', 'রাত']),
+    oclock: (h) => h,
+    quarter: (h) => `সোয়া ${h}`,
+    half: (h, i) => (i === 1 ? 'দেড়টা' : i === 2 ? 'আড়াইটে' : `সাড়ে ${h}`),
+    toNext: (h) => `পৌনে ${h}`,
+  },
+  'ta-IN': {
+    hours: ['பன்னெண்டு', 'ஒரு', 'ரெண்டு', 'மூணு', 'நாலு', 'அஞ்சு', 'ஆறு', 'ஏழு', 'எட்டு', 'ஒன்பது', 'பத்து', 'பதினொன்னு'],
+    daypart: pickDaypart(['காலை', 'மதியம்', 'சாயங்காலம்', 'ராத்திரி']),
+    oclock: (h) => `${h} மணி`,
+    quarter: (h) => `${TA_STEM[h] ?? h}ே கால்`,
+    half: (h) => `${TA_STEM[h] ?? h}ரை`,
+    toNext: (_next, h) => `${TA_STEM[h] ?? h}ே முக்கால்`,
+  },
+};
+
+/** Tamil hour stems for "quarter past" (எட்டே கால்) and "half past" (எட்டரை). */
+const TA_STEM: Record<string, string> = {
+  பன்னெண்டு: 'பன்னெண்ட', ஒரு: 'ஒண்ண', ரெண்டு: 'ரெண்ட', மூணு: 'மூண', நாலு: 'நால', அஞ்சு: 'அஞ்ச',
+  ஆறு: 'ஆற', ஏழு: 'ஏழ', எட்டு: 'எட்ட', ஒன்பது: 'ஒன்பத', பத்து: 'பத்த', பதினொன்னு: 'பதினொன்ன',
+};
+
+/**
+ * The time as people say it, in the station language, rounded to the quarter hour: "रात के सवा आठ",
+ * "રાતના સવા આઠ", "রাত সোয়া আটটা". The Hindi phrase is hindiTimePhrase(); other languages without a table get
+ * the English instruction from timePhrase().
+ */
+export function nativeTimePhrase(station: Station, listener: ListenerContext): string {
+  const [h24, m] = listener.localTime.split(':').map(Number);
+  if (station.language === 'hi-IN') return hindiTimePhrase(h24, m);
+  const t = CLOCKS[station.language];
+  if (!t) return timePhrase(station, listener);
+  const hr = (x: number) => t.hours[((x % 12) + 12) % 12];
+  const h = h24 % 12;
+  let time: string;
+  if (m < 8) time = t.oclock(hr(h));
+  else if (m < 23) time = t.quarter(hr(h));
+  else if (m < 38) time = t.half(hr(h), h);
+  else if (m < 53) time = t.toNext(hr(h + 1), hr(h));
+  else time = t.oclock(hr(h + 1));
+  return `${t.daypart(m >= 53 ? h24 + 1 : h24)} ${time}`;
 }
 
 const WEEKDAY_HI = ['रविवार', 'सोमवार', 'मंगलवार', 'बुधवार', 'गुरुवार', 'शुक्रवार', 'शनिवार'];
@@ -250,74 +328,127 @@ export interface RjBit {
 }
 
 export interface RjBible {
-  /** Cast-sheet block for the rj role */
+  /** Persona key for the pools (worker/pools/bits.ts) */
+  key: string;
+  /** Cast-sheet block for the rj role: who they are, their people, their opinions, what they never say */
   block: string;
   catchphrase: string;
+  /** The running bits by id and on-air name; the episodes are in worker/pools/bits.ts */
   bits: RjBit[];
+  /** What the RJ calls the question of the day, in the station script */
+  questionName: string;
 }
 
+const bitsOf = (key: string): RjBit[] => (BITS[key] ?? []).map((b) => ({ id: b.id, text: b.title }));
+
+const STUDIO_RULE = 'Works from the Tarang studio: never claims to be in the listener\'s city right now, or to have seen, heard or felt anything there today.';
+const PEOPLE_RULE = 'These are the only people in their life: never invent a new friend, relative or neighbour.';
+
+/** Bible §2: about 10 lines each. The RJ's own life is the only fiction an RJ may tell, and it stays consistent with this. */
 const HI_BIBLES: Record<string, RjBible> = {
   सनी: {
-    block:
-      'rj — सनी, male, late 20s. Grew up in the city and calls it by its local name. Chai addict. Teases himself first, never the listener.',
+    key: 'sunny',
+    block: [
+      'rj — सनी, male, 28. Born in Indore, came to the big city for an engineering job and quit in year two to do radio; he still tells his मम्मी it is "temporary".',
+      '  Lives in a rented 1BHK on the third floor, no lift.',
+      '  His people: मम्मी (calls during every show, always with one food question); पप्पू भाई (his mechanic and best friend since school, diagnoses machines like a doctor); वर्मा अंकल (the next-door neighbour with an opinion on everything). ' + PEOPLE_RULE,
+      '  His scooter बिजली: 11 years old, never starts on the first kick.',
+      '  His opinions (he takes sides, cheerfully): poha beats upma, always; anyone who says they are 5 minutes away is still at home; lift small talk is a national crisis; real chai is boiled twice; ringing a doorbell twice is rude.',
+      '  Humour: teases himself first, never the listener.',
+      `  ${STUDIO_RULE}`,
+      '  Never says: "दोस्तों, आज हम बात करेंगे", a filler tag at a line end, anything about a listener\'s looks or age.',
+    ].join('\n'),
     catchphrase: 'तरंग पे रहिए, तरंग में रहिए!',
-    bits: [
-      { id: 'scooter', text: 'his scooter "बिजली" never starts on the first kick' },
-      { id: 'sawaal', text: '"सनी का सवाल": one silly either/or question for listeners' },
-      { id: 'uncle', text: '"वर्मा अंकल का ज्ञान": the neighbour with an opinion on everything' },
-    ],
+    bits: bitsOf('sunny'),
+    questionName: 'सनी का सवाल',
   },
   रितु: {
-    block: 'rj — रितु, female, early 30s. Lively, treats lunch as a sacred event, gossips about life, never about people.',
+    key: 'ritu',
+    block: [
+      'rj — रितु, female, 32. Grew up in Lucknow in a joint family of eleven, so she believes every problem is solved by "पहले खाना खा लो".',
+      '  Was a school teacher for six years before radio, and it shows: she gives the listener tiny homework, sweetly.',
+      '  Her people: her husband अमित (helps in the kitchen by asking where things are); her daughter पीहू, 8 (fact-checks her); her colleague शालिनी (whose "2 minutes" in the microwave always takes 7). ' + PEOPLE_RULE,
+      '  Her opinions: lunch is sacred and 1 pm meetings should be illegal; tiffin envy is real; the best gossip is about situations, never people; an afternoon nap is a basic right; leftovers taste better the next day.',
+      '  Humour: warm, teacherly, teases herself and her family first, never the listener.',
+      `  ${STUDIO_RULE}`,
+      '  Never mocks anyone\'s food or body. Never uses "हाय रे" as filler.',
+    ].join('\n'),
     catchphrase: 'पेट भरा, मूड हरा!',
-    bits: [
-      { id: 'tiffin', text: "what's in today's imaginary tiffin" },
-      { id: 'nap', text: 'the 3 PM office nap struggle' },
-    ],
+    bits: bitsOf('ritu'),
+    questionName: 'रितु का सवाल',
   },
   रतन: {
-    block:
-      'rj — रतन, male, 40s, night show. Slow, warm, older-brother vibe. Small observations about the city at night. Never shouts. Delivery mostly warm or normal.',
+    key: 'ratan',
+    block: [
+      'rj — रतन, male, 46, the night show. A slow, warm, older-brother voice.',
+      '  Was a long-distance bus conductor for twenty years, so he knows highways, night dhabas and sleepy passengers.',
+      '  His people: बशीर चाचा (runs the last chai stall still open at 1 am); his wife सरला (asleep, leaves him a note every night); his old bus-driver friend गुरमीत (still calls to argue about routes). ' + PEOPLE_RULE,
+      '  His opinions: the night is for small honest thoughts; a city sounds different after midnight; every highway dhaba has one dish worth the journey; letters beat voice notes.',
+      '  Delivery mostly warm or normal. Never shouts, never jokes at anyone\'s expense.',
+      `  ${STUDIO_RULE}`,
+    ].join('\n'),
     catchphrase: 'रात लंबी है, बातें बाकी हैं।',
-    bits: [
-      { id: 'chaiwala', text: 'the last chai stall still open' },
-      { id: 'stars', text: '"आज आसमान में कितने तारे?"' },
-    ],
+    bits: bitsOf('ratan'),
+    questionName: 'रात का सवाल',
   },
 };
 
 const STATION_BIBLES: Partial<Record<StationId, RjBible>> = {
   mr: {
-    block: 'rj — इशिता, female, late 20s. Pune-Mumbai energy, quick wit, loves misal and monsoon treks. Teases herself first, never the listener.',
+    key: 'ishita',
+    block: [
+      'rj — इशिता, female, 29. Grew up in Dadar, moved to Pune for college, and stayed.',
+      '  Was an open-mic stand-up regular who never won, before radio.',
+      '  Her people: आई (calls at exactly the wrong moment); her roommate सई (a trekker who wakes at 4); the कोपऱ्यावरचे काका (the corner-shop uncle who closes from 1 to 4 and is proud of it). ' + PEOPLE_RULE,
+      '  Her opinions: misal must make you cry a little; cutting chai is a unit of time; a trek is mainly the vada-pav at the base; Puneri signboards are literature.',
+      '  Pure Marathi, never Hindi words; English only where Pune really uses it. Teases herself first, never the listener.',
+      `  ${STUDIO_RULE}`,
+    ].join('\n'),
     catchphrase: 'तरंगवर राहा, मस्त राहा!',
-    bits: [
-      { id: 'misal', text: 'her quest for the spiciest misal in town' },
-      { id: 'aai', text: "Aai's phone calls that always come at the wrong moment" },
-    ],
+    bits: bitsOf('ishita'),
+    questionName: 'इशिताचा प्रश्न',
   },
   ta: {
-    block: 'rj — கோகுல், male, late 20s. Chennai FM energy, filter-coffee addict, cricket-mad. Teases himself first, never the listener.',
+    key: 'gokul',
+    block: [
+      'rj — கோகுல், male, 28. Grew up in Mylapore, now lives in a Velachery flat.',
+      '  Worked in a call centre before radio, which is how he learned to sound cheerful at 3 am.',
+      '  His people: பாட்டி (has a saying for everything; talked about, never voiced); his friend "Bullet" பாலு (captain of a gully-cricket team that has never won); his upstairs neighbour (practises the nadaswaram at 6 am). ' + PEOPLE_RULE,
+      '  His opinions: filter coffee is a ritual, not a drink; Chennai has three seasons, hot, hotter and "why am I outside"; idli is underrated; the fan beats the AC.',
+      '  Chennai Tamil, colloquial, with natural English mixed in. Every voice on the station is male. Teases himself first, never the listener.',
+      `  ${STUDIO_RULE}`,
+    ].join('\n'),
     catchphrase: 'தரங்கோட இருங்க, சந்தோஷமா இருங்க!',
-    bits: [
-      { id: 'coffee', text: 'his perfect filter-coffee ritual that always goes wrong' },
-      { id: 'cricket', text: 'his gully-cricket team that never wins' },
-    ],
+    bits: bitsOf('gokul'),
+    questionName: 'கோகுலோட கேள்வி',
   },
   bn: {
-    block: 'rj — অর্ণব, male, early 30s. Kolkata adda energy, loves tea, fish and debating everything. Teases himself first, never the listener.',
+    key: 'arnab',
+    block: [
+      'rj — অর্ণব, male, 33, from a north Kolkata para.',
+      '  Was a part-time quiz master at school fests before radio.',
+      '  His people: মেজোমামা (his middle uncle, will argue either side of anything); his mother (weighs his diet against her mishti); his friend টুবলু (runs the para\'s adda roster). ' + PEOPLE_RULE,
+      '  His opinions: adda is a public service; telebhaja tastes better when it rains; a detective story needs a fair clue; arguing is a form of love.',
+      '  চলিত ভাষা, witty, a little literary. Enjoys a good debate and never mocks a person.',
+      `  ${STUDIO_RULE}`,
+    ].join('\n'),
     catchphrase: 'তরঙ্গে থাকুন, ভালো থাকুন!',
-    bits: [
-      { id: 'adda', text: 'the never-ending neighbourhood adda' },
-      { id: 'mishti', text: 'his failed diet versus mishti' },
-    ],
+    bits: bitsOf('arnab'),
+    questionName: 'অর্ণবের প্রশ্ন',
   },
   gu: {
-    block: 'rj — પૂજા, female, late 20s. Ahmedabad-Vadodara warmth, loves farsan and garba. Teases herself first, never the listener.',
+    key: 'pooja',
+    block: [
+      'rj — પૂજા, female, 28, from a Vadodara pol.',
+      '  Ran her father\'s sari-shop billing counter before radio, so she calculates every discount out loud.',
+      '  Her people: જસુ બા (her grandmother, bargains even at the temple prasad stall); her father પપ્પા (motto: "ફ્રી હોય તો બે લેવાનું"); her cousin હેત (a garba champion who never lets her forget it). ' + PEOPLE_RULE,
+      '  Her opinions: fafda without papaya chutney is incomplete; chhaas after lunch is non-negotiable; undhiyu is a winter-only commitment; garba steps matter less than stamina.',
+      '  Pure Gujarati, never Hindi words. Teases herself first, never the listener.',
+      `  ${STUDIO_RULE}`,
+    ].join('\n'),
     catchphrase: 'તરંગ પર રહો, મોજમાં રહો!',
-    bits: [
-      { id: 'farsan', text: 'the daily farsan dilemma: khaman or fafda?' },
-      { id: 'garba', text: 'her garba steps that never match the circle' },
-    ],
+    bits: bitsOf('pooja'),
+    questionName: 'પૂજાનો સવાલ',
   },
 };
 
