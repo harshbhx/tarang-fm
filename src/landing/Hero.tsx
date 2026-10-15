@@ -5,6 +5,7 @@ import type { StationId } from '../../shared/types';
 import Magnet from '../components/bits/Magnet';
 import ProximityText from '../components/bits/ProximityText';
 import Tilt from '../components/bits/Tilt';
+import { onAppLink } from '../live/ui/navigate';
 import { stationIdVoice } from './data';
 import RadioSet, { HERO_SAMPLE_PREFIX } from './RadioSet';
 import { TextSwap } from './TextSwap';
@@ -66,6 +67,15 @@ export default function Hero({ onTuneIn, player }: { onTuneIn: (id: StationId) =
         <m.p className="lp-trust" {...rise(0.22)}>
           No install, no login. Starts on {station.languageName} {station.frequency}. Press a preset to hear a station.
         </m.p>
+        <m.a className="lp-hero-live" href="/live" onClick={onAppLink} {...rise(0.28)}>
+          <span className="lp-hero-live-dot" aria-hidden="true" />
+          <span className="lp-hero-live-name">Listen together</span>
+          <span className="lp-beta">Beta</span>
+          <span className="lp-hero-live-sub">one live show, everyone in sync</span>
+          <span className="lp-hero-live-arrow" aria-hidden="true">
+            →
+          </span>
+        </m.a>
       </div>
       <m.div className="lp-hero-visual" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.1, ease: EASE }}>
         <Tilt max={3.5}>

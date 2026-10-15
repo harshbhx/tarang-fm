@@ -3692,3 +3692,304 @@
     font-size: var(--lp-fs-md, 1.0625rem);
   }
 }
+
+/* ---------- Listen together (beta): one shared live show per station ---------- */
+
+/* Hero: the small way in, under the trust line */
+.lp-hero-live {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-height: 44px;
+  margin-top: 14px;
+  padding: 8px 14px 8px 12px;
+  border: 1px solid var(--lp-line-2);
+  border-radius: 12px;
+  background: rgb(255 240 220 / 0.03);
+  color: var(--lp-fg);
+  font-size: var(--lp-fs-sm);
+  text-decoration: none;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+
+.lp-hero-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lp-lamp);
+  box-shadow: 0 0 8px rgb(255 75 54 / 0.8);
+}
+
+.lp-hero-live-name {
+  font-weight: 600;
+}
+
+.lp-hero-live-sub {
+  color: var(--lp-fg-3);
+}
+
+.lp-hero-live-arrow {
+  color: var(--lp-amber);
+  transition: transform 150ms var(--lp-ease);
+}
+
+.lp-beta {
+  padding: 1px 7px;
+  border: 1px solid rgb(242 178 92 / 0.4);
+  border-radius: 999px;
+  color: var(--lp-amber-hi);
+  font-family: var(--lp-font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.5;
+}
+
+@media (hover: hover) {
+  .lp-hero-live:hover {
+    border-color: rgb(242 178 92 / 0.45);
+    background: rgb(242 178 92 / 0.06);
+  }
+
+  .lp-hero-live:hover .lp-hero-live-arrow {
+    transform: translateX(3px);
+  }
+}
+
+@media (max-width: 420px) {
+  .lp-hero-live-sub {
+    display: none;
+  }
+}
+
+/* The section: copy and steps beside a sample shared studio */
+.lp-together-grid {
+  display: grid;
+  gap: 40px;
+}
+
+@media (min-width: 1000px) {
+  .lp-together-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    gap: 80px;
+    align-items: center;
+  }
+}
+
+.lp-together-copy .lp-open {
+  margin-bottom: 32px;
+}
+
+.lp-together-points {
+  display: grid;
+  gap: 18px;
+  max-width: 34rem;
+}
+
+.lp-together-points li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  padding-top: 16px;
+  border-top: 1px solid var(--lp-line);
+}
+
+.lp-together-num {
+  font-family: var(--lp-font-mono);
+  font-size: var(--lp-fs-xs);
+  letter-spacing: 0.04em;
+  color: var(--lp-amber);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-together-point {
+  display: block;
+  font-family: var(--lp-font-display);
+  font-size: var(--lp-fs-lg);
+  font-weight: 600;
+  font-stretch: 92%;
+  line-height: 1.2;
+  color: var(--lp-fg);
+}
+
+.lp-together-body {
+  display: block;
+  margin-top: 4px;
+  color: var(--lp-fg-2);
+  text-wrap: pretty;
+}
+
+.lp-together-go {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 18px;
+  margin-top: 32px;
+}
+
+.lp-together-go .lp-cta {
+  text-decoration: none;
+}
+
+.lp-together-trust {
+  font-size: var(--lp-fs-sm);
+  color: var(--lp-fg-3);
+}
+
+/* The sample studio, built on the evening's on-air stage */
+.lp-together-stage {
+  gap: 18px;
+}
+
+.lp-together-station {
+  font-family: var(--lp-font-mono);
+  font-size: var(--lp-fs-xs);
+  letter-spacing: 0.04em;
+  color: var(--lp-fg-2);
+  white-space: nowrap;
+}
+
+.lp-together-station span {
+  font-size: var(--lp-fs-sm);
+  color: var(--lp-fg);
+}
+
+.lp-together-room {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--lp-line);
+  border-radius: 14px;
+  background: rgb(0 0 0 / 0.28);
+}
+
+.lp-together-people {
+  display: flex;
+}
+
+.lp-together-face {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 35%, #2a2826, #161514);
+  box-shadow: 0 0 0 2px #121110, 0 0 0 3px var(--lp-line-2);
+  color: var(--lp-fg-2);
+  font-family: var(--lp-font-mono);
+  font-size: var(--lp-fs-xs);
+  font-weight: 500;
+}
+
+.lp-together-face + .lp-together-face {
+  margin-left: -8px;
+}
+
+.lp-together-face--new {
+  background: radial-gradient(circle at 50% 35%, #ffd08a, #e39b40);
+  color: #1d1105;
+  box-shadow: 0 0 0 2px #121110, 0 0 14px rgb(242 178 92 / 0.55);
+}
+
+.lp-together-count {
+  font-size: var(--lp-fs-sm);
+  color: var(--lp-fg-2);
+}
+
+.lp-together-count strong {
+  color: var(--lp-fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.lp-together-joined {
+  margin-left: auto;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgb(242 178 92 / 0.12);
+  color: var(--lp-amber-hi);
+  font-family: var(--lp-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+}
+
+.lp-together-line {
+  display: grid;
+  gap: 4px;
+  min-height: 132px;
+  transition: opacity 250ms ease;
+}
+
+.lp-together-line[data-on='false'] {
+  opacity: 0.6;
+}
+
+.lp-together-stage .lp-native {
+  font-size: clamp(1.15rem, 1rem + 0.6vw, 1.45rem);
+}
+
+.lp-together-wait {
+  color: var(--lp-fg-3);
+  font-size: var(--lp-fs-sm);
+}
+
+.lp-together-clock {
+  display: grid;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--lp-line);
+}
+
+.lp-together-bar {
+  position: relative;
+  height: 4px;
+  border-radius: 4px;
+  background: rgb(255 240 220 / 0.07);
+  overflow: hidden;
+}
+
+.lp-together-bar span {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--lp-amber), var(--lp-amber-hi));
+  box-shadow: 0 0 10px rgb(242 178 92 / 0.6);
+  transform-origin: left;
+  transform: scaleX(0.04);
+}
+
+/* Six minutes of show, run once across the sample (the real one is longer than a glance) */
+.lp-together-bar span[data-run='true'] {
+  transform: scaleX(0.32);
+  transition: transform 6s linear;
+}
+
+.lp-together-clock p {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  font-family: var(--lp-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--lp-fg-3);
+}
+
+.lp-together-clock p span:last-child {
+  color: var(--lp-fg-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-together-bar span[data-run='true'] {
+    transition: none;
+  }
+
+  .lp-hero-live-arrow {
+    transition: none;
+  }
+}

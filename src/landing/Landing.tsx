@@ -13,6 +13,7 @@ import DialBand from './DialBand';
 import Evening from './Evening';
 import Hero from './Hero';
 import { GitHubIcon, WaveMark } from './icons';
+import ListenTogether from './ListenTogether';
 import SignOff from './SignOff';
 import StationStack from './StationStack';
 import TalkBack from './TalkBack';
@@ -34,7 +35,7 @@ const STATION_BAND = STATIONS.map((s) => `${s.nativeName.replace(/^\S+\s/, '')} 
 
 /**
  * One evening on the radio: the radio, tonight's show, the five stations and their voices, talking back,
- * what runs it, and the sign-off.
+ * listening together, what runs it, and the sign-off.
  */
 export default function Landing({ onTuneIn, engine }: LandingProps) {
   const player = useVoicePlayer(engine);
@@ -92,6 +93,7 @@ export default function Landing({ onTuneIn, engine }: LandingProps) {
             <StationStack player={player} onTuneIn={tune} />
             <VoiceTuner player={player} />
             <TalkBack player={player} />
+            <ListenTogether />
             <BuiltOnSarvam />
             <TextReveal className="lp-manifesto" text={MANIFESTO} accent={MANIFESTO_ACCENT} run={1.2}>
               <span className="lp-manifesto-lamp" aria-hidden="true" />
