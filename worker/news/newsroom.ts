@@ -52,7 +52,8 @@ const background = (req: BulletinRequest, p: Promise<unknown>) => {
 
 /**
  * The slate for one bulletin, as sources for the newsreader (id = story id: echo it back in airedNews). Empty when
- * the station has no newsroom pool yet; the caller then falls back to live headlines. Never throws.
+ * the station has no newsroom pool yet; the caller then falls back to live headlines. Never throws. Nothing is
+ * marked aired here: the caller calls markNewsAired with the segment's newsIds once the bulletin was written.
  */
 export async function newsroomHeadlines(env: Env, req: BulletinRequest): Promise<Source[]> {
   const pool = newsStationOf(req.station.id);
@@ -120,20 +121,45 @@ async function slateFor(env: Env, pool: NewsStation, req: BulletinRequest): Prom
   const slate = pickBulletin(stories, { station: pool, mode: req.mode ?? 'full', city, state, sessionAired: new Set(req.airedNews ?? []), now, rotation, kicker });
   if (!slate.length) return [];
 
-  // The station remembers what it aired (and that someone listened); a low pool gets one top-up per hour
-  const scopes = [stationScope, stateScope, cityScope].filter((s): s is string => Boolean(s));
-  background(
-    req,
-    markAired(db, pool, slate.map((s) => s.story), crypto.randomUUID(), now, scopes).then(async () => {
-      const counts = await unairedCounts(db, pool, now, { state, city });
-      const decision = topupDecision(counts, stationRow?.last_topup_at, now, Boolean(state));
-      if (decision.run && (await claimRefresh(db, stationScope, now, staleClaim))) {
-        console.log(`[news] ${pool} top-up: ${decision.why}`);
-        await startRefresh(env, { station: pool, kind: 'topup' }, now);
-      }
-    }),
-  );
   return slateSources(slate);
+}
+
+/**
+ * Marks the stories a written bulletin read (the segment's newsIds) as aired for the station, counts the serve on
+ * the station, state and city pools, and starts one top-up per hour when the pool runs low. Never throws.
+ */
+export async function markNewsAired(env: Env, req: BulletinRequest, ids: string[] | undefined): Promise<void> {
+  const pool = newsStationOf(req.station.id);
+  if (!pool || !env.NEWS_DB || !ids?.length) return;
+  const db = env.NEWS_DB;
+  const now = req.now ?? Date.now();
+  try {
+    const state = stateCodeOf(req.regionCode, req.regionName) ?? HOME_STATE[pool];
+    const city = cityKeyOf(req.city);
+    const stationScope = `station:${pool}`;
+    const stateScope = state && state !== HOME_STATE[pool] ? `state:${pool}:${state}` : undefined;
+    const cityScope = city ? `city:${pool}:${city}` : undefined;
+    const unique = [...new Set(ids)].slice(0, 20);
+    const { results } = await db
+      .prepare(`SELECT DISTINCT cluster_id, topic_id FROM news_item WHERE pool = ? AND cluster_id IN (${unique.map(() => '?').join(',')})`)
+      .bind(pool, ...unique)
+      .all<{ cluster_id: string; topic_id: string }>();
+    const seen = new Set<string>();
+    const stories = results.filter((r) => !seen.has(r.cluster_id) && seen.add(r.cluster_id)).map((r) => ({ clusterId: r.cluster_id, topicId: r.topic_id }));
+    if (!stories.length) return;
+    const scopes = [stationScope, stateScope, cityScope].filter((s): s is string => Boolean(s));
+    await markAired(db, pool, stories, crypto.randomUUID(), now, scopes);
+    const stationRow = (await refreshRows(db, [stationScope])).get(stationScope);
+    const counts = await unairedCounts(db, pool, now, { state, city });
+    const decision = topupDecision(counts, stationRow?.last_topup_at, now, Boolean(state));
+    const staleClaim = now - POLICY.runningTimeoutMs;
+    if (decision.run && !(stationRow?.running_since && stationRow.running_since > staleClaim) && (await claimRefresh(db, stationScope, now, staleClaim))) {
+      console.log(`[news] ${pool} top-up: ${decision.why}`);
+      await startRefresh(env, { station: pool, kind: 'topup' }, now);
+    }
+  } catch (err) {
+    console.error(`[news] marking aired failed: ${String(err)}`);
+  }
 }
 
 /** The cron check: refresh each station (and each listener's local pool) only if it was consumed. */
