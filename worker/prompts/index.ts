@@ -6,13 +6,13 @@ import type { ChatMessage } from '../sarvam';
 import { AD_PLAN_FIELDS, adPrompt, type AdPlan } from './ad';
 import { contextBlock, EN_FIELD, subtitleRule, subtitlesOn, systemPreamble, type LlmPlan, type LlmSegmentType } from './common';
 import { KAHANI_PLAN_FIELDS, kahaniPrompt, storyPlan, type StoryPlan } from './kahani';
-import { NEWS_HEADLINES, NEWS_PLAN_FIELDS, newsPrompt } from './news';
+import { NEWS_HEADLINES, NEWS_PLAN_FIELDS, newsMessages } from './news';
 import { RJ_PLAN_FIELDS, rjLinkPrompt } from './rj';
 
 export type { LlmPlan, LlmSegmentType } from './common';
 export { contextBlock, maxTokensFor, onAirName, rjName, rjOnAir, spokenTime, subtitlesOn, systemPreamble } from './common';
 export { callerPlaceholder, studioCallsBlock } from './rj';
-export { NEWS_HEADLINES } from './news';
+export { NEWS_HEADLINES, newsFrameText } from './news';
 export type { AdPlan } from './ad';
 export { storyPlan } from './kahani';
 export type { StoryPlan } from './kahani';
@@ -28,12 +28,13 @@ export const SEGMENT_ROLES: Record<LlmSegmentType, Role[]> = {
 export const SEGMENT_PLAN: Record<LlmSegmentType, LlmPlan> = {
   rj_link: { temperature: 0.7, maxTokens: 1400, reasoningEffort: null, timeoutMs: 10_000 },
   news: { temperature: 0.3, maxTokens: 1800, reasoningEffort: null, timeoutMs: 10_000 },
-  ad_break: { temperature: 0.85, maxTokens: 1600, reasoningEffort: null, timeoutMs: 10_000 },
-  kahani: { temperature: 0.85, maxTokens: 3000, reasoningEffort: null, timeoutMs: 15_000 },
+  ad_break: { temperature: 0.9, maxTokens: 1400, reasoningEffort: null, timeoutMs: 13_000 },
+  // A serial part (prefetched as soon as the previous part is accepted); the outline and the one-shot story have their own plans in ../fiction
+  kahani: { temperature: 0.8, maxTokens: 3200, reasoningEffort: null, timeoutMs: 25_000 },
 };
 
 /** Most lines the model may write per type (lines can still be split later). */
-export const MAX_LINES: Record<LlmSegmentType, number> = { rj_link: 5, news: NEWS_HEADLINES * 2 + 2, ad_break: 7, kahani: 14 };
+export const MAX_LINES: Record<LlmSegmentType, number> = { rj_link: 5, news: NEWS_HEADLINES * 2 + 2, ad_break: 5, kahani: 16 };
 
 /**
  * The pack's "plan" object, flattened: sarvam-105b loops on whitespace until max_tokens when the response
@@ -91,15 +92,14 @@ export function segmentMessages(
   headlines: Source[] = [],
   plans: SegmentPlans = {},
 ): ChatMessage[] {
+  // The newsreader has its own system prompt and sees only its slate (no show log, local pack or listener)
+  if (type === 'news') return newsMessages(station, req, headlines, subtitlesOn(station, req.subtitles));
   const plan = type === 'kahani' ? (plans.story ?? storyPlan(station, req.listener.daypart)) : undefined;
   const system = systemPreamble(station, SEGMENT_ROLES[type], req.listener, plan?.cast);
   let task: string;
   switch (type) {
     case 'rj_link':
       task = rjLinkPrompt(station, req);
-      break;
-    case 'news':
-      task = newsPrompt(station, req, headlines);
       break;
     case 'ad_break':
       task = adPrompt(station, req, plans.ad);

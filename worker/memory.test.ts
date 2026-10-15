@@ -4,7 +4,9 @@ import { STATION_BY_ID } from '../shared/stations';
 import type { Station } from '../shared/types';
 import { clearMemoryCache, kvShowMemory, normalizeTitle, STORY_MEMORY, type MemoryStore, type StoryRecord } from './memory';
 import type { Sarvam } from './sarvam';
-import { buildSegment, planSegment } from './segment';
+import { planAd, planStory } from './fiction';
+import { AD_PARODIES, AD_PROBLEMS } from './pools/ads';
+import { buildSegment } from './segment';
 import { STORY_HOOKS, STORY_SETTINGS, STORY_TWISTS } from './story';
 import { Timings } from './timing';
 
@@ -78,11 +80,11 @@ describe('story plans from the memory', () => {
     await kv.store.put('show:hi:stories', JSON.stringify(used));
     const memory = kvShowMemory(kv.store)!;
     for (let i = 0; i < 25; i++) {
-      const { story } = await planSegment(hindi, 'kahani', req('kahani'), memory);
-      expect(used.map((r) => r.hook)).not.toContain(story!.brief.hook);
-      expect(used.map((r) => r.twist)).not.toContain(story!.brief.twist);
-      expect(story!.aired!.length).toBe(8);
-      expect(story!.airedTitles!.has(normalizeTitle('कहानी 3'))).toBe(true);
+      const story = await planStory(hindi, req('kahani'), memory);
+      expect(used.map((r) => r.hook)).not.toContain(story.brief.hook);
+      expect(used.map((r) => r.twist)).not.toContain(story.brief.twist);
+      expect(story.aired!.length).toBe(8);
+      expect(story.airedTitles!.has(normalizeTitle('कहानी 3'))).toBe(true);
     }
   });
 
@@ -138,19 +140,22 @@ describe('story plans from the memory', () => {
     expect(kv.data.size).toBe(0);
   });
 
-  it('gives ads a category and format not used lately', async () => {
+  it('gives ads a format and a problem not used lately', async () => {
     const kv = fakeKv();
-    const recent = [
-      { at: '', title: 'A', category: 'a kitchen gadget', format: 'infomercial' },
-      { at: '', title: 'B', category: 'a monsoon accessory', format: 'jingle' },
-      { at: '', title: 'C', category: 'a pet product', format: 'trailer' },
-    ];
+    // Year-round formats and problems, so the test holds in any month
+    const formats = ['teleshopping', 'lab_coat_expert', 'mf_disclaimer'];
+    const problems = ['guests_stay', 'remote_lost', 'family_forwards'];
+    for (const id of formats) expect(AD_PARODIES.some((c) => c.id === id && !c.months)).toBe(true);
+    for (const id of problems) expect(AD_PROBLEMS.some((p) => p.id === id && !p.months && !p.festival)).toBe(true);
+    const recent = formats.map((format, i) => ({ at: '', title: `Ad ${i}`, category: problems[i], format }));
     await kv.store.put('show:hi:ads', JSON.stringify(recent));
     const memory = kvShowMemory(kv.store)!;
     for (let i = 0; i < 20; i++) {
-      const { ad } = await planSegment(hindi, 'ad_break', req('ad_break'), memory);
-      expect(recent.map((r) => r.category)).not.toContain(ad!.category);
-      expect(recent.map((r) => r.format)).not.toContain(ad!.format.id);
+      const ad = await planAd(hindi, req('ad_break'), memory);
+      expect(formats).not.toContain(ad.card.id);
+      expect(problems).not.toContain(ad.problem.id);
+      expect(ad.problem.cards).toContain(ad.card.id);
+      expect(ad.airedTitles!.has(normalizeTitle('Ad 1'))).toBe(true);
     }
   });
 });

@@ -4,15 +4,16 @@ import { PAUSE_AFTER_MS } from '../shared/constants';
 import { LlmSegmentSchema, type Dedication, type SegmentRequest } from '../shared/schemas';
 import type { Delivery, Line, Mood, Role, Segment, SegmentType, Source, Station, TtsLanguage, Voice } from '../shared/types';
 import { randomFiller, SOMEONE_EN, someoneFor, studioCallLine, studioCallLineEn } from './fallbacks';
-import { callerPlaceholder, MAX_LINES, NEWS_HEADLINES, rjOnAir, maxTokensFor, storyPlan, subtitlesOn, type AdPlan, type SegmentPlans, type StoryPlan, SEGMENT_PLAN, SEGMENT_ROLES, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
+import { callerPlaceholder, MAX_LINES, NEWS_HEADLINES, newsFrameText, rjOnAir, maxTokensFor, subtitlesOn, type SegmentPlans, type StoryPlan, SEGMENT_PLAN, SEGMENT_ROLES, segmentJsonSchema, segmentMessages, type LlmSegmentType } from './prompts';
 import type { Sarvam } from './sarvam';
 import { gapAfter, isDelivery, timePhrase, voiceFor } from './show';
 import { normalizeTitle, type ShowMemory } from './memory';
-import { adBrief } from './story';
+import { buildFiction } from './fiction';
 import { modelSubtitle } from './subtitle';
 import { cleanText, processLines, type RawLine } from './text';
 import type { Timings } from './timing';
-import { copiesExample, dropInventedNumbers, validateScript } from './validate';
+import { copiesExample, validateScript } from './validate';
+import { newsFidelity } from './checks/news';
 
 /** Total budget for one segment request, including the retry. */
 const SEGMENT_BUDGET_MS = 19_000;
@@ -158,61 +159,12 @@ export function limitNameTokens(texts: string[], allowed: number): string[] {
   });
 }
 
-/** How many recent stories' ingredients (place, hook, twist) a new brief avoids. */
-const AVOID_STORIES = 24;
-/** How many recent ads' categories, and formats, a new ad avoids. */
-const AVOID_AD_CATEGORIES = 14;
-const AVOID_AD_FORMATS = 3;
-
-/** Plans the story or ad from the show memory; everything else needs no plan. */
-export async function planSegment(station: Station, type: SegmentType, req: SegmentRequest, memory?: ShowMemory): Promise<SegmentPlans> {
-  if (type === 'kahani') {
-    const records = memory ? await memory.recentStories(station.id).catch(() => []) : [];
-    const recent = records.slice(-AVOID_STORIES);
-    const plan = storyPlan(station, req.listener.daypart, {
-      settings: recent.map((r) => r.setting),
-      hooks: recent.map((r) => r.hook),
-      twists: recent.map((r) => r.twist),
-      openings: records.slice(-3).map((r) => r.opening),
-    });
-    plan.aired = records.slice(-10).map((r) => `${r.title}${r.summary ? `: ${r.summary}` : ''}`);
-    plan.airedTitles = new Set(records.map((r) => normalizeTitle(r.title)));
-    return { story: plan };
-  }
-  if (type === 'ad_break') {
-    const records = memory ? await memory.recentAds(station.id).catch(() => []) : [];
-    const brief = adBrief(Math.random, {
-      categories: records.slice(-AVOID_AD_CATEGORIES).map((r) => r.category),
-      formats: records.slice(-AVOID_AD_FORMATS).map((r) => r.format),
-    });
-    const ad: AdPlan = {
-      ...brief,
-      aired: records.slice(-8).map((r) => `${r.title}${r.summary ? `: ${r.summary}` : ''}`),
-      airedTitles: new Set(records.map((r) => normalizeTitle(r.title))),
-    };
-    return { ad };
-  }
+/**
+ * Plans for the segment being written. The Kahani and the ad break are planned, written and remembered in
+ * ./fiction (buildSegment hands them over before this runs); the RJ link and the news need no plan.
+ */
+export async function planSegment(_station: Station, _type: SegmentType, _req: SegmentRequest, _memory?: ShowMemory): Promise<SegmentPlans> {
   return {};
-}
-
-/** Records a finished story or ad in the show memory (template fallbacks are not remembered). */
-function remember(memory: ShowMemory | undefined, station: Station, type: SegmentType, segment: Segment, plans: SegmentPlans): void {
-  if (!memory || segment.fallback) return;
-  const at = new Date().toISOString();
-  if (type === 'kahani' && plans.story) {
-    const { brief } = plans.story;
-    memory.rememberStory(station.id, {
-      at,
-      title: segment.title,
-      summary: segment.summary,
-      setting: brief.setting,
-      hook: brief.hook,
-      twist: brief.twist,
-      opening: brief.opening.id,
-    });
-  } else if (type === 'ad_break' && plans.ad) {
-    memory.rememberAd(station.id, { at, title: segment.title, summary: segment.summary, category: plans.ad.category, format: plans.ad.format.id });
-  }
 }
 
 /** Keeps the opening lines and the closing line (tease, tagline or sign-off) when the model overruns. */
@@ -298,7 +250,9 @@ async function writeScript(
   const roles = SEGMENT_ROLES[type];
   const subtitles = subtitlesOn(station, req.subtitles);
   const schema = segmentJsonSchema(type, subtitles);
-  const headlinesText = headlines.map((h) => h.title).join(' ');
+  // News may draw on each item's title, detail and publisher, and nothing else
+  const headlinesText = headlines.map((h) => [h.title, h.detail, h.source].filter(Boolean).join(' ')).join(' ');
+  const newsFrame = type === 'news' ? newsFrameText(station, req) : '';
   const time = timePhrase(station, req.listener);
   const greet = type === 'rj_link' && Boolean(req.producer?.greetListener || req.producer?.firstLink || !req.showLog?.some((e) => e.type === 'rj_link'));
   const calls = type === 'rj_link' ? (req.dedications ?? []) : [];
@@ -319,7 +273,10 @@ async function writeScript(
           timeoutMs: Math.min(plan.timeoutMs + attempt * 3000, remaining),
         }),
       );
-      const problems = validateScript(station, type, raw.lines, { greet, listenerName: req.listener.name, headlinesText, timePhrase: time });
+      const problems = validateScript(station, type, raw.lines, { greet, listenerName: req.listener.name, headlinesText, timePhrase: type === 'news' ? newsFrame : time });
+      // A bulletin that would lose 3+ lines to the fidelity check is rewritten once
+      const fidelity = type === 'news' ? newsFidelity(raw.lines, headlinesText, newsFrame) : undefined;
+      if (fidelity && fidelity.dropped.length >= 3) problems.push(`news fidelity: ${fidelity.dropped.map((d) => d.reason).join(', ')}`);
       // The name belongs only in an RJ greeting, once.
       const namesAllowed = type === 'rj_link' && greet && req.listener.name ? 1 : 0;
       const names = countNameTokens(raw.lines.map((l) => l.text));
@@ -334,7 +291,11 @@ async function writeScript(
       if (problems.length && attempt === 0) throw new Error(`validation: ${problems.slice(0, 3).join(' | ')}`);
       // After the retry, drop any line that still copies a prompt example (the Kahani may echo its own scene line).
       let scriptLines = type === 'kahani' ? raw.lines : raw.lines.filter((l) => !copiesExample(l.text));
-      if (type === 'news') scriptLines = dropOrphanKicker(dropInventedNumbers(scriptLines, headlinesText, `${time} ${station.frequency}`));
+      if (type === 'news') {
+        const checked = newsFidelity(scriptLines, headlinesText, newsFrame);
+        for (const d of checked.dropped) console.warn(`[segment] ${station.id}/news dropped a line (${d.reason}): ${d.text.slice(0, 80)}`);
+        scriptLines = dropOrphanKicker(checked.lines);
+      }
       const limited = limitNameTokens(scriptLines.map((l) => l.text), namesAllowed);
       // The subtitle follows the same name rule, and gets the name as the listener typed it
       const limitedEn = subtitles ? limitNameTokens(scriptLines.map((l) => l.en ?? ''), namesAllowed) : [];
@@ -382,13 +343,15 @@ export async function buildSegment(
     };
   }
 
+  // The Kahani (serial part or one complete story) and the ad break are written in ./fiction
+  if (type === 'kahani' || type === 'ad_break') return buildFiction(sarvam, station, req, timings, { memory: opts.memory });
+
   let headlines: Source[] = [];
   if (type === 'news') {
-    headlines = (req.headlines ?? []).slice(0, NEWS_HEADLINES);
-    if (!headlines.length && opts.fetchHeadlines) {
-      headlines = await timings.measure('news', () => opts.fetchHeadlines!().catch(() => [] as Source[]));
-      headlines = headlines.slice(0, NEWS_HEADLINES);
-    }
+    // The newsroom's fresh slate first; the client's tune-in headlines only when the server has none
+    if (opts.fetchHeadlines) headlines = await timings.measure('news', () => opts.fetchHeadlines!().catch(() => [] as Source[]));
+    if (!headlines.length) headlines = req.headlines ?? [];
+    headlines = headlines.slice(0, NEWS_HEADLINES);
     if (!headlines.length) return fallbackSegment(station, type, subtitles);
   }
 
@@ -426,7 +389,10 @@ export async function buildSegment(
   if (script.summary) segment.summary = script.summary.slice(0, 200);
   if (script.mood) segment.mood = script.mood;
   if (script.dedicated?.length) segment.dedicated = script.dedicated;
-  remember(opts.memory, station, type, segment, plans);
-  if (type === 'news') segment.sources = headlines;
+  if (type === 'news') {
+    segment.sources = headlines;
+    const ids = headlines.map((h) => h.id).filter((id): id is string => Boolean(id));
+    if (ids.length) segment.newsIds = ids;
+  }
   return segment;
 }

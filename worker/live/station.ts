@@ -26,6 +26,7 @@ import type { Dedication, SegmentRequest } from '../../shared/schemas';
 import { rjVoiceAt, STATION_BY_ID } from '../../shared/stations';
 import type { Line, ListenerContext, Mood, PhoneCall, Segment, SegmentType, Station, StationId } from '../../shared/types';
 import { getHeadlines, getWeather, localNewsCity } from '../context';
+import { newsroomHeadlines } from '../news/newsroom';
 import { createSarvam, type Sarvam } from '../sarvam';
 import { buildSegment, nativeListenerName, toLine } from '../segment';
 import { capStream, maxPcmBytes } from '../show';
@@ -660,7 +661,12 @@ export class LiveStation extends DurableObject<Env> {
     for (let attempt = 0; attempt < 2 && !segment; attempt++) {
       try {
         segment = await buildSegment(sarvam, station, req, new Timings(), {
-          fetchHeadlines: () => getHeadlines(station, origin, undefined, localNewsCity(city, country)),
+          // The newsroom's slate (the station never airs a story twice); live headlines while its pool fills
+          fetchHeadlines: async () => {
+            const local = localNewsCity(city, country);
+            const slate = await newsroomHeadlines(this.env, { station, mode: req.mode === 'update' ? 'update' : 'full', city: local, regionName: local ? req.listener.region : undefined, waitUntil: (p) => this.ctx.waitUntil(p) });
+            return slate.length ? slate : getHeadlines(station, origin, undefined, local);
+          },
         });
       } catch (err) {
         console.error(`[live] ${station.id} ${type} failed (attempt ${attempt + 1}): ${String(err)}`);

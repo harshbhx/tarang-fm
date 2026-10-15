@@ -22,6 +22,13 @@
     { "tag": "studio-line-v1", "new_sqlite_classes": ["StudioLine"] },
     { "tag": "live-station-v1", "new_sqlite_classes": ["LiveStation"] }
   ],
+  // Newsroom: the story pool (D1), near-duplicate search (Vectorize, bge-m3 1024-d cosine), tagging and embeddings
+  // (Workers AI), the durable refresh (Workflow), and a 3-hourly check that refreshes a station only if its pool aired.
+  "d1_databases": [{ "binding": "NEWS_DB", "database_name": "tarang-news", "database_id": "37effed5-3eb6-41af-ba54-62e179b1f135", "migrations_dir": "migrations" }],
+  "vectorize": [{ "binding": "NEWS_INDEX", "index_name": "tarang-news-dedupe" }],
+  "ai": { "binding": "AI" },
+  "workflows": [{ "name": "tarang-news-refresh", "binding": "NEWS_REFRESH", "class_name": "NewsRefresh" }],
+  "triggers": { "crons": ["0 */3 * * *"] },
   "ratelimits": [
     { "name": "RL_SEGMENT", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
     { "name": "RL_TTS", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },

@@ -1,10 +1,12 @@
 /**
- * Story engine: every Kahani, ad and RJ link is built from a fresh brief drawn from large pools, so no two
- * segments share a premise. A Kahani brief combines genre × setting × hook × telling × twist × ending
- * (about 3 million combinations) and comes with region-appropriate character names, so the model starts from
- * something specific instead of reaching for the same haunted mansion every night.
+ * Story engine: every Kahani and RJ link is built from a fresh brief drawn from large pools, so no two
+ * segments share a premise. A Kahani brief seeds the serial outline with a setting, a hook and a twist type
+ * (the daypart genre is seasoning) and comes with region-appropriate character names, so the writer starts
+ * from something specific instead of reaching for the same haunted mansion every night. Each language's
+ * storytelling words (part names, recap openers, fillers, examples) live here too. Ads are in pools/ads.ts,
+ * casting in casting.ts.
  */
-import type { Daypart, Station, StationId, StoryPool, Voice } from '../shared/types';
+import type { Daypart, RecapSource, Segment, StationId } from '../shared/types';
 
 type Random = () => number;
 
@@ -341,41 +343,219 @@ export function storyBrief(station: StationId, daypart: Daypart, random: Random 
   };
 }
 
-// ---- Casting ------------------------------------------------------------------------------------------
-
-export type StoryRole = 'narrator' | 'char_a' | 'char_b' | 'char_kid';
-export type StoryCast = Record<StoryRole, Voice>;
+// ---- Spooky stories -----------------------------------------------------------------------------------
 
 const SPOOKY = /ghost|spooky|eerie|night train|urban legend|empty road|strange|mystery|suspense|time-loop|lighthouse|night-shift/i;
 
+/** Ghost stories and night mysteries get a suspense narrator. */
+export function isSpooky(genre: string): boolean {
+  return SPOOKY.test(genre);
+}
+
+// ---- Each language's storytelling words ----------------------------------------------------------------
+
+/** One example line for the writer (style only; every one is registered in the copied-example check). */
+export interface ExampleLine {
+  role: string;
+  delivery: string;
+  text: string;
+  /** What it shows, in English */
+  note: string;
+}
+
+export interface FictionLocale {
+  /** A serial part on air: "कड़ी" */
+  partWord: string;
+  /** How the narrator's recap starts: "पिछली बार" */
+  recap: string;
+  /** Sentence end */
+  punct: string;
+  /** The fine-print phrase in an ad */
+  tnc: string;
+  /** Spoken fillers (bible §3.1): budgeted, never at the start of a line */
+  fillers: string[];
+  /** How the characters talk, one line for the writer */
+  dialogue: string;
+  /** Kahani examples: sets of a cold open and a sound said in words (one set is shown per call) */
+  storyExamples: ExampleLine[][];
+  /** Ad examples by the format they show (an ad never sees the example of its own format) */
+  adExamples: { format: string; lines: ExampleLine[] }[];
+}
+
+export const FICTION_LOCALE: Partial<Record<StationId, FictionLocale>> = {
+  hi: {
+    partWord: 'कड़ी',
+    recap: 'पिछली बार',
+    punct: '।',
+    tnc: 'शर्तें लागू',
+    fillers: ['अरे', 'यार', 'वैसे', 'सच में', 'बिल्कुल', 'मतलब', 'हाँ जी', 'उफ़्फ़'],
+    dialogue: 'Everyday spoken Hindi, the way families and friends really talk; an English word only where people really say it (phone, tiffin, race, office).',
+    storyExamples: [
+      [
+        { role: 'char_b', delivery: 'shout', text: 'इशान, तूने फिर मेरी साइकिल की घंटी बेच दी? कल सुबह 6 बजे race है!', note: 'cold open, a name in line 1, a want with a clock' },
+        { role: 'narrator', delivery: 'dramatic', text: 'बाहर कुकर की तीसरी सीटी बजी, और उसी पल पूरी गली की बत्ती चली गई।', note: 'a sound said in words' },
+      ],
+      [
+        { role: 'char_a', delivery: 'fast', text: 'ज़ोया, तूने मेरा टिफ़िन फिर बदल दिया? आज उसमें गिनकर बारह लड्डू थे!', note: 'cold open, a name in line 1, one concrete number' },
+        { role: 'narrator', delivery: 'hushed', text: 'ऊपर वाले flat में किसी ने तीन बार दरवाज़ा खटखटाया, और फिर सन्नाटा।', note: 'a sound said in words' },
+      ],
+    ],
+    adExamples: [
+      {
+        format: 'coaching_topper',
+        lines: [
+          { role: 'ad_customer', delivery: 'excited', text: "पूरे मोहल्ले में Rank 1, और इसका पूरा श्रेय 'रटंतु Classes' को!", note: 'the format is obvious in line 1' },
+          { role: 'ad_announcer', delivery: 'fast', text: 'रटंतु Classes। इस Rank 1 का दावा 4 और institutes भी करते हैं, topper एक ही है।', note: 'the fine print is the punchline' },
+        ],
+      },
+      {
+        format: 'real_estate',
+        lines: [
+          { role: 'ad_announcer', delivery: 'excited', text: 'सपनों का घर, शहर के बीचों-बीच, airport से सिर्फ़ 10 मिनट!', note: 'the grand claim with one number' },
+          { role: 'ad_announcer', delivery: 'fast', text: '10 मिनट, अगर आप ख़ुद उड़ सकें। पंख शामिल नहीं।', note: 'the asterisk is the joke' },
+        ],
+      },
+    ],
+  },
+  mr: {
+    partWord: 'भाग',
+    recap: 'मागच्या भागात',
+    punct: '.',
+    tnc: 'अटी लागू',
+    fillers: ['अरे', 'बरं', 'म्हणजे', 'खरंच'],
+    dialogue: 'Everyday spoken Marathi (बोलीभाषा) with Marathi grammar and Marathi words only: never Hindi words such as है, नहीं, क्या, बहुत (say आहे, नाही, काय, खूप). Sentences end with ".".',
+    storyExamples: [
+      [
+        { role: 'char_b', delivery: 'shout', text: 'सई, तू पुन्हा माझ्या सायकलची घंटी विकलीस? उद्या सकाळी 6 वाजता race आहे!', note: 'cold open, a name in line 1, a want with a clock' },
+        { role: 'narrator', delivery: 'dramatic', text: 'बाहेर कुकरची तिसरी शिट्टी वाजली, आणि त्याच क्षणी अख्ख्या गल्लीतले दिवे गेले.', note: 'a sound said in words' },
+      ],
+    ],
+    adExamples: [
+      {
+        format: 'coaching_topper',
+        lines: [
+          { role: 'ad_customer', delivery: 'excited', text: "अख्ख्या सोसायटीत Rank 1, आणि याचं सगळं श्रेय 'घोकंपट्टी Classes' ला!", note: 'the format is obvious in line 1' },
+          { role: 'ad_announcer', delivery: 'fast', text: 'घोकंपट्टी Classes. या Rank 1 चा दावा आणखी 4 institutes करतात, topper एकच आहे.', note: 'the fine print is the punchline' },
+        ],
+      },
+      {
+        format: 'real_estate',
+        lines: [
+          { role: 'ad_announcer', delivery: 'excited', text: 'स्वप्नातलं घर, शहराच्या मधोमध, airport पासून फक्त 10 मिनिटं!', note: 'the grand claim with one number' },
+          { role: 'ad_announcer', delivery: 'fast', text: '10 मिनिटं, जर तुम्ही स्वतः उडू शकलात तर. पंख समाविष्ट नाहीत.', note: 'the asterisk is the joke' },
+        ],
+      },
+    ],
+  },
+  ta: {
+    partWord: 'பகுதி',
+    recap: 'போன பகுதியில்',
+    punct: '.',
+    tnc: 'T&C apply',
+    fillers: ['அட', 'சரி', 'ஆமா', 'அப்புறம்'],
+    dialogue: 'Colloquial Chennai Tamil (பேச்சுத் தமிழ், never formal written Tamil) with natural English words in Latin script. Every voice is male: every character is a man or a boy (masculine verb forms). Sentences end with ".".',
+    storyExamples: [
+      [
+        { role: 'char_kid', delivery: 'shout', text: 'கார்த்திக் அண்ணா, நீ மறுபடியும் என் சைக்கிள் மணியை வித்துட்டியா? நாளைக்கு காலைல 6 மணிக்கு race!', note: 'cold open, a name in line 1, a want with a clock' },
+        { role: 'narrator', delivery: 'dramatic', text: 'வெளியே குக்கர் மூணாவது விசில் அடிச்சுது, அதே நொடியில தெரு முழுக்க கரண்ட் போச்சு.', note: 'a sound said in words' },
+      ],
+    ],
+    adExamples: [
+      {
+        format: 'coaching_topper',
+        lines: [
+          { role: 'ad_customer', delivery: 'excited', text: "தெரு முழுக்க Rank 1, எல்லா credit-உம் 'மனப்பாடம் Classes'-க்கு தான்!", note: 'the format is obvious in line 1' },
+          { role: 'ad_announcer', delivery: 'fast', text: 'மனப்பாடம் Classes. இந்த Rank 1-ஐ இன்னும் 4 institutes claim பண்றாங்க, topper ஒரே ஆள் தான்.', note: 'the fine print is the punchline' },
+        ],
+      },
+      {
+        format: 'real_estate',
+        lines: [
+          { role: 'ad_announcer', delivery: 'excited', text: 'கனவு வீடு, நகரத்தோட நடுவுல, airport-ல இருந்து வெறும் 10 நிமிஷம்!', note: 'the grand claim with one number' },
+          { role: 'ad_announcer', delivery: 'fast', text: '10 நிமிஷம், நீங்களே பறக்க முடிஞ்சா. இறக்கை தனியா வாங்கணும்.', note: 'the asterisk is the joke' },
+        ],
+      },
+    ],
+  },
+  bn: {
+    partWord: 'পর্ব',
+    recap: 'গত পর্বে',
+    punct: '।',
+    tnc: 'শর্তাবলী প্রযোজ্য',
+    fillers: ['আরে', 'আসলে', 'মানে', 'সত্যি'],
+    dialogue: 'Natural spoken Bangla (চলিত ভাষা, never সাধু), witty, the way a Kolkata family argues; English words only where people really say them. Sentences end with "।".',
+    storyExamples: [
+      [
+        { role: 'char_b', delivery: 'shout', text: 'ঋষি, তুই আবার আমার সাইকেলের ঘণ্টি বেচে দিলি? কাল সকাল 6টায় race!', note: 'cold open, a name in line 1, a want with a clock' },
+        { role: 'narrator', delivery: 'dramatic', text: 'বাইরে প্রেশার কুকারের তিন নম্বর সিটি বাজল, আর ঠিক তখনই গোটা গলির আলো নিভে গেল।', note: 'a sound said in words' },
+      ],
+    ],
+    adExamples: [
+      {
+        format: 'coaching_topper',
+        lines: [
+          { role: 'ad_customer', delivery: 'excited', text: "গোটা পাড়ায় Rank 1, আর পুরো কৃতিত্ব 'মুখস্থ Classes'-এর!", note: 'the format is obvious in line 1' },
+          { role: 'ad_announcer', delivery: 'fast', text: 'মুখস্থ Classes। এই Rank 1-এর দাবি আরও 4টে institute করে, topper একজনই।', note: 'the fine print is the punchline' },
+        ],
+      },
+      {
+        format: 'real_estate',
+        lines: [
+          { role: 'ad_announcer', delivery: 'excited', text: 'স্বপ্নের বাড়ি, শহরের একদম মাঝখানে, airport থেকে মাত্র 10 মিনিট!', note: 'the grand claim with one number' },
+          { role: 'ad_announcer', delivery: 'fast', text: '10 মিনিট, যদি আপনি নিজে উড়তে পারেন। ডানা আলাদা কিনতে হবে।', note: 'the asterisk is the joke' },
+        ],
+      },
+    ],
+  },
+  gu: {
+    partWord: 'ભાગ',
+    recap: 'ગયા ભાગમાં',
+    punct: '.',
+    tnc: 'શરતો લાગુ',
+    fillers: ['અરે', 'હા', 'એટલે', 'ખરેખર'],
+    dialogue: 'Warm everyday spoken Gujarati with Gujarati grammar and Gujarati words only: never Hindi words such as है, नहीं, क्या, बहुत (say છે, નથી, શું, બહુ). Sentences end with ".".',
+    storyExamples: [
+      [
+        { role: 'char_b', delivery: 'shout', text: 'ધ્રુવ, તેં ફરી મારી સાઇકલની ઘંટડી વેચી દીધી? કાલે સવારે 6 વાગ્યે race છે!', note: 'cold open, a name in line 1, a want with a clock' },
+        { role: 'narrator', delivery: 'dramatic', text: 'બહાર કૂકરની ત્રીજી સીટી વાગી, અને એ જ પળે આખી શેરીની લાઇટ જતી રહી.', note: 'a sound said in words' },
+      ],
+    ],
+    adExamples: [
+      {
+        format: 'coaching_topper',
+        lines: [
+          { role: 'ad_customer', delivery: 'excited', text: "આખી સોસાયટીમાં Rank 1, અને એનો બધો શ્રેય 'ગોખણપટ્ટી Classes' ને!", note: 'the format is obvious in line 1' },
+          { role: 'ad_announcer', delivery: 'fast', text: 'ગોખણપટ્ટી Classes. આ Rank 1 નો દાવો બીજા 4 institutes પણ કરે છે, topper એક જ છે.', note: 'the fine print is the punchline' },
+        ],
+      },
+      {
+        format: 'real_estate',
+        lines: [
+          { role: 'ad_announcer', delivery: 'excited', text: 'સપનાનું ઘર, શહેરની વચ્ચોવચ, airport થી ફક્ત 10 મિનિટ!', note: 'the grand claim with one number' },
+          { role: 'ad_announcer', delivery: 'fast', text: '10 મિનિટ, જો તમે જાતે ઊડી શકો તો. પાંખો સામેલ નથી.', note: 'the asterisk is the joke' },
+        ],
+      },
+    ],
+  },
+};
+
+export function fictionLocale(station: StationId): FictionLocale {
+  return FICTION_LOCALE[station] ?? FICTION_LOCALE.hi!;
+}
+
+// ---- The recap the next part is written from -----------------------------------------------------------
+
 /**
- * A fresh cast for one story from the station's verified voices: a narrator who suits the genre, two
- * characters of different voices (either may be a woman or a man), and a kid. No voice plays two roles.
+ * What part n+1's recap may draw on, built from what part n actually aired: the heard summary (the producer's
+ * when there is one, else the part's own summary of its lines), the cliffhanger the part ended on, and its
+ * last 3 lines verbatim. The client (and the live station) send this back as `recapSource`.
  */
-export function castStory(station: Station, brief: Pick<StoryBrief, 'genre'>, random: Random = Math.random): StoryCast {
-  const pool: StoryPool | undefined = station.storyPool;
-  const base: StoryCast = { narrator: station.cast.narrator, char_a: station.cast.char_a, char_b: station.cast.char_b, char_kid: station.cast.char_kid };
-  if (!pool) return base;
-  const taken = new Set<string>();
-  const take = (options: Voice[] | undefined, fallback: Voice): Voice => {
-    const free = (options ?? []).filter((v) => !taken.has(v.speaker));
-    const choice = free.length ? pickWith(free, random) : fallback;
-    taken.add(choice.speaker);
-    return choice;
+export function recapSourceFrom(segment: Pick<Segment, 'heardSummary' | 'summary' | 'serial' | 'lines'>): RecapSource {
+  return {
+    heard: (segment.heardSummary ?? segment.summary ?? '').slice(0, 400),
+    cliffhanger: (segment.serial?.outline.aired_cliffhanger_en ?? '').slice(0, 300),
+    lastLines: segment.lines.slice(-3).map((l) => ({ role: l.role, text: l.text.slice(0, 300) })),
   };
-  const spooky = SPOOKY.test(brief.genre);
-  const narrators = spooky && pool.spookyNarrators?.length ? pool.spookyNarrators : pool.narrators;
-  const narrator = take(narrators, base.narrator);
-  // Character A and B: one man and one woman by default, in either order; two men or two women sometimes
-  const men = pool.men;
-  const women = pool.women;
-  const roll = random();
-  const [firstPool, secondPool] =
-    roll < 0.4 ? [men, women] : roll < 0.8 ? [women, men] : roll < 0.9 ? [men, men] : [women, women];
-  const charA = take(firstPool.length ? firstPool : men.length ? men : women, base.char_a);
-  const charB = take(secondPool.length ? secondPool : women.length ? women : men, base.char_b);
-  const kid = take(pool.kids, base.char_kid);
-  return { narrator, char_a: charA, char_b: charB, char_kid: kid };
 }
 
 /** Story openings and endings that make every Kahani sound alike. */
@@ -407,122 +587,6 @@ export const STORY_BANNED: Partial<Record<StationId, RegExp>> = {
   bn: /এক দেশে ছিল|সবটাই স্বপ্ন ছিল|আজকের গল্প|গল্পের আসর/u,
   ta: /ஒரு ஊர்ல ஒரு|அது ஒரு கனவு|இன்றைய கதை|கதை நேரம்/u,
 };
-
-// ---- Ads -----------------------------------------------------------------------------------------
-
-export const AD_CATEGORIES = [
-  'a kitchen gadget',
-  'a monsoon accessory',
-  'a wedding-season service',
-  'an exam-stress remedy',
-  'an auto-rickshaw accessory',
-  'a gadget for joint families',
-  'a phone app for parents who forward too many messages',
-  'a pet product',
-  'a traffic-jam survival kit',
-  'a hair oil with ridiculous claims',
-  'a pressure-cooker accessory',
-  'a crunchy snack',
-  'smart footwear',
-  'a festive house-cleaning service',
-  'a neighbour-gossip blocker',
-  'an alarm clock for heavy sleepers',
-  'a cricket-fan accessory',
-  'a dating app for arranged-marriage aunties',
-  'a mosquito solution',
-  'a power-cut survival product',
-  'a chai-related invention',
-  'an online class gadget',
-  'a remote-control finder',
-  'a hostel-life essential',
-  'a gift for a boss you don\'t like',
-  'a luggage product for overpacked families',
-];
-
-export interface AdFormat {
-  id: string;
-  shape: string;
-}
-
-/** How the ad is played. Each has its own shape, so ad breaks don't all sound like the same infomercial. */
-export const AD_FORMATS: AdFormat[] = [
-  {
-    id: 'infomercial',
-    shape: `1. customer: a relatable comic problem, mid-scene.
-2. announcer crashes in with the brand name. delivery "excited".
-3. announcer: one absurd, specific claim that is easy to picture.
-4. announcer: a price ladder ("not ₹X, not even ₹Y, just ₹Z!") with fresh numbers. delivery "shout".
-5. happy_customer: a slightly-too-emotional testimonial.
-6. announcer: a rhyming 5–9 word tagline. delivery "excited".
-7. announcer: a super-fast "T&C apply" line hiding one more joke. delivery "fast".`,
-  },
-  {
-    id: 'breaking-news',
-    shape: `1. announcer as a breathless newsreader: "Breaking news!" about the everyday problem as if it were a national crisis. delivery "fast".
-2. customer as an eyewitness, interviewed live, describing the problem dramatically.
-3. announcer: the product is revealed as the "solution experts are calling…" plus the brand name.
-4. customer: a reaction that undercuts the drama.
-5. announcer: the tagline, then a one-line "back to the studio" sign-off joke.`,
-  },
-  {
-    id: 'customer-care',
-    shape: `1. customer phones a helpline, already annoyed, explaining the problem.
-2. announcer as the impossibly cheerful helpline agent, who answers every question with the product.
-3. customer tries to object; announcer has an absurd answer ready.
-4. customer gives in and loves it.
-5. announcer: the tagline, then "your call is important to us" turned into a joke. delivery "fast".`,
-  },
-  {
-    id: 'trailer',
-    shape: `1. announcer in a blockbuster-trailer voice: "In a world where…" about a tiny household problem. delivery "dramatic".
-2. customer: one line of over-the-top suffering.
-3. announcer: "One product… will change everything." plus the brand name. delivery "dramatic".
-4. customer: an epic line about using the product.
-5. announcer: the tagline, then "now in a shop near you" as if it were a release date. delivery "shout".`,
-  },
-  {
-    id: 'gossip',
-    shape: `1. customer gossiping over the balcony to a neighbour (announcer plays the neighbour) about someone whose life suddenly got better.
-2. announcer (as the neighbour) demands to know the secret.
-3. customer reveals the product in a whisper. delivery "hushed".
-4. announcer (as the neighbour) is scandalised, then wants one immediately.
-5. announcer as the real announcer: the tagline and a fast "T&C" joke.`,
-  },
-  {
-    id: 'commentary',
-    shape: `1. announcer as a cricket commentator calling an ordinary household task like the last over of a final. delivery "fast".
-2. customer, mid-task, panicking.
-3. announcer: the product comes "in to bat", with the brand name. delivery "shout".
-4. customer: a victory line.
-5. announcer: the tagline, sung-spoken like a stadium chant.`,
-  },
-  {
-    id: 'sad-violin',
-    shape: `1. customer: a heartbreaking, slow confession that turns out to be about a tiny problem. delivery "sad".
-2. announcer, equally serious, reveals the product.
-3. customer: tears of joy, absurdly out of proportion.
-4. announcer: the tagline, then a deadpan one-line disclaimer. delivery "fast".`,
-  },
-  {
-    id: 'jingle',
-    shape: `1. announcer opens with a catchy rhyming jingle line built on the brand name. delivery "excited".
-2. customer: a quick before-and-after, all in one line.
-3. announcer: one absurd, specific claim.
-4. customer repeats the jingle, slightly wrong.
-5. announcer: the jingle once more and a fast "T&C" joke.`,
-  },
-];
-
-/** A category and a format for one ad, skipping those aired recently on the station. */
-export function adBrief(
-  random: Random = Math.random,
-  avoid: { categories?: Iterable<string>; formats?: Iterable<string> } = {},
-): { category: string; format: AdFormat } {
-  return {
-    category: fresh(AD_CATEGORIES, avoid.categories, (c) => c, random),
-    format: fresh(AD_FORMATS, avoid.formats, (f) => f.id, random),
-  };
-}
 
 // ---- RJ links ------------------------------------------------------------------------------------
 

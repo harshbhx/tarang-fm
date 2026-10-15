@@ -1,5 +1,7 @@
 /** Listener context: Cloudflare geolocation plus news headlines. See docs/TECH-SPEC.md §10. */
 import { SourceSchema } from '../shared/schemas';
+import { isGrim } from './news/filters';
+import { FEED_HEADERS } from './news/parse';
 import type { ContextResponse, Source, Station, StationId, Weather } from '../shared/types';
 
 const NEWS_TTL_S = 30 * 60;
@@ -11,13 +13,11 @@ const FEED_TIMEOUT_MS = 3000;
 /** Per-isolate cache; the Cache API is a no-op on workers.dev, so this keeps feeds warm there too. */
 const memory = new Map<string, { at: number; headlines: Source[] }>();
 
-/** Grim stories (murder, sexual violence, suicide, bodies) make poor light radio; skip them in every station language. */
-const GRIM =
-  /murder|rape|suicide|dead body|beheaded|lynch|\bstab(bed|bing|s)?\b|sexual|molest|चाकू|यौन|छेड़छाड़|दुष्कर्म|मौत के घाट|विनयभंग|लैंगिक|भोसक|கத்திக்குத்து|ছুরি|যৌন|છરી|જાતીય|हत्या|हत्याकांड|मर्डर|बलात्कार|रेप|आत्महत्या|लाश|शव|कत्ल|கொலை|தற்கொலை|பாலியல்|பிறப்புறுப்பு|சடலம்|খুন|হত্যা|ধর্ষণ|আত্মহত্যা|মৃতদেহ|खून|હત્યા|ખૂન|બળાત્કાર|આત્મહત્યા|લાશ|મૃતદેહ/i;
-
-export function isGrim(title: string): boolean {
-  return GRIM.test(title);
-}
+/**
+ * Grim stories (murder, sexual violence, suicide, bodies) make poor light radio; skip them in every station language.
+ * The newsroom's word-start-guarded pattern: no more false hits on দেখুন, तलाश, केशव, बदलाशे or रेपो रेट.
+ */
+export { isGrim } from './news/filters';
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 
@@ -88,7 +88,8 @@ interface Feed {
 
 async function fetchFeed(feed: Feed): Promise<Source[]> {
   const res = await fetch(feed.url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; TarangFM/1.0)', Accept: 'application/rss+xml, application/xml, text/xml' },
+    // Accept: */* (Live Hindustan answers application/rss+xml with an empty body)
+    headers: FEED_HEADERS,
     signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`news feed ${res.status}`);

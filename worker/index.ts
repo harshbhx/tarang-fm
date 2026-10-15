@@ -14,6 +14,9 @@ import { createSarvam, SarvamError } from './sarvam';
 import { capStream, maxPcmBytes } from './show';
 import type { LiveStation } from './live/station';
 import { kvShowMemory } from './memory';
+import { STATE_NAMES, stateCodeOf } from './news/catalog';
+import { newsroomHeadlines, scheduledNews, startRefresh } from './news/newsroom';
+import type { NewsRefreshParams } from './news/workflow';
 import { buildSegment } from './segment';
 import { Timings } from './timing';
 
@@ -129,6 +132,23 @@ app.get('/context', async (c) => {
   return c.json(context, 200, { 'Cache-Control': 'private, no-store' });
 });
 
+/** A bulletin's mode from the clock; anything else is a full bulletin. */
+function newsMode(mode: string | undefined): 'full' | 'update' {
+  return mode === 'update' ? 'update' : 'full';
+}
+
+/** The listener's city and state for local news: the client's (from the edge at tune-in), else this request's edge. India only. */
+function newsPlace(request: Request, listener: { city?: string; region?: string }): { city?: string; regionCode?: string; regionName?: string } {
+  const cf = (request as Request & { cf?: IncomingRequestCfProperties }).cf;
+  const country = cf?.country;
+  if (country && country.toUpperCase() !== 'IN') return {};
+  return {
+    city: listener.city || cf?.city || undefined,
+    regionName: listener.region || undefined,
+    regionCode: listener.region ? undefined : (cf?.regionCode as string | undefined) || undefined,
+  };
+}
+
 app.post('/segment', rateLimit((e) => e.RL_SEGMENT), requireKey, async (c) => {
   const body = await readJson(c);
   if (!body.ok) return apiError(c, 400, 'invalid_json', 'Request body must be JSON.');
@@ -148,8 +168,18 @@ app.post('/segment', rateLimit((e) => e.RL_SEGMENT), requireKey, async (c) => {
 
   const sarvam = createSarvam(c.env.SARVAM_API_KEY);
   const origin = new URL(c.req.url).origin;
+  // The bulletin's state cue needs a state name: take it from the edge when the client sent none
+  if (parsed.data.type === 'news' && !parsed.data.listener.region) {
+    const code = stateCodeOf(newsPlace(c.req.raw, parsed.data.listener).regionCode);
+    const name = code ? STATE_NAMES[code]?.en : undefined;
+    if (name) parsed.data.listener.region = name;
+  }
   const segment = await buildSegment(sarvam, station, parsed.data, c.var.timings, {
-    fetchHeadlines: () => getHeadlines(station, origin, waitUntil(c), localNewsCity(parsed.data.listener.city, edgeCountry(c.req.raw))),
+    // The newsroom's slate for this listener (never a story this session heard); live headlines while its pool fills
+    fetchHeadlines: async () => {
+      const slate = await newsroomHeadlines(c.env, { station, mode: newsMode(parsed.data.mode), ...newsPlace(c.req.raw, parsed.data.listener), airedNews: parsed.data.airedNews, waitUntil: waitUntil(c) });
+      return slate.length ? slate : getHeadlines(station, origin, waitUntil(c), localNewsCity(parsed.data.listener.city, edgeCountry(c.req.raw)));
+    },
     // What this station already aired, for every listener, so stories and ads don't repeat
     memory: kvShowMemory(c.env.PHONE, waitUntil(c)),
   });
@@ -348,6 +378,37 @@ app.get('/live/:station/now', async (c) => {
   return new Response(res.body, res);
 });
 
+// ---- Newsroom admin (owner only, bearer admin key) ----------------------------------------------
+
+function isAdmin(c: Ctx): boolean {
+  const auth = c.req.header('authorization') ?? '';
+  return tokenMatches(auth.startsWith('Bearer ') ? auth.slice(7).trim() : undefined, c.env.LIVE_ADMIN_TOKEN);
+}
+
+/** Starts a newsroom refresh now: {station, kind: refresh|topup|local|process, state?, city?}. */
+app.post('/news/refresh', async (c) => {
+  if (!isAdmin(c)) return apiError(c, 401, 'unauthorized', 'Wrong admin key.');
+  const body = await readJson(c);
+  const v = (body.ok ? body.value : {}) as Partial<NewsRefreshParams>;
+  if (!v.station || !['hi', 'mr', 'ta', 'bn', 'gu'].includes(v.station) || !['refresh', 'topup', 'local', 'process'].includes(v.kind ?? '')) {
+    return apiError(c, 400, 'invalid_request', 'station (hi|mr|ta|bn|gu) and kind (refresh|topup|local|process) are required.');
+  }
+  const id = await startRefresh(c.env, { station: v.station, kind: v.kind!, state: v.state?.slice(0, 2), city: v.city?.slice(0, 40) });
+  return id ? c.json({ id }, 202) : apiError(c, 502, 'workflow_failed', 'Could not start the refresh.');
+});
+
+/** Pool health: refresh rows, feed results from the edge, and unaired stories per bucket. */
+app.get('/news/status', async (c) => {
+  if (!isAdmin(c)) return apiError(c, 401, 'unauthorized', 'Wrong admin key.');
+  const db = c.env.NEWS_DB;
+  const [refresh, feeds, pool] = await Promise.all([
+    db.prepare('SELECT * FROM news_refresh ORDER BY scope').all(),
+    db.prepare('SELECT feed_id, pool, ok, status, items, kept, ms, error, checked_at FROM news_feed ORDER BY pool, feed_id').all(),
+    db.prepare('SELECT pool, bucket, COUNT(*) AS items, COUNT(DISTINCT cluster_id) AS stories, SUM(tagged) AS tagged, SUM(embedded) AS embedded FROM news_item WHERE expires_at > ? GROUP BY pool, bucket').bind(Date.now()).all(),
+  ]);
+  return c.json({ refresh: refresh.results, feeds: feeds.results, pool: pool.results }, 200, { 'Cache-Control': 'no-store' });
+});
+
 app.notFound((c) => apiError(c, 404, 'not_found', `No route for ${c.req.method} ${c.req.path}.`));
 
 app.onError((err, c) => {
@@ -356,7 +417,15 @@ app.onError((err, c) => {
 });
 
 export { LiveStation } from './live/station';
-export default app;
+export { NewsRefresh } from './news/workflow';
+
+export default {
+  fetch: app.fetch,
+  /** Every 3 hours: refresh a station's news pool only if it was consumed (see worker/news/policy.ts). */
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(scheduledNews(env).then((ids) => console.log(`[news] cron started ${ids.length} refresh(es)`)));
+  },
+} satisfies ExportedHandler<Env>;
 
 /** Durable Object classes must be exported by the Worker's entry module. */
 export { StudioLine } from './studio';
