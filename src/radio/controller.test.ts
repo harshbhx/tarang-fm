@@ -126,6 +126,12 @@ function harness(timings: Partial<RadioTimings> = {}) {
   /** Studio call ids the fake worker leaves out of its script */
   const skipDedications = new Set<string>();
   let segDelay = 3;
+  /** Per segment type write time (ms), over segDelay */
+  const typeDelay: Partial<Record<string, number>> = {};
+  /** A server from before clock v2: no serial, link state, news ids or heard summary */
+  const server = { old: false };
+  /** 'req:<what>' as each request arrives and 'done:<what>' as it is written, in order */
+  const log: string[] = [];
   let callDelay = 5;
   let callResponse: LiveCallResponse = {
     transcript: 'ek sher ki kahani sunao',
@@ -159,7 +165,9 @@ function harness(timings: Partial<RadioTimings> = {}) {
     getContext: async () => ({ city: 'Jammu', headlines: [{ title: 'Headline', url: 'https://example.com/1' }] }),
     getSegment: async (req: SegmentRequest, signal?: AbortSignal): Promise<Segment> => {
       requests.push(req);
-      await delay(segDelay);
+      const what = `${req.type}${req.mode ? `/${req.mode}` : ''}${req.part ? `#${req.part}` : ''}`;
+      log.push(`req:${what}`);
+      await delay(typeDelay[req.type] ?? segDelay);
       if (signal?.aborted) {
         aborted.push(req.type);
         throw abortError();
@@ -182,7 +190,19 @@ function harness(timings: Partial<RadioTimings> = {}) {
         ...(req.type === 'news' ? { mood: 'heavy' as const } : {}),
         ...(req.dedications?.length ? { dedicated: req.dedications.map((d) => d.id).filter((id) => !skipDedications.has(id)) } : {}),
       };
+      if (!server.old) {
+        if (req.type === 'kahani' && req.part) {
+          const outline = { ...(req.serial?.outline ?? { title_native: `story ${n}` }), aired_cliffhanger_en: `cliff ${n}` };
+          segment.serial = { id: req.serial?.id ?? `serial-${n}`, part: req.part, outline, cast: { narrator: 'narrator_voice' } };
+          segment.heardSummary = `kahani ${n} heard`;
+        }
+        if (req.type === 'rj_link') {
+          segment.linkState = { lastTypes: [...(req.linkState?.lastTypes ?? []), `link-${n}`].slice(-8), usedFactIds: [], bitEpisodes: {} };
+        }
+        if (req.type === 'news') segment.newsIds = [`news-${n}-a`, `news-${n}-b`];
+      }
       served.push(segment);
+      log.push(`done:${what}`);
       return segment;
     },
     ttsFetch: async (line, _station, signal) => {
@@ -229,6 +249,9 @@ function harness(timings: Partial<RadioTimings> = {}) {
     failSegment,
     failTts,
     skipDedications,
+    typeDelay,
+    server,
+    log,
     setSegDelay: (ms: number) => (segDelay = ms),
     setCallDelay: (ms: number) => (callDelay = ms),
     setCallResponse: (r: LiveCallResponse) => (callResponse = r),
@@ -445,7 +468,7 @@ describe('RadioController call-in', () => {
     expect(caps.find((c) => c?.text === 'reply-text')?.en).toBe('The reply');
   });
 
-  it('puts the caller on air, queues the requested story and resumes from the next line', async () => {
+  it('puts the caller on air, seeds the next serial with the requested story and resumes from the next line', async () => {
     const h = setup();
     let called = false;
     h.engine.onPlay = (text) => {
@@ -464,22 +487,23 @@ describe('RadioController call-in', () => {
     const played = h.engine.played;
     const reply = played.indexOf('reply-text');
     expect(reply).toBeGreaterThan(played.indexOf('hi:rj_link:0'));
-    expect(played.slice(reply + 1, reply + 5)).toEqual([
-      'hi:rj_link:1',
-      'hi:kahani(tiger):0',
-      'hi:kahani(tiger):1',
-      'hi:news:0',
-    ]);
+    expect(played.slice(reply + 1, reply + 3)).toEqual(['hi:rj_link:1', 'hi:news:0']);
 
-    const story = h.requests.find((r) => r.type === 'kahani');
-    expect(story?.theme).toBe('tiger');
-    expect(story?.recentCalls).toEqual(['ek sher ki kahani sunao']);
-    expect(h.calls[0]).toMatchObject({ station: 'hi', nowPlaying: 'rj_link 1', subtitles: false });
+    // Part 1 is written alongside the opener, so the opener may not be the first segment served
+    expect(h.calls[0]).toMatchObject({ station: 'hi', nowPlaying: expect.stringMatching(/^rj_link \d+$/), subtitles: false });
 
     const s = h.c.getSnapshot();
     const caller = [...s.history, s.caption].find((cap) => cap?.role === 'caller');
     expect(caller).toMatchObject({ speaker: '', label: 'Caller', en: 'tell me a story about a tiger' });
     expect(s.status).toBe('playing');
+
+    // Part 1 of the running serial was already written: the caller's story is the next serial
+    await waitFor(() => expect(kahanis(h).filter((r) => r.part === 1)).toHaveLength(2));
+    const [running, next] = kahanis(h).filter((r) => r.part === 1);
+    expect(running.theme).toBeUndefined();
+    expect(kahanis(h).filter((r) => r.part !== 1).every((r) => !r.theme)).toBe(true);
+    expect(next).toMatchObject({ theme: 'tiger', recentCalls: ['ek sher ki kahani sunao'] });
+    expect(next.serial).toBeUndefined();
   });
 
   it('drops a too-short recording and keeps the programme going', async () => {
@@ -800,6 +824,7 @@ function phoneCall(id: string, patch: Partial<PhoneCall> = {}): PhoneCall {
 }
 
 const rjLinks = (h: ReturnType<typeof harness>) => h.requests.filter((r) => r.type === 'rj_link');
+const kahanis = (h: ReturnType<typeof harness>) => h.requests.filter((r) => r.type === 'kahani');
 
 describe('RadioController studio phone line', () => {
   it('sends a call to the RJ link as structured data, without the number', () => {
@@ -961,7 +986,9 @@ describe('RadioController studio phone line', () => {
     await waitFor(() => expect(rjLinks(h).length).toBe(1));
     h.phone.calls = [phoneCall('old', { at: new Date(Date.now() - 60 * 60_000).toISOString() })];
     await waitFor(() => expect(h.c.getSnapshot().phoneStatus.old).toBe('aired'));
-    expect(playedAt(h, 'hi:rj_link:0', 1)).toBeGreaterThan(playedAt(h, 'hi:kahani:0'));
+    // No link slotted in after the news: the clock's handover into the Kahani reads it
+    expect(playedAt(h, 'hi:rj_link:0', 1)).toBeGreaterThan(playedAt(h, 'hi:ad_break:0'));
+    expect(rjLinks(h).find((r) => dedicationIds(r).includes('old'))?.mode).toBe('kahani_in');
   });
 
   it('rewrites an upcoming link when another listener’s RJ read its call first', async () => {
@@ -1002,11 +1029,12 @@ describe('RadioController studio phone line', () => {
     const h = setup();
     h.phone.calls = [phoneCall('call-1', { type: 'story_request', theme: 'भूतिया हवेली', message: 'एक भूतिया कहानी!' })];
     await h.c.tuneIn();
-    await waitFor(() => expect(h.requests.some((r) => r.type === 'kahani')).toBe(true));
-    const kahanis = h.requests.filter((r) => r.type === 'kahani');
-    expect(kahanis[0].theme).toBe('भूतिया हवेली');
-    await waitFor(() => expect(h.requests.filter((r) => r.type === 'kahani').length).toBeGreaterThanOrEqual(2));
-    expect(h.requests.filter((r) => r.type === 'kahani')[1].theme).toBeUndefined();
+    // The opener reads the call once part 1 is written, so the theme seeds the next serial, once
+    await waitFor(() => expect(kahanis(h).filter((r) => r.part === 1).length).toBeGreaterThanOrEqual(2));
+    const firsts = kahanis(h).filter((r) => r.part === 1);
+    expect(firsts[0].theme).toBeUndefined();
+    expect(firsts[1].theme).toBe('भूतिया हवेली');
+    expect(kahanis(h).filter((r) => r.theme)).toHaveLength(1);
   });
 });
 
@@ -1014,12 +1042,13 @@ describe('RadioController producer and show log', () => {
   it("sends the night's earlier stories with each Kahani request, so none repeats", async () => {
     const h = setup();
     await h.c.tuneIn();
-    await waitFor(() => expect(h.requests.filter((r) => r.type === 'kahani').length).toBeGreaterThanOrEqual(3));
-    const kahanis = h.requests.filter((r) => r.type === 'kahani');
-    expect(kahanis[0].recentStories).toBeUndefined();
-    // Prefetch writes the next story while the current one plays, so the log can trail by one
-    const later = kahanis.slice(2).map((r) => r.recentStories ?? []);
-    expect(later.every((log) => log.length >= 1 && log.every((s) => /^kahani \d+ aired$/.test(s)))).toBe(true);
+    await waitFor(() => expect(kahanis(h).filter((r) => r.part === 1).length).toBeGreaterThanOrEqual(2));
+    const [first, next] = kahanis(h).filter((r) => r.part === 1);
+    expect(first.recentStories).toBeUndefined();
+    // Parts 2-3 continue the serial; the next serial hears what aired (the producer's heard summaries)
+    expect(kahanis(h).filter((r) => r.serial).every((r) => !r.recentStories)).toBe(true);
+    expect(next.recentStories?.length).toBeGreaterThanOrEqual(2);
+    expect(next.recentStories?.every((s) => /^kahani \d+ heard$/.test(s))).toBe(true);
   });
 
   it('rotates producer settings without back-to-back catchphrases', () => {
@@ -1070,5 +1099,124 @@ describe('RadioController producer and show log', () => {
     expect(h.calls[0].showLog?.map((e) => e.type)).toEqual(['rj_link', 'news']);
     h.c.setStation('ta');
     expect(h.c.getSnapshot().helpline).toBeUndefined();
+  });
+});
+
+describe('RadioController clock v2', () => {
+  const what = (r: SegmentRequest) => `${r.type}${r.mode ? `/${r.mode}` : ''}${r.part ? `#${r.part}` : ''}`;
+  const servedPart = (h: ReturnType<typeof harness>, part: number) => h.served.find((s) => s.type === 'kahani' && s.serial?.part === part);
+
+  it('asks for each slot with its mode and part, one serial per loop', async () => {
+    const h = setup();
+    await h.c.tuneIn();
+    await waitFor(() => expect(rjLinks(h).filter((r) => r.mode === 'kahani_out')).toHaveLength(3));
+    expect(rjLinks(h).map((r) => r.mode)).toEqual(['opener', 'kahani_in', 'kahani_out', 'kahani_in', 'kahani_out', 'kahani_in', 'kahani_out']);
+    expect(kahanis(h).slice(0, 3).map(what)).toEqual(['kahani#1', 'kahani#2', 'kahani#3']);
+    expect(h.requests.filter((r) => r.type === 'news').slice(0, 2).map((r) => r.mode)).toEqual(['full', 'update']);
+    expect(h.requests.every((r) => !r.oneShot)).toBe(true);
+  });
+
+  it('writes part 1 at tune-in alongside the opener, part n+1 once part n is written, and each handover after its part', async () => {
+    const h = setup();
+    h.typeDelay.kahani = 60;
+    let atOpener: string[] = [];
+    let atPart1: string[] = [];
+    h.engine.onPlay = (text) => {
+      if (text === 'hi:rj_link:0' && !atOpener.length) atOpener = h.requests.map(what);
+      if (text === 'hi:kahani:0' && !atPart1.length) atPart1 = h.requests.map(what);
+    };
+    await h.c.tuneIn();
+    await waitFor(() => expect(atPart1.length).toBeGreaterThan(0));
+    // Requested before the opener aired, ahead of the news
+    expect(atOpener).toContain('kahani#1');
+    expect(h.log.indexOf('req:kahani#1')).toBeLessThan(h.log.indexOf('req:news/full'));
+    // Part 2 was asked for as soon as part 1 was written, before part 1 aired
+    expect(atPart1).toContain('kahani#2');
+    expect(h.log.indexOf('req:kahani#2')).toBeGreaterThan(h.log.indexOf('done:kahani#1'));
+    // The handover into part 1 was written after part 1, so its tease is true
+    expect(h.log.indexOf('req:rj_link/kahani_in')).toBeGreaterThan(h.log.indexOf('done:kahani#1'));
+    expect(rjLinks(h)[1].next?.type).toBe('kahani');
+  });
+
+  it('echoes the link state, serial, recap and aired news, and logs what the producer heard', async () => {
+    const h = setup();
+    await h.c.tuneIn();
+    await waitFor(() => expect(rjLinks(h).filter((r) => r.mode === 'kahani_out').length).toBeGreaterThanOrEqual(2));
+    const links = rjLinks(h);
+    const servedLinks = h.served.filter((s) => s.type === 'rj_link');
+    expect(links[0].linkState).toBeUndefined();
+    expect(links[1].linkState).toEqual(servedLinks[0].linkState);
+    expect(links[2].linkState).toEqual(servedLinks[1].linkState);
+
+    const [p1, p2, p3] = [1, 2, 3].map((n) => kahanis(h).find((r) => r.part === n)!);
+    const part1 = servedPart(h, 1)!;
+    const part2 = servedPart(h, 2)!;
+    expect(p1.serial).toBeUndefined();
+    expect(p2.serial).toMatchObject({ id: part1.serial!.id, part: 1 });
+    expect(p3.serial).toMatchObject({ id: part1.serial!.id, part: 2 });
+    expect(p2.recapSource).toEqual({
+      heard: part1.heardSummary,
+      cliffhanger: part1.serial!.outline.aired_cliffhanger_en,
+      lastLines: part1.lines.slice(-3).map((l) => ({ role: l.role, text: l.text })),
+    });
+    expect(p3.recapSource?.heard).toBe(part2.heardSummary);
+
+    // Handovers carry the serial as their part left it
+    expect(links.filter((r) => r.mode === 'kahani_in').map((r) => r.serial?.part).slice(0, 2)).toEqual([1, 2]);
+    expect(links.filter((r) => r.mode === 'kahani_out').map((r) => r.serial?.part).slice(0, 2)).toEqual([1, 2]);
+
+    const [full, update] = h.requests.filter((r) => r.type === 'news');
+    expect(full.airedNews).toBeUndefined();
+    expect(update.airedNews).toEqual(h.served.find((s) => s.type === 'news')!.newsIds);
+    // The show log prefers the heard summary
+    expect(links.find((r) => r.mode === 'kahani_out')?.showLog?.some((e) => e.summary === part1.heardSummary)).toBe(true);
+  });
+
+  it('pauses "Still listening?" at a segment boundary, never mid-segment, and resumes the serial', async () => {
+    const h = setup({ listenCapMs: 70 });
+    h.engine.playMs = 25;
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.c.getSnapshot()).toMatchObject({ status: 'paused', capped: true }));
+    const played = h.engine.played.length;
+    const last = h.engine.played[played - 1];
+    expect(last === HI_ID || last.endsWith(':1')).toBe(true);
+    h.c.resume();
+    await waitFor(() => expect(h.engine.played.length).toBeGreaterThan(played));
+    expect(h.engine.played[played].endsWith(':0')).toBe(true);
+    await waitFor(() => expect(servedPart(h, 2)).toBeDefined());
+    expect(servedPart(h, 2)!.serial!.id).toBe(servedPart(h, 1)!.serial!.id);
+  });
+
+  it('gives a story request to the running serial while its part 1 is still being written', async () => {
+    const h = setup();
+    // Part 1 is still being written when the call ends
+    h.typeDelay.kahani = 5000;
+    let called = false;
+    h.engine.onPlay = (text) => {
+      if (text === 'hi:rj_link:0' && !called) {
+        called = true;
+        void h.c.startCall();
+      }
+    };
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.c.getSnapshot().status).toBe('call_recording'));
+    await delay(25);
+    h.typeDelay.kahani = 3;
+    await h.c.endCall();
+    await waitFor(() => expect(h.engine.played).toContain('hi:kahani(tiger):0'));
+    const firsts = kahanis(h).filter((r) => r.part === 1);
+    expect(firsts.map((r) => r.theme)).toEqual([undefined, 'tiger']);
+    expect(h.engine.played).not.toContain('hi:kahani:0');
+  });
+
+  it('works with a server that returns no serial, link state or news ids', async () => {
+    const h = setup();
+    h.server.old = true;
+    await h.c.tuneIn();
+    await waitFor(() => expect(h.engine.played.filter((t) => t === 'hi:kahani:0').length).toBeGreaterThanOrEqual(3));
+    expect(kahanis(h).every((r) => !r.serial && !r.recapSource)).toBe(true);
+    expect(rjLinks(h).every((r) => !r.linkState && !r.serial)).toBe(true);
+    expect(h.requests.filter((r) => r.type === 'news').every((r) => !r.airedNews)).toBe(true);
+    expect(rjLinks(h).filter((r) => r.mode === 'kahani_out').length).toBeGreaterThanOrEqual(2);
   });
 });

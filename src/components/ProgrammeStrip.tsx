@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
-import type { SegmentType } from '../../shared/types';
+import type { ClockSlot, SegmentType } from '../../shared/types';
+import type { UpNextSlot } from '../radio/state';
 import NumberTicker from './NumberTicker';
 import SplitFlapText from './SplitFlapText';
-import { SEGMENT_NAMES, formatClock, laterOnClock } from './format';
+import { formatClock, laterOnClock, slotLabel } from './format';
 import { useElapsedSeconds } from './hooks';
 import { BoltIcon, SegmentIcon } from './icons';
 
@@ -16,7 +17,8 @@ interface ProgrammeStripProps {
   /** Segment title as written by the station (station language) */
   title?: string;
   lang: string;
-  upNext?: SegmentType;
+  /** The next clock slot (its bulletin kind or serial part, and the slot after it), or just its type */
+  upNext?: SegmentType | UpNextSlot;
   ttfaMs?: number;
   /** Show clock keys: remount (reset the timer) per station */
   clockKey: string;
@@ -36,7 +38,9 @@ export default function ProgrammeStrip({
   clockKey,
   tools,
 }: ProgrammeStripProps) {
-  const later = laterOnClock(segment, upNext);
+  const next: UpNextSlot | undefined = typeof upNext === 'string' ? { type: upNext } : upNext;
+  const laterType = next?.later ? undefined : laterOnClock(segment, next?.type);
+  const later: ClockSlot | undefined = next?.later ?? (laterType ? { type: laterType } : undefined);
   return (
     <section aria-label="Programme" className="programme">
       <div className="prog-now">
@@ -53,19 +57,19 @@ export default function ProgrammeStrip({
       </div>
 
       <ol className="prog-queue" aria-label="Coming up">
-        <li className="prog-slot" data-empty={!upNext}>
+        <li className="prog-slot" data-empty={!next}>
           <span className="prog-k">Next</span>
           <span className="prog-v">
-            {upNext ? <SegmentIcon type={upNext} width={16} height={16} /> : null}
-            {upNext ? SEGMENT_NAMES[upNext] : 'Coming up'}
+            {next ? <SegmentIcon type={next.type} width={16} height={16} /> : null}
+            {next ? <SlotName slot={next} lang={lang} /> : 'Coming up'}
           </span>
         </li>
         {later ? (
           <li className="prog-slot">
             <span className="prog-k">Later</span>
             <span className="prog-v">
-              <SegmentIcon type={later} width={16} height={16} />
-              {SEGMENT_NAMES[later]}
+              <SegmentIcon type={later.type} width={16} height={16} />
+              <SlotName slot={later} lang={lang} />
             </span>
           </li>
         ) : null}
@@ -84,6 +88,17 @@ export default function ProgrammeStrip({
         {tools ? <div className="prog-tools">{tools}</div> : null}
       </div>
     </section>
+  );
+}
+
+/** 'Kahani · कड़ी 2' (the part word the station says on air), 'News update', 'RJ' */
+function SlotName({ slot, lang }: { slot: ClockSlot; lang: string }) {
+  const label = slotLabel(slot, lang);
+  if (!label.detail) return <>{label.name}</>;
+  return (
+    <>
+      {label.name} · <span lang={label.lang}>{label.detail}</span>
+    </>
   );
 }
 

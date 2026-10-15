@@ -1,5 +1,5 @@
 /** Radio UI state contract (docs/TECH-SPEC.md §9). Produced by src/radio, rendered by src/components. */
-import type { PhoneCall, Role, SegmentType, Source, StationId } from '../../shared/types';
+import type { ClockSlot, PhoneCall, Role, SegmentType, Source, StationId } from '../../shared/types';
 
 export type RadioStatus =
   | 'idle'
@@ -38,6 +38,11 @@ export interface CallState {
   error?: string;
 }
 
+/** The next slot on the show clock (its bulletin kind or serial part), and the one after it when known. */
+export interface UpNextSlot extends ClockSlot {
+  later?: ClockSlot;
+}
+
 /** Where a studio phone call is on its way to air: written into the next RJ link, being read, or read. */
 export type PhoneAirStatus = 'up_next' | 'on_air' | 'aired';
 
@@ -61,7 +66,8 @@ export interface RadioState {
   subtitlesSoon?: boolean;
   /** TTFA of the most recent line */
   ttfaMs?: number;
-  upNext?: SegmentType;
+  /** What plays next: a slot of the show clock, or just its type (mock states) */
+  upNext?: SegmentType | UpNextSlot;
   error?: string;
   /** The studio phone line: its number and recent on-air calls, newest first (polled while tuned in) */
   phone?: { number: string; calls: PhoneCall[] };

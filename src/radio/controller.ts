@@ -1,14 +1,16 @@
 /** Show scheduler and radio store (docs/TECH-SPEC.md §9). */
-import { CALL_MAX_SECONDS, LISTENER_NAME_MAX, PAUSE_AFTER_MS } from '../../shared/constants';
+import { CALL_MAX_SECONDS, LISTENER_NAME_MAX, PAUSE_AFTER_MS, SHOW_CLOCK_V2 } from '../../shared/constants';
 import type { CallMeta, Dedication, SegmentRequest } from '../../shared/schemas';
 import { getStation, STATION_BY_ID } from '../../shared/stations';
 import type {
   Line,
+  LinkState,
   Mood,
   PhoneCall,
   PhoneRecentResponse,
   Segment,
   SegmentType,
+  SerialState,
   Source,
   Station,
   StationId,
@@ -17,8 +19,21 @@ import type {
 import type { AudioEngine, Recorder } from '../audio/types';
 import * as defaultApi from './api';
 import { readAhead, type CallSubtitles, type LiveCallResponse } from './api';
-import { entryKey, firstEntry, nextEntry, withStoryRequest, type ClockEntry } from './clock';
+import {
+  cleanTheme,
+  entryKey,
+  findAhead,
+  firstEntry,
+  insertedEntry,
+  isSerialPart,
+  nextEntry,
+  partOf,
+  position,
+  slotOf,
+  type ClockEntry,
+} from './clock';
 import { cleanListenerName, listenerContext, loadListenerName, loadPhoneHolder, saveListenerName } from './listener';
+import { addAiredNews, cleanLinkState, cleanSerial, recapSourceFrom } from './session';
 import {
   INITIAL_STATE,
   type Caption,
@@ -28,6 +43,7 @@ import {
   type RadioActions,
   type RadioState,
   type RadioStatus,
+  type UpNextSlot,
 } from './state';
 
 export interface RadioApi {
@@ -117,6 +133,33 @@ interface Aired {
   mood?: Mood;
 }
 
+/** One loop's Kahani serial, as its parts are written. */
+interface SerialRun {
+  /** The latest serial state a part returned (part 1 brings the outline and cast) */
+  serial?: SerialState;
+  /** Each part as written, which is what airs */
+  parts: Partial<Record<1 | 2 | 3, Segment>>;
+  /** A caller's story theme (part 1 only) */
+  theme?: string;
+}
+
+/** What this station's show echoes back to the server on every request (clock v2). */
+interface ShowState {
+  station: StationId;
+  /** RJ link rotation state from the last link on air */
+  linkState?: LinkState;
+  /** Newsroom ids aired this session, never repeated */
+  airedNews: string[];
+  /** One serial per clock loop */
+  serials: Map<number, SerialRun>;
+  /** A caller's story theme for the next serial whose part 1 isn't written yet */
+  storyTheme?: string;
+}
+
+function freshShow(station: StationId): ShowState {
+  return { station, airedNews: [], serials: new Map() };
+}
+
 export type ShowLog = NonNullable<SegmentRequest['showLog']>;
 export type ProducerPlan = NonNullable<SegmentRequest['producer']>;
 
@@ -170,6 +213,13 @@ const CATCHPHRASE_ODDS = 0.3;
 const BIT_ODDS = 0.35;
 const CARE_HELPLINE = { name: 'Tele-MANAS', number: '14416' } as const;
 const MISSES_BEFORE_BACKOFF = 3;
+/**
+ * How many slots ahead a serial's part 1 (outline included, 34–62 s to write) is requested: from the opener at
+ * tune-in, and from the loop's last link after that, which leaves about two minutes of air before its handover.
+ */
+const SERIAL_LEAD = 4;
+/** How far ahead the clock is searched for a serial part (two loops) */
+const SERIAL_SEARCH = SHOW_CLOCK_V2.length * 2;
 
 const TOO_SHORT = 'That was too short. Hold the button while you speak.';
 const WEAK_SIGNAL = 'Weak signal. Retrying…';
@@ -318,7 +368,9 @@ export class RadioController implements RadioActions {
 
   private cursor: Cursor | null = null;
   private resumeAt: Cursor | null = null;
-  private plannedNext: { afterSeq: number; entry: ClockEntry } | null = null;
+  /** An extra segment to play after the entry with key `after` */
+  private plannedNext: { after: string; entry: ClockEntry } | null = null;
+  private show: ShowState = freshShow(INITIAL_STATE.stationId);
   private readonly segments = new Map<string, PendingSegment>();
   private readonly tts = new Map<string, PendingTts>();
   private context: Promise<void> | null = null;
@@ -344,8 +396,6 @@ export class RadioController implements RadioActions {
   private readonly phoneJumped = new Set<string>();
   /** Summaries of the Kahanis aired this session, oldest first, so each new story is different */
   private storyLog: string[] = [];
-  /** Story theme a studio caller asked for; the next unthemed Kahani uses it */
-  private phoneTheme: string | undefined;
 
   private callResume: 'playing' | 'paused' = 'playing';
   private recStart: Promise<void> | null = null;
@@ -390,15 +440,21 @@ export class RadioController implements RadioActions {
   // ---- listening cap -----------------------------------------------------
 
   private capTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The cap was reached mid-segment: the show pauses when the segment on air ends */
+  private capPending = false;
 
   /** The listener did something: restart the cap clock and clear a "Still listening?" prompt. */
   private touch(): void {
     if (this.capTimer) clearTimeout(this.capTimer);
     this.capTimer = this.timings.listenCapMs > 0 ? setTimeout(() => this.capReached(), this.timings.listenCapMs) : undefined;
+    this.capPending = false;
     if (this.state.capped) this.set({ capped: false });
   }
 
-  /** Pauses a show nobody has touched for listenCapMs, so a forgotten tab stops writing and voicing new segments. */
+  /**
+   * Pauses a show nobody has touched for listenCapMs, so a forgotten tab stops writing and voicing new segments.
+   * It pauses at a segment boundary (never mid-part), so resuming carries on with the next segment.
+   */
   private capReached(): void {
     this.capTimer = undefined;
     const status = this.state.status;
@@ -408,6 +464,12 @@ export class RadioController implements RadioActions {
       return;
     }
     if (status !== 'playing' && status !== 'tuning') return;
+    if (this.cursor?.segment) this.capPending = true;
+    else this.capPause();
+  }
+
+  private capPause(): void {
+    this.capPending = false;
     this.pause();
     this.set({ capped: true });
   }
@@ -425,6 +487,7 @@ export class RadioController implements RadioActions {
     this.unlocking = this.unlockEngine();
     const gen = this.interrupt();
     this.resetStationScope();
+    if (this.show.station !== this.state.stationId) this.show = freshShow(this.state.stationId);
     this.cursor = freshCursor();
     this.resumeAt = null;
     this.set({ status: 'tuning', error: undefined });
@@ -483,6 +546,7 @@ export class RadioController implements RadioActions {
     this.aired = [];
     this.links = 0;
     this.lastCatchphrase = false;
+    this.show = freshShow(id);
     this.engine.stopVoice(this.timings.stopFadeMs);
     this.engine.music.stop(this.timings.stopFadeMs);
     this.cursor = freshCursor();
@@ -652,7 +716,11 @@ export class RadioController implements RadioActions {
 
   private recordAired(segment: Segment): void {
     if (this.aired.some((a) => a.id === segment.id)) return;
-    const summary = segment.summary?.trim();
+    // What the producer heard beats the writer's own summary
+    const summary = segment.heardSummary?.trim() || segment.summary?.trim();
+    const linkState = segment.type === 'rj_link' ? cleanLinkState(segment.linkState) : undefined;
+    if (linkState) this.show.linkState = linkState;
+    if (segment.type === 'news') this.show.airedNews = addAiredNews(this.show.airedNews, segment.newsIds);
     if (segment.type === 'kahani' && !segment.fallback && summary) {
       this.storyLog = [...this.storyLog, summary.slice(0, SUMMARY_CHARS)].slice(-MAX_STORY_LOG);
     }
@@ -703,6 +771,8 @@ export class RadioController implements RadioActions {
     this.releaseCalls([...this.phoneTaken].filter(([, s]) => s !== 'aired').map(([id]) => id));
     this.phoneJumped.clear();
     this.plannedNext = null;
+    // The clock starts again from the top, with a new serial
+    this.show.serials.clear();
     this.context = null;
     this.headlines = [];
     this.weather = undefined;
@@ -714,6 +784,8 @@ export class RadioController implements RadioActions {
     if (!this.context) this.fetchContext(station.id);
     const from = freshCursor();
     this.cursor = from;
+    // The serial's part 1 (with its outline) is written alongside the opener
+    this.planSerial(station.id);
     void this.run(gen, from);
   }
 
@@ -739,14 +811,19 @@ export class RadioController implements RadioActions {
   /** The entry after `entry`, honouring a call's story request. */
   private following(entry: ClockEntry): ClockEntry {
     const planned = this.plannedNext;
-    if (planned && planned.afterSeq === entry.seq) return planned.entry;
+    if (planned && planned.after === entryKey(entry)) return planned.entry;
     return nextEntry(entry);
   }
 
   private advance(entry: ClockEntry): ClockEntry {
     const next = this.following(entry);
-    if (this.plannedNext?.afterSeq === entry.seq) this.plannedNext = null;
+    if (this.plannedNext?.after === entryKey(entry)) this.plannedNext = null;
     return next;
+  }
+
+  /** The next slot for the programme strip, with the one after it. */
+  private upNextSlot(next: ClockEntry): UpNextSlot {
+    return { ...slotOf(next), later: slotOf(this.following(next)) };
   }
 
   private async run(gen: number, from: Cursor): Promise<void> {
@@ -761,6 +838,11 @@ export class RadioController implements RadioActions {
       try {
         if (!segment) {
           this.cursor = { entry, segment: null, lineIndex: 0, started: false };
+          if (this.capPending) {
+            // "Still listening?" waits for a segment boundary: resuming starts this entry
+            this.capPause();
+            return;
+          }
           const loaded = await this.loadSegment(entry, station.id);
           if (gen !== this.gen) return;
           if (!loaded || loaded.lines.length === 0) {
@@ -811,9 +893,10 @@ export class RadioController implements RadioActions {
   ): Promise<void> {
     const following = this.following(entry);
     this.recordAired(segment);
-    this.pruneSegments([entry, following]);
+    this.pruneSegments(entry, [entry, following]);
     this.prefetchSegment(following, station.id);
-    this.set({ segment: toNowPlaying(segment), lineIndex: startLine, upNext: following.type });
+    this.planSerial(station.id, entry);
+    this.set({ segment: toNowPlaying(segment), lineIndex: startLine, upNext: this.upNextSlot(following) });
     this.airCalls(segment);
     this.jumpQueue(entry, segment.lines.length - startLine);
 
@@ -936,9 +1019,84 @@ export class RadioController implements RadioActions {
     const pending: PendingSegment = Object.assign(ticket, { promise: this.fetchSegment(ticket, station, carry) });
     void pending.promise.then((segment) => {
       pending.segment = segment;
+      const current = this.segments.get(key) === pending && !pending.controller.signal.aborted;
+      if (segment && current && isSerialPart(pending.entry)) this.partWritten(pending.entry, segment, station);
     });
     this.segments.set(key, pending);
     return pending;
+  }
+
+  private serialRun(loop: number): SerialRun {
+    let run = this.show.serials.get(loop);
+    if (!run) {
+      run = { parts: {} };
+      this.show.serials.set(loop, run);
+    }
+    return run;
+  }
+
+  /** A serial part was written: it is what airs, its serial is the latest, and the next part starts now. */
+  private partWritten(entry: ClockEntry & { part: 1 | 2 | 3 }, segment: Segment, station: StationId): void {
+    const run = this.serialRun(entry.loop);
+    run.parts[entry.part] = segment;
+    const serial = cleanSerial(segment.serial);
+    if (serial) run.serial = serial;
+    this.planSerial(station);
+  }
+
+  /** Where serial part `part` of loop `loop` is on the clock from `from`, if still ahead (or on air). */
+  private partAhead(from: ClockEntry, loop: number, part: 1 | 2 | 3) {
+    return findAhead(from, (e) => e.loop === loop && isSerialPart(e) && e.part === part, SERIAL_SEARCH);
+  }
+
+  /**
+   * Writes the serial ahead of the clock: part 1 (with its outline) SERIAL_LEAD slots before it airs, which at
+   * tune-in is alongside the opener, and part n+1 as soon as part n is written (it only needs part n's lines).
+   * Nothing new is written while the show is paused.
+   */
+  private planSerial(station: StationId, at = this.cursor?.entry): void {
+    if (!at || !PHONE_STATUSES.has(this.state.status)) return;
+    // The station ID is voiced from the station's own copy, at once: plan from the opener
+    const from = at.type === 'station_id' ? nextEntry(at) : at;
+    for (const loop of [from.loop, from.loop + 1]) {
+      for (const part of [1, 2, 3] as const) {
+        const ahead = this.partAhead(from, loop, part);
+        if (!ahead || this.segments.has(entryKey(ahead.entry))) continue;
+        const due = part === 1 ? ahead.steps <= SERIAL_LEAD : !!this.show.serials.get(loop)?.parts[(part - 1) as 1 | 2];
+        if (due) this.requestSegment(ahead.entry, station);
+      }
+    }
+  }
+
+  /** The request for a serial part, already made or made now; one that failed is asked for again. */
+  private requestPart(loop: number, part: 1 | 2 | 3, station: StationId): PendingSegment | null {
+    const at = this.cursor?.entry ?? this.resumeAt?.entry;
+    const ahead = at && this.partAhead(at, loop, part);
+    if (!ahead) return null;
+    const key = entryKey(ahead.entry);
+    const hit = this.segments.get(key);
+    if (hit && hit.segment === null && !hit.rewrite) this.segments.delete(key);
+    return this.requestSegment(ahead.entry, station);
+  }
+
+  /**
+   * A caller asked for a story: it seeds the next serial. If a serial's part 1 is still being written, that
+   * serial is the caller's: part 1 is written again on their theme.
+   */
+  private seedStory(theme: string | undefined): void {
+    const clean = cleanTheme(theme);
+    if (!clean) return;
+    const station = this.state.stationId;
+    for (const [key, pending] of this.segments) {
+      const { entry } = pending;
+      if (!isSerialPart(entry) || entry.part !== 1 || pending.segment !== undefined || pending.rewrite) continue;
+      this.serialRun(entry.loop).theme = clean;
+      pending.controller.abort();
+      this.segments.delete(key);
+      pending.rewrite = this.requestSegment(entry, station, pending.req);
+      return;
+    }
+    this.show.storyTheme = clean;
   }
 
   /** A segment once written; one that was written again in the meantime hands over to its rewrite. */
@@ -957,12 +1115,20 @@ export class RadioController implements RadioActions {
     // Paused (or stopped): just drop them, and the show asks for fresh ones when it plays on
     const rewrite = PHONE_STATUSES.has(this.state.status);
     const station = this.state.stationId;
-    for (const [key, pending] of [...this.segments]) {
+    const here = position(at.entry);
+    /** Loops whose earliest upcoming serial part is written again: their later parts follow it, written afresh */
+    const rewritten = new Set<number>();
+    const upcoming = [...this.segments]
+      .filter(([, pending]) => {
+        const { entry } = pending;
+        // Station IDs are voiced from the station's own copy; a failed request has nothing to rewrite
+        if (pending.subtitles || entry.type === 'station_id' || pending.segment === null) return false;
+        const pos = position(entry);
+        return pos > here || (pos === here && !at.segment);
+      })
+      .sort(([, a], [, b]) => position(a.entry) - position(b.entry));
+    for (const [key, pending] of upcoming) {
       const { entry } = pending;
-      // Station IDs are voiced from the station's own copy; a failed request has nothing to rewrite
-      if (pending.subtitles || entry.type === 'station_id' || pending.segment === null) continue;
-      const upcoming = entry.seq > at.entry.seq || (entry.seq === at.entry.seq && !at.segment);
-      if (!upcoming) continue;
       pending.controller.abort();
       this.segments.delete(key);
       // Its studio calls go back in the queue, and the rewrite (an RJ link) takes them again
@@ -970,6 +1136,15 @@ export class RadioController implements RadioActions {
         ? (pending.segment.dedicated ?? []).filter((id) => this.phoneTaken.get(id) === 'up_next')
         : pending.claimed.splice(0);
       this.releaseCalls(held);
+      if (isSerialPart(entry)) {
+        const run = this.show.serials.get(entry.loop);
+        if (rewritten.has(entry.loop) || !rewrite) {
+          // Written again once the part before it is
+          if (run) delete run.parts[entry.part];
+          continue;
+        }
+        rewritten.add(entry.loop);
+      }
       if (rewrite) pending.rewrite = this.requestSegment(entry, station, pending.req);
     }
   }
@@ -985,10 +1160,13 @@ export class RadioController implements RadioActions {
     });
   }
 
-  private pruneSegments(keep: ClockEntry[]): void {
+  /** Drops the requests the show no longer needs: all but `keep`, and the serial parts still ahead of `current`. */
+  private pruneSegments(current: ClockEntry, keep: ClockEntry[]): void {
     const keys = new Set(keep.map(entryKey));
+    const here = position(current);
     for (const [key, pending] of this.segments) {
       if (keys.has(key)) continue;
+      if (isSerialPart(pending.entry) && position(pending.entry) > here) continue;
       pending.controller.abort();
       this.segments.delete(key);
       const ids = (pending.segment?.dedicated ?? []).filter((id) => this.phoneTaken.get(id) === 'up_next');
@@ -1063,6 +1241,22 @@ export class RadioController implements RadioActions {
     const phone = entry.type === 'rj_link' ? this.phonePoll?.first : undefined;
     await Promise.race([Promise.all([context, phone]), delay(this.timings.contextWaitMs)]);
     if (signal.aborted) return null;
+    const part = partOf(entry);
+    if (entry.mode === 'kahani_in' && part) {
+      // The tease must be true: the handover is written once its part is (a part that failed is asked for again)
+      const pending = this.requestPart(entry.loop, part, station);
+      const written = pending ? await this.settled(pending) : null;
+      if (signal.aborted || !written) return null;
+    }
+    if (isSerialPart(entry) && entry.part > 1) {
+      // The part before it is being written again (subtitles): this one recaps what that one says
+      const before = [...this.segments.values()].find(
+        (p) => isSerialPart(p.entry) && p.entry.loop === entry.loop && p.entry.part === entry.part - 1,
+      );
+      if (before && before.segment === undefined) await this.settled(before);
+      if (signal.aborted) return null;
+    }
+    const run = part ? this.serialRun(entry.loop) : undefined;
     const req: SegmentRequest = {
       station,
       type: entry.type,
@@ -1070,7 +1264,41 @@ export class RadioController implements RadioActions {
       upNext: this.following(entry).type,
       subtitles,
     };
-    if (entry.type === 'news') req.headlines = this.headlines;
+    if (entry.mode) req.mode = entry.mode;
+    if (entry.type === 'news') {
+      req.headlines = this.headlines;
+      if (this.show.airedNews.length) req.airedNews = [...this.show.airedNews];
+    }
+    if (entry.type === 'rj_link') {
+      const linkState = carry?.linkState ?? this.show.linkState;
+      if (linkState) req.linkState = linkState;
+      if (run && part) {
+        // A handover carries the serial as its part left it; one after a part that never aired is a plain link
+        const serial = cleanSerial(run.parts[part]?.serial);
+        if (entry.mode === 'kahani_out' && !run.parts[part]) req.mode = 'payload';
+        else if (serial) req.serial = serial;
+      }
+    }
+    if (run && isSerialPart(entry)) {
+      req.part = entry.part;
+      const prev = entry.part > 1 ? run.parts[(entry.part - 1) as 1 | 2] : undefined;
+      const prevSerial = cleanSerial(prev?.serial);
+      // Part 1 starts a serial (a rewrite keeps the outline it was written from); later parts continue the latest
+      const serial = entry.part === 1 ? (carry ? cleanSerial(run.parts[1]?.serial) : undefined) : (prevSerial ?? run.serial);
+      if (serial) req.serial = serial;
+      if (prev && prevSerial) req.recapSource = recapSourceFrom({ ...prev, serial: prevSerial });
+      if (!serial) {
+        // A new story (or a server without serials): it differs from the night's earlier ones, on a caller's theme
+        if (this.storyLog.length) req.recentStories = this.storyLog.slice(-MAX_STORY_LOG);
+        let theme = (entry.part === 1 ? run.theme : undefined) ?? carry?.theme;
+        if (!theme && !carry && this.show.storyTheme) {
+          theme = this.show.storyTheme;
+          this.show.storyTheme = undefined;
+          if (entry.part === 1) run.theme = theme;
+        }
+        if (theme) req.theme = theme;
+      }
+    }
     if (entry.type === 'rj_link' && this.weather) req.weather = this.weather;
     if (entry.type === 'rj_link') {
       // A rewrite is the same link: it keeps its place in the producer's rotation (the first link still greets)
@@ -1090,13 +1318,6 @@ export class RadioController implements RadioActions {
     if (showLog.length) req.showLog = showLog;
     const previous = this.aired[this.aired.length - 1];
     if (previous?.mood) req.moodAfterPrevious = previous.mood;
-    if (entry.type === 'kahani' && this.storyLog.length) req.recentStories = this.storyLog.slice(-MAX_STORY_LOG);
-    if (entry.type === 'kahani' && entry.theme) req.theme = entry.theme;
-    else if (entry.type === 'kahani' && carry?.theme) req.theme = carry.theme;
-    else if (entry.type === 'kahani' && this.phoneTheme) {
-      req.theme = this.phoneTheme;
-      this.phoneTheme = undefined;
-    }
     const recent = this.recentCalls.slice(-MAX_RECENT_CALLS);
     if (recent.length) req.recentCalls = recent.slice(0, MAX_REQUEST_CALLS);
     const phoneCalls = entry.type === 'rj_link' ? this.takePhoneCalls() : [];
@@ -1156,7 +1377,7 @@ export class RadioController implements RadioActions {
       void this.api.markPhoneAired?.({ station: segment.station, holder: this.phoneHolder, ids: fresh }).catch(noop);
     }
     const story = (this.state.phone?.calls ?? []).find((c) => ids.includes(c.id) && c.type === 'story_request' && c.theme?.trim());
-    if (story) this.phoneTheme = story.theme!.trim();
+    if (story) this.seedStory(story.theme);
   }
 
   /**
@@ -1190,15 +1411,15 @@ export class RadioController implements RadioActions {
       return;
     }
     // Slot a link in; the segment already written for the next slot moves along one place, unwasted
-    const inserted: ClockEntry = { seq: current.seq + 1, index: current.index, type: 'rj_link', inserted: true };
+    const inserted = insertedEntry(current, 'rj_link', 'payload');
     if (pending) {
       this.segments.delete(key);
       pending.entry = nextEntry(inserted);
       this.segments.set(entryKey(pending.entry), pending);
     }
-    this.plannedNext = { afterSeq: current.seq, entry: inserted };
+    this.plannedNext = { after: entryKey(current), entry: inserted };
     this.prefetchSegment(inserted, station);
-    this.set({ upNext: 'rj_link' });
+    this.set({ upNext: this.upNextSlot(inserted) });
   }
 
   /**
@@ -1336,7 +1557,7 @@ export class RadioController implements RadioActions {
     if (transcript) {
       this.recentCalls = [...this.recentCalls, transcript.slice(0, RECENT_CALL_CHARS)].slice(-MAX_RECENT_CALLS);
     }
-    if (res.intent === 'story_request') this.planStory(res.theme || transcript);
+    if (res.intent === 'story_request') this.seedStory(res.theme || transcript);
     if (res.intent === 'care') this.set({ helpline: { ...CARE_HELPLINE } });
 
     const reply = res.reply?.text?.trim() ? res.reply : null;
@@ -1420,17 +1641,6 @@ export class RadioController implements RadioActions {
       };
     }
     this.set(patch);
-  }
-
-  /** Makes the segment after the current one a kahani on the caller's theme. */
-  private planStory(theme: string | undefined): void {
-    const current = this.resumeAt?.entry ?? this.cursor?.entry;
-    if (!current) return;
-    const entry = withStoryRequest(current, theme);
-    this.plannedNext = { afterSeq: current.seq, entry };
-    this.pruneSegments([current, entry]);
-    this.prefetchSegment(entry, this.state.stationId);
-    this.set({ upNext: entry.type });
   }
 
   /** Ends the call flow of generation `gen` and hands back to the programme. */

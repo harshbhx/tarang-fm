@@ -1,6 +1,6 @@
-import { SHOW_CLOCK } from '../../shared/constants';
+import { CLOCK_LOOP_FROM, SHOW_CLOCK_V2 } from '../../shared/constants';
 import { ROLES, storyVoices } from '../../shared/stations';
-import type { Role, SegmentType, Station, Voice } from '../../shared/types';
+import type { ClockSlot, Role, SegmentType, Station, Voice } from '../../shared/types';
 import type { Caption, RadioStatus } from '../radio/state';
 
 export const DIAL_MIN = 88;
@@ -93,14 +93,43 @@ export function castVoices(station: Station): CastVoice[] {
  */
 export function laterOnClock(current?: SegmentType, next?: SegmentType): SegmentType | undefined {
   if (!current || !next) return undefined;
-  const loop = SHOW_CLOCK.slice(1);
+  const clock = SHOW_CLOCK_V2.map((s) => s.type);
+  const loop = clock.slice(CLOCK_LOOP_FROM);
   const n = loop.length;
   const found = new Set<SegmentType>();
   for (let i = 0; i < n; i++) {
     if (loop[i] === current && loop[(i + 1) % n] === next) found.add(loop[(i + 2) % n]);
   }
-  if (SHOW_CLOCK[0] === current && SHOW_CLOCK[1] === next) found.add(SHOW_CLOCK[2] ?? loop[0]);
+  for (let i = 0; i + 2 < clock.length && i < CLOCK_LOOP_FROM; i++) {
+    if (clock[i] === current && clock[i + 1] === next) found.add(clock[i + 2]);
+  }
   return found.size === 1 ? [...found][0] : undefined;
+}
+
+/** The word each station says on air for a serial part (as the Kahani writer uses it); others say "Part". */
+export const PART_WORDS: Partial<Record<string, string>> = {
+  hi: 'कड़ी',
+  mr: 'भाग',
+  ta: 'பகுதி',
+  bn: 'পর্ব',
+  gu: 'ભાગ',
+};
+
+export interface SlotLabel {
+  name: string;
+  /** e.g. 'कड़ी 2', in the station language when `lang` is set */
+  detail?: string;
+  lang?: string;
+}
+
+/** A clock slot for the programme strip: 'Kahani · कड़ी 2', 'News update', 'RJ'. `language` is e.g. 'hi-IN'. */
+export function slotLabel(slot: ClockSlot, language?: string): SlotLabel {
+  if (slot.type === 'news' && slot.mode === 'update') return { name: 'News update' };
+  if (slot.type === 'kahani' && slot.part) {
+    const word = language ? PART_WORDS[language.split('-')[0]] : undefined;
+    return word ? { name: 'Kahani', detail: `${word} ${slot.part}`, lang: language } : { name: 'Kahani', detail: `Part ${slot.part}` };
+  }
+  return { name: SEGMENT_NAMES[slot.type] };
 }
 
 /** 75 → '01:15'; 3725 → '1:02:05' */
