@@ -1,4 +1,4 @@
-import type { SegmentType } from './types';
+import type { ClockSlot, SegmentType } from './types';
 
 export const TTS_MODEL = 'bulbul:v4-flash';
 export const TTS_SAMPLE_RATE = 24000;
@@ -25,6 +25,31 @@ export const SHOW_CLOCK: SegmentType[] = [
   'ad_break',
   'kahani',
 ];
+
+/**
+ * Show clock v2 (writing redesign): one loop is one complete Kahani serial. An RJ link hands into and out of
+ * every part, news alternates full and update, and no two ads touch. The loop starts again at CLOCK_LOOP_FROM.
+ * (SHOW_CLOCK above stays until every consumer moves to this.)
+ */
+export const SHOW_CLOCK_V2: ClockSlot[] = [
+  { type: 'station_id' },
+  { type: 'rj_link', mode: 'opener' },
+  { type: 'news', mode: 'full' },
+  { type: 'ad_break' },
+  { type: 'rj_link', mode: 'kahani_in' },
+  { type: 'kahani', part: 1 },
+  { type: 'rj_link', mode: 'kahani_out' },
+  { type: 'news', mode: 'update' },
+  { type: 'ad_break' },
+  { type: 'rj_link', mode: 'kahani_in' },
+  { type: 'kahani', part: 2 },
+  { type: 'rj_link', mode: 'kahani_out' },
+  { type: 'ad_break' },
+  { type: 'rj_link', mode: 'kahani_in' },
+  { type: 'kahani', part: 3 },
+  { type: 'rj_link', mode: 'kahani_out' },
+];
+export const CLOCK_LOOP_FROM = 2;
 
 /** Default silence after a line, by segment type (ms) */
 export const PAUSE_AFTER_MS: Record<SegmentType, number> = {

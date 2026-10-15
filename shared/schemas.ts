@@ -19,16 +19,52 @@ export const DaypartSchema = z.enum(['morning', 'afternoon', 'evening', 'night']
 export const DeliverySchema = z.enum(DELIVERIES);
 export const MoodSchema = z.enum(['light', 'heavy']);
 
+export const NewsSlotSchema = z.enum(['city', 'state', 'national', 'world', 'sport', 'business', 'entertainment', 'kicker']);
+
 export const SourceSchema = z.object({
   title: z.string().min(1).max(300),
   url: z.string().url().max(2000),
   source: z.string().max(120).optional(),
   local: z.boolean().optional(),
+  id: z.string().max(64).optional(),
+  detail: z.string().max(600).optional(),
+  slot: NewsSlotSchema.optional(),
+  light: z.boolean().optional(),
+});
+
+export const ClockModeSchema = z.enum(['opener', 'payload', 'kahani_in', 'kahani_out', 'full', 'update']);
+
+const SerialRoleSchema = z.enum(['narrator', 'char_a', 'char_b', 'char_kid']);
+
+export const SerialStateSchema = z.object({
+  id: z.string().trim().min(1).max(64),
+  part: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  outline: z.record(z.string().max(40), z.string().max(600)),
+  cast: z.partialRecord(SerialRoleSchema, z.string().min(3).max(64)),
+});
+
+export const RecapSourceSchema = z.object({
+  heard: z.string().trim().max(400),
+  cliffhanger: z.string().trim().max(300),
+  lastLines: z.array(z.object({ role: z.string().max(20), text: z.string().max(300) })).max(3),
+});
+
+export const LinkStateSchema = z.object({
+  lastTypes: z.array(z.string().max(24)).max(8),
+  usedFactIds: z.array(z.string().max(64)).max(60),
+  openQuestion: z.string().trim().max(240).optional(),
+  bitEpisodes: z.record(z.string().max(24), z.number().int().min(0).max(99)),
+  lastWeatherAt: z.number().optional(),
+  lastFestivalAt: z.number().optional(),
+  onThisDayDone: z.boolean().optional(),
 });
 
 export const WeatherSchema = z.object({
   tempC: z.number().min(-60).max(70),
   description: z.string().trim().min(1).max(60),
+  notable: z.enum(['none', 'rain_soon', 'raining', 'heat', 'cold', 'bad_air', 'fog']).optional(),
+  rainChance3h: z.number().min(0).max(100).optional(),
+  pm25: z.number().min(0).max(2000).optional(),
 });
 
 export const ListenerContextSchema = z.object({
@@ -94,6 +130,20 @@ export const SegmentRequestSchema = z.object({
   holder: HolderSchema.optional(),
   /** Write an English subtitle for every line (the script writer adds it; off unless the listener turned subtitles on) */
   subtitles: z.boolean().optional(),
+  /** What this segment is for in the v2 clock (rj_link: opener/payload/kahani_in/kahani_out; news: full/update) */
+  mode: ClockModeSchema.optional(),
+  /** kahani only: serial part (1 writes the outline first) */
+  part: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+  /** kahani only: one complete story instead of a serial part (the shared live show) */
+  oneShot: z.boolean().optional(),
+  /** kahani parts 2-3 (and kahani_in/out links): the serial from part 1 */
+  serial: SerialStateSchema.optional(),
+  /** kahani parts 2-3: what actually aired last part */
+  recapSource: RecapSourceSchema.optional(),
+  /** rj_link only: rotation state from the previous link */
+  linkState: LinkStateSchema.optional(),
+  /** news only: newsroom ids already aired this session (never repeated) */
+  airedNews: z.array(z.string().max(64)).max(40).optional(),
 });
 
 /** POST /api/phone/aired: the studio calls an RJ link has started reading on air. */

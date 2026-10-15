@@ -106,11 +106,66 @@ export interface Source {
   source?: string;
   /** From the listener's own city feed */
   local?: boolean;
+  /** Stable newsroom id (aired tracking) */
+  id?: string;
+  /** The feed's own description: the only place a "why it matters" line may come from */
+  detail?: string;
+  /** Where the bulletin places it */
+  slot?: NewsSlot;
+  /** A light or good-news item (kicker candidate) */
+  light?: boolean;
+}
+
+export type NewsSlot = 'city' | 'state' | 'national' | 'world' | 'sport' | 'business' | 'entertainment' | 'kicker';
+
+/** What an RJ link or bulletin is for in the clock (the code decides, the writer delivers). */
+export type ClockMode = 'opener' | 'payload' | 'kahani_in' | 'kahani_out' | 'full' | 'update';
+
+/** One entry of the v2 show clock. */
+export interface ClockSlot {
+  type: SegmentType;
+  mode?: ClockMode;
+  /** kahani only: serial part */
+  part?: 1 | 2 | 3;
+}
+
+/** A Kahani serial: outlined once, then aired in parts with the same cast. */
+export interface SerialState {
+  id: string;
+  part: 1 | 2 | 3;
+  /** Flat outline fields from the outline call (title, setting, names, act breaks, ending lines...) */
+  outline: Record<string, string>;
+  /** Locked voice per story role */
+  cast: Partial<Record<'narrator' | 'char_a' | 'char_b' | 'char_kid', string>>;
+}
+
+/** What the next part's recap may draw on: what actually aired. */
+export interface RecapSource {
+  heard: string;
+  cliffhanger: string;
+  lastLines: { role: string; text: string }[];
+}
+
+/** RJ link rotation state, kept by the client (or the live station) and echoed on each request. */
+export interface LinkState {
+  lastTypes: string[];
+  usedFactIds: string[];
+  /** A question of the day waiting for its answer in a later link */
+  openQuestion?: string;
+  /** Running bits: next episode number per bit id */
+  bitEpisodes: Record<string, number>;
+  lastWeatherAt?: number;
+  lastFestivalAt?: number;
+  onThisDayDone?: boolean;
 }
 
 export interface Weather {
   tempC: number;
   description: string;
+  /** Worth an RJ mention right now */
+  notable?: 'none' | 'rain_soon' | 'raining' | 'heat' | 'cold' | 'bad_air' | 'fog';
+  rainChance3h?: number;
+  pm25?: number;
 }
 
 export interface Segment {
@@ -130,6 +185,14 @@ export interface Segment {
   mood?: Mood;
   /** rj_link only: ids of the studio phone calls this link reads on air */
   dedicated?: string[];
+  /** kahani only: the serial this part belongs to (part 1 returns the new outline and cast) */
+  serial?: SerialState;
+  /** What the producer heard: replaces `summary` in the show log and feeds the next recap */
+  heardSummary?: string;
+  /** rj_link only: the rotation state after this link (echo it on the next request) */
+  linkState?: LinkState;
+  /** news only: newsroom ids aired in this bulletin (send them back in airedNews) */
+  newsIds?: string[];
 }
 
 export interface ListenerContext {
