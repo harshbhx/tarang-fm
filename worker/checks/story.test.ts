@@ -31,7 +31,6 @@ const OPTS: SerialShapeOptions = {
   expectedLast: 'अब से टिफ़िन में एक कटोरी बिल्ली के नाम की भी जाएगी।',
   min: 12,
   max: 18,
-  noListenerName: true,
 };
 
 describe('stage-direction leaks', () => {

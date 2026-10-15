@@ -1,7 +1,8 @@
 /**
  * Free checks for the Kahani (bible §5.1, prompt pack §10.3): code, no model call. A "hard" problem sends the
  * script back for one rewrite with the problem as the note; a "soft" one only joins that note. Every message
- * is written as an instruction the writer can act on.
+ * is written as an instruction the writer can act on. A "block" is a hard problem that must never reach air
+ * (owner rule, 2026-10-15): a draft that still has one after the rewrite airs only if dropping lines repairs it.
  */
 import type { Station, StationId } from '../../shared/types';
 import { fictionLocale, FICTION_LOCALE, STORY_BANNED } from '../story';
@@ -12,10 +13,25 @@ export interface CheckLine {
   delivery?: string;
 }
 
+/** The problems that must never air: each is also listed (as an instruction) in `hard`. */
+export type BlockKind = 'placeholder' | 'leak' | 'english' | 'speaker' | 'kinship' | 'self_address' | 'copied';
+
+export interface Block {
+  kind: BlockKind;
+  /** The line it sits in (0-based) */
+  line: number;
+  /** True when dropping that line repairs it (a leak, an English line, a copy, a placeholder) */
+  droppable: boolean;
+}
+
 export interface CheckResult {
   hard: string[];
   soft: string[];
+  block?: Block[];
 }
+
+/** Blocks a line-dropping repair can't fix, or that sit in lines it may not drop. */
+export const blockCount = (check: CheckResult): number => check.block?.length ?? 0;
 
 // ---- Text helpers --------------------------------------------------------------------------------------
 
@@ -241,17 +257,14 @@ function kinIn(word: string, kin: Kin): boolean {
   return !kin.exact && letters >= 2 && word.startsWith(w);
 }
 
-/**
- * Kinship words the lines use that the outline never defined (the "two people call each other पापा" bug).
- * `defined` is everything the outline says about people: relations, names and who-is-who.
- */
-export function kinshipOutside(lines: CheckLine[], station: StationId, defined: string): string[] {
+/** Each line's kinship words that the outline never defined, by line. */
+function kinshipByLine(lines: CheckLine[], station: StationId, defined: string): { line: number; word: string }[] {
   const table = KINSHIP[station] ?? [];
   const known = kinFold(defined);
   const knownWords = new Set(kinWords(defined));
   const englishWords = new Set(defined.toLowerCase().split(/[^a-z]+/u).filter(Boolean));
-  const out = new Set<string>();
-  for (const line of lines) {
+  const out: { line: number; word: string }[] = [];
+  lines.forEach((line, i) => {
     for (const word of kinWords(line.text)) {
       for (const kin of table) {
         if (!kinIn(word, kin)) continue;
@@ -259,11 +272,19 @@ export function kinshipOutside(lines: CheckLine[], station: StationId, defined: 
           known.includes(kinFold(kin.word)) ||
           [...knownWords].some((k) => kinIn(k, kin)) ||
           kin.aliases.some((a) => englishWords.has(a));
-        if (!ok) out.add(kin.word);
+        if (!ok) out.push({ line: i, word: kin.word });
       }
     }
-  }
-  return [...out];
+  });
+  return out;
+}
+
+/**
+ * Kinship words the lines use that the outline never defined (the "two people call each other पापा" bug).
+ * `defined` is everything the outline says about people: relations, names and who-is-who.
+ */
+export function kinshipOutside(lines: CheckLine[], station: StationId, defined: string): string[] {
+  return [...new Set(kinshipByLine(lines, station, defined).map((k) => k.word))];
 }
 
 // ---- Names early -------------------------------------------------------------------------------------------------
@@ -300,8 +321,6 @@ export interface SerialShapeOptions {
   /** Line count limits */
   min: number;
   max: number;
-  /** Set when the listener's name ({name}) must never appear */
-  noListenerName?: boolean;
   /** The previous part's last lines (parts 2-3): never repeated word for word */
   recapLines?: string[];
 }
@@ -309,12 +328,16 @@ export interface SerialShapeOptions {
 export function serialShape(station: Station, lines: CheckLine[], opts: SerialShapeOptions): CheckResult {
   const hard: string[] = [];
   const soft: string[] = [];
+  const block: Block[] = [];
   const n = lines.length;
   if (n > opts.max) hard.push(`Too long: ${n} lines. Write ${opts.max - 2} lines at most: cut a middle exchange, keep the ending line.`);
   if (n < opts.min) hard.push(`Too short: ${n} lines. Write at least ${opts.min}: the story needs its middle (a try that fails, the turn).`);
   const allowed = new Set(['narrator', ...opts.characters]);
   const strangers = [...new Set(lines.map((l) => l.role).filter((r) => !allowed.has(r)))];
   if (strangers.length) hard.push(`Roles ${strangers.join(', ')} are not in this story: use only ${[...allowed].join(', ')}.`);
+  lines.forEach((l, i) => {
+    if (!allowed.has(l.role)) block.push({ kind: 'speaker', line: i, droppable: false });
+  });
   const speaking = new Set(lines.map((l) => l.role).filter((r) => r !== 'narrator'));
   if (speaking.size < Math.min(2, opts.characters.length)) hard.push('At least two characters must speak: dialogue carries the story.');
   const narrator = lines.filter((l) => l.role === 'narrator').length;
@@ -322,8 +345,9 @@ export function serialShape(station: Station, lines: CheckLine[], opts: SerialSh
 
   const late = namesLate(lines, opts.names);
   for (const role of late) hard.push(`The listener never hears ${role}'s name (${opts.names[role]}) by that character's second line: have someone say it early.`);
-  const kin = kinshipOutside(lines, station.id, opts.defined);
-  if (kin.length) hard.push(`Kinship words not in RELATIONS: ${kin.join(', ')}. Use names, or only the relations the outline defines.`);
+  const kin = kinshipByLine(lines, station.id, opts.defined);
+  if (kin.length) hard.push(`Kinship words not in RELATIONS: ${[...new Set(kin.map((k) => k.word))].join(', ')}. Use names, or only the relations the outline defines.`);
+  for (const line of new Set(kin.map((k) => k.line))) block.push({ kind: 'kinship', line, droppable: false });
 
   const last = lines[n - 1]?.text ?? '';
   if (opts.expectedLast && lineOverlap(last, opts.expectedLast) < 0.3) {
@@ -334,17 +358,21 @@ export function serialShape(station: Station, lines: CheckLine[], opts: SerialSh
   const names = Object.values(opts.names).filter((v): v is string => Boolean(v && !/^none$/i.test(v)));
   const banned = STORY_BANNED[station.id];
   const lang = station.languageName;
+  const fail = (i: number, kind: BlockKind, droppable: boolean, message: string) => {
+    hard.push(message);
+    block.push({ kind, line: i, droppable });
+  };
   lines.forEach((l, i) => {
-    if (isEnglishLine(l.text)) hard.push(`Line ${i + 1} is in English: write it in ${lang} (English only for single everyday words).`);
+    if (isEnglishLine(l.text)) fail(i, 'english', true, `Line ${i + 1} is in English: write it in ${lang} (English only for single everyday words).`);
     const own = opts.names[l.role];
     if (own && !/^none$/i.test(own) && new RegExp(`^\\s*${words(own)[0] ?? '\u0000'}`, 'u').test(fold(l.text)) && /^[^,!?।.]{1,30}[,!]/u.test(l.text)) {
-      hard.push(`Line ${i + 1}: ${l.role} (${own}) calls out their own name. Someone else says it, or use the other character's name.`);
+      fail(i, 'self_address', false, `Line ${i + 1}: ${l.role} (${own}) calls out their own name. Someone else says it, or use the other character's name.`);
     }
     if (opts.recapLines?.some((r) => r.length > 12 && lineOverlap(l.text, r) >= 0.8)) hard.push(`Line ${i + 1} repeats a line from the last part: recap in new words.`);
-    if (leaksDirection(l.text, names)) hard.push(`Line ${i + 1} has a stage direction, label or bracket in "text": only spoken words go there (acting goes in "delivery").`);
-    if (copiesFictionExample(l.text)) hard.push(`Line ${i + 1} copies an example from the instructions: write your own.`);
+    if (leaksDirection(l.text, names)) fail(i, 'leak', true, `Line ${i + 1} has a stage direction, label or bracket in "text": only spoken words go there (acting goes in "delivery").`);
+    if (copiesFictionExample(l.text)) fail(i, 'copied', true, `Line ${i + 1} copies an example from the instructions: write your own.`);
     if (banned?.test(l.text)) hard.push(`Line ${i + 1} uses a stock story phrase: drop it.`);
-    if (opts.noListenerName && /\{\s*(name|nickname)\s*\}/iu.test(l.text)) hard.push(`Line ${i + 1} has {name}: the listener is never named inside a story.`);
+    if (/\{[^{}]{0,24}\}/u.test(l.text)) fail(i, 'placeholder', true, `Line ${i + 1} has a placeholder like {name}: nobody outside the story is ever named in it.`);
   });
 
   const fillers = fillerCount(lines, station.id);
@@ -354,7 +382,7 @@ export function serialShape(station: Station, lines: CheckLine[], opts: SerialSh
 
   const starts = lines.map((l) => words(l.text)[0]).filter(Boolean);
   if (new Set(starts).size < starts.length - 2) soft.push('Several lines start with the same word: vary the openings.');
-  return { hard, soft };
+  return { hard, soft, block };
 }
 
 /** True for a station whose stories are written with the locale table (all on-air languages). */

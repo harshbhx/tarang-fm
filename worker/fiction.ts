@@ -10,7 +10,8 @@ import type { SegmentRequest } from '../shared/schemas';
 import type { Line, RecapSource, Role, Segment, SerialState, Station } from '../shared/types';
 import { castCharacters, castFromRecord, castRecord, castSerial, type SerialCast } from './casting';
 import { adShape } from './checks/ad';
-import { endsWithQuestion, latinShare, leaksDirection, lineOverlap, serialShape, type CheckResult } from './checks/story';
+import { blockCount, endsWithQuestion, latinShare, leaksDirection, lineOverlap, serialShape, type CheckResult } from './checks/story';
+import type { JudgeInput } from './judge/types';
 import { normalizeTitle, type ShowMemory } from './memory';
 import { pickAd } from './pools/ads';
 import { maxTokensFor, SEGMENT_PLAN, subtitlesOn, systemPreamble, type LlmPlan } from './prompts';
@@ -115,9 +116,17 @@ interface WriteSpec<T> {
   plan: LlmPlan;
   subtitles: boolean;
   check: (raw: T) => CheckResult;
+  /** Code's own repairs to an attempt (dropping lines that must never air, the safety net), checked again after */
+  repair?: (raw: T, check: CheckResult) => T;
   deadline: number;
   /** The plan for the attempt after a failed call (e.g. reasoning off when reasoning used up the tokens) */
   afterError?: LlmPlan;
+}
+
+/** A draft as it would air: after code's repairs, with the problems it still has. */
+export interface Draft<T> {
+  raw: T;
+  check: CheckResult;
 }
 
 /** The note appended to the writer's message on a rewrite (prompt pack §8.4). */
@@ -126,8 +135,19 @@ export function producerNote(check: CheckResult): string {
   return `PRODUCER NOTE (the last draft was sent back; fix this and keep what worked):\n${items.map((p) => `- ${p}`).join('\n')}`;
 }
 
-async function writeChecked<T>(sarvam: Sarvam, timings: Timings, spec: WriteSpec<T>): Promise<{ raw: T; check: CheckResult }> {
-  let best: { raw: T; check: CheckResult } | undefined;
+/** True when draft `a` is at least as good as `b`: fewer blocks first, then fewer hard problems. */
+export function atLeastAsGood(a: CheckResult, b: CheckResult): boolean {
+  const blocks = blockCount(a) - blockCount(b);
+  return blocks < 0 || (blocks === 0 && a.hard.length <= b.hard.length);
+}
+
+/**
+ * At most two attempts: the second gets the first one's problems as a note. Each attempt is repaired by code
+ * and checked again, and the better repaired draft is returned with its problems (a tie goes to the rewrite,
+ * which already fixed what the note named). Throws only when no attempt came back at all.
+ */
+async function writeChecked<T>(sarvam: Sarvam, timings: Timings, spec: WriteSpec<T>): Promise<Draft<T>> {
+  let best: Draft<T> | undefined;
   let lastError: unknown;
   let note = '';
   let plan = spec.plan;
@@ -149,8 +169,9 @@ async function writeChecked<T>(sarvam: Sarvam, timings: Timings, spec: WriteSpec
         }),
       );
       const check = spec.check(raw);
-      // On a tie the rewrite wins: it already fixed what the note named
-      if (!best || check.hard.length <= best.check.hard.length) best = { raw, check };
+      const fixed = spec.repair ? spec.repair(raw, check) : raw;
+      const draft: Draft<T> = { raw: fixed, check: fixed === raw ? check : spec.check(fixed) };
+      if (!best || atLeastAsGood(draft.check, best.check)) best = draft;
       if (!check.hard.length) break;
       console.error(`[fiction] ${spec.name} attempt ${attempt + 1} sent back: ${check.hard.slice(0, 3).join(' | ')}`);
       note = producerNote(check);
@@ -163,6 +184,71 @@ async function writeChecked<T>(sarvam: Sarvam, timings: Timings, spec: WriteSpec
   if (!best) throw lastError ?? new Error(`${spec.name}: budget exhausted`);
   return best;
 }
+
+/** How far the line-dropping repair may go: a story keeps its ending line and loses at most 2 lines. */
+interface DropPolicy {
+  keepLast: boolean;
+  maxDrops: number;
+}
+const STORY_DROPS: DropPolicy = { keepLast: true, maxDrops: 2 };
+const AD_DROPS: DropPolicy = { keepLast: false, maxDrops: Infinity };
+
+/**
+ * Drops the lines whose only must-never-air problems are droppable ones (a stage direction, an English line, a
+ * copied example, a placeholder). A line with a block dropping can't repair is kept, so the draft stays blocked;
+ * so is everything when the repair would need more drops than the policy allows.
+ */
+export function dropBlocked<L>(lines: L[], check: CheckResult, policy: DropPolicy): L[] {
+  const blocks = check.block ?? [];
+  if (!blocks.length) return lines;
+  const fixed = new Set(blocks.filter((b) => !b.droppable).map((b) => b.line));
+  const drop = new Set(blocks.filter((b) => b.droppable && !fixed.has(b.line) && !(policy.keepLast && b.line === lines.length - 1)).map((b) => b.line));
+  if (drop.size > policy.maxDrops) return lines;
+  return lines.filter((_l, i) => !drop.has(i));
+}
+
+// ---- The acceptance step (owner decision 2, 2026-10-15) -------------------------------------------------------
+
+/** What the producer's judge says about a draft: only coherence decides here. */
+export interface FictionVerdict {
+  coherence?: number;
+}
+
+/** The producer's judge, plugged in by the caller. Resolving undefined (or failing) means "no verdict". */
+export type FictionJudge = (input: JudgeInput) => Promise<FictionVerdict | undefined>;
+
+/** A judge that takes longer than this gives no verdict. */
+const JUDGE_TIMEOUT_MS = 8000;
+
+/**
+ * Whether the better draft may air. A must-never-air problem that dropping lines couldn't repair never airs.
+ * Otherwise the judge's verdict decides when there is one (coherence 3 or more airs); with no verdict (no judge
+ * yet, or it timed out), the draft airs.
+ */
+export function mayAir(check: CheckResult, verdict?: FictionVerdict): boolean {
+  if (blockCount(check)) return false;
+  if (typeof verdict?.coherence === 'number') return verdict.coherence >= 3;
+  return true;
+}
+
+/** Asks the judge about a draft that still fails the free checks (but has nothing that must never air). */
+async function verdictFor(judge: FictionJudge | undefined, check: CheckResult, input: () => JudgeInput): Promise<FictionVerdict | undefined> {
+  if (!judge || !check.hard.length || blockCount(check)) return undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const late = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), JUDGE_TIMEOUT_MS);
+    });
+    return await Promise.race([judge(input()), late]);
+  } catch (err) {
+    console.error(`[fiction] judge failed: ${String(err)}`);
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const reviewLines = (lines: { role: string; text: string; delivery?: string }[]) => lines.map((l) => ({ role: l.role, text: l.text, ...(l.delivery ? { delivery: l.delivery } : {}) }));
 
 // ---- Lines on air ----------------------------------------------------------------------------------------------
 
@@ -360,7 +446,6 @@ async function buildOneShot(sarvam: Sarvam, station: Station, req: SegmentReques
       expectedLast: undefined,
       min: ONE_SHOT_LINES.min,
       max: ONE_SHOT_LINES.max,
-      noListenerName: true,
     });
     if (plan.airedTitles?.has(normalizeTitle(str(raw.title)))) result.hard.push(`The title "${str(raw.title)}" already aired: pick another.`);
     const last = str(raw.last_line_native);
@@ -455,7 +540,6 @@ async function buildPart(
       expectedLast: end.text || undefined,
       min: PART_LINES.min,
       max: PART_LINES.max,
-      noListenerName: true,
       recapLines: recap?.lastLines.map((l) => l.text),
     });
   let written: { raw: ModelScript; check: CheckResult };

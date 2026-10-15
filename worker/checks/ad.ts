@@ -7,7 +7,7 @@ import type { StationId } from '../../shared/types';
 import type { AdParody } from '../pools/ads';
 import { rainInSeason } from '../pools/ads';
 import { fictionLocale } from '../story';
-import { copiesFictionExample, fold, leaksDirection, lineOverlap, words, type CheckLine, type CheckResult } from './story';
+import { copiesFictionExample, fold, leaksDirection, lineOverlap, words, type Block, type BlockKind, type CheckLine, type CheckResult } from './story';
 
 /** The fine-print beat in any station language (or the universal asterisk words). */
 const TNC = /T\s*&\s*C|terms|conditions|शर्तें|शर्त|अटी|நிபந்தனை|শর্ত|શરત|\*/iu;
@@ -39,9 +39,17 @@ export function brandMentions(lines: CheckLine[], brand: string): number {
   return lines.reduce((n, l) => n + words(l.text).filter((w) => w.startsWith(key)).length, 0);
 }
 
+const AD_ROLES = new Set(['ad_announcer', 'ad_customer']);
+
 export function adShape(station: StationId, lines: CheckLine[], opts: AdShapeOptions): CheckResult {
   const hard: string[] = [];
   const soft: string[] = [];
+  const block: Block[] = [];
+  // Every line-level problem that must never air can be repaired by dropping the line
+  const fail = (i: number, kind: BlockKind, message: string) => {
+    hard.push(message);
+    block.push({ kind, line: i, droppable: true });
+  };
   const n = lines.length;
   const [min, max] = opts.card.lines;
   if (n < 3) hard.push(`Too short: ${n} lines. The format needs its ${min}-${max} beats.`);
@@ -60,8 +68,10 @@ export function adShape(station: StationId, lines: CheckLine[], opts: AdShapeOpt
   lines.forEach((l, i) => {
     const rest = words(l.text).filter((w) => !brandKey || !w.startsWith(brandKey));
     if (rest.length < 2) hard.push(`Line ${i + 1} is only the brand name: every line must move the joke.`);
-    if (leaksDirection(l.text)) hard.push(`Line ${i + 1} reads a stage direction, label or bracket aloud: only spoken words go in "text", acting goes in "delivery".`);
-    if (copiesFictionExample(l.text)) hard.push(`Line ${i + 1} copies an example from the instructions: write your own joke.`);
+    if (!AD_ROLES.has(l.role)) fail(i, 'speaker', `Line ${i + 1} has the role "${l.role}": use only ad_announcer or ad_customer.`);
+    if (leaksDirection(l.text)) fail(i, 'leak', `Line ${i + 1} reads a stage direction, label or bracket aloud: only spoken words go in "text", acting goes in "delivery".`);
+    if (copiesFictionExample(l.text)) fail(i, 'copied', `Line ${i + 1} copies an example from the instructions: write your own joke.`);
+    if (/\{[^{}]{0,24}\}/u.test(l.text)) fail(i, 'placeholder', `Line ${i + 1} has a placeholder like {name}: an ad never names anyone outside it.`);
   });
 
   const tncLine = lines.findIndex((l) => TNC.test(l.text));
@@ -71,7 +81,7 @@ export function adShape(station: StationId, lines: CheckLine[], opts: AdShapeOpt
   }
   lines.forEach((l, i) => {
     if (i === tncLine) return;
-    if (LATIN_RUN.test(l.text)) hard.push(`Line ${i + 1} is a full English sentence: keep the sentence in ${station === 'hi' ? 'Hindi' : 'the station language'}, English only for single words.`);
+    if (LATIN_RUN.test(l.text)) fail(i, 'english', `Line ${i + 1} is a full English sentence: keep the sentence in ${station === 'hi' ? 'Hindi' : 'the station language'}, English only for single words.`);
   });
 
   const all = lines.map((l) => l.text).join(' ');
@@ -86,5 +96,5 @@ export function adShape(station: StationId, lines: CheckLine[], opts: AdShapeOpt
   if (lines.some((l) => fillers.some((f) => fold(l.text).startsWith(`${f} `) || fold(l.text).startsWith(`${f},`)))) {
     soft.push('A line starts with a filler word: open on the format instead.');
   }
-  return { hard, soft };
+  return { hard, soft, block };
 }
