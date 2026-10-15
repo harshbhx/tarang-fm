@@ -155,7 +155,13 @@ describe('ad shape', () => {
     const all = r.hard.join(' ');
     expect(all).toMatch(/never chanted/);
     expect(all).toMatch(/real landmark/);
-    expect(all).toMatch(/punchline you planned/);
+    // §5.1 leaves the joke to the judge: a missed planned punchline is a note, not a failure
+    expect(r.soft.join(' ')).toMatch(/punchline you planned/);
+  });
+  it('allows the brand once or twice, never three times', () => {
+    const lines = (n: number) => [ad('ad_customer', 'मेहमान तीन दिन से गए ही नहीं, और कल फिर आ रहे हैं!'), ad('ad_announcer', `पेश है ${Array(n).fill('विदाई Express').join(' और ')}, एक बटन में विदा।`), ad('ad_announcer', 'घोषणा सुनकर मामाजी ने reservation दो दिन और बढ़ा लिया।', 'fast')];
+    expect(freeChecks('ad_break', lines(2), { station: 'hi', brand: 'विदाई Express' }).hard).toEqual([]);
+    expect(freeChecks('ad_break', lines(3), { station: 'hi', brand: 'विदाई Express' }).hard.join(' ')).toMatch(/said 3 times/);
   });
 });
 
@@ -178,5 +184,28 @@ describe('the calibration set', () => {
     expect(msg('before-hi-05-rj_link')).toMatch(/time or the weather/);
     expect(msg('before-hi-04-kahani')).toMatch(/on a question/);
     expect(msg('before-ta-01-rj_link')).toMatch(/லக்ஷ்மி விலாஸ்/);
+  });
+});
+
+describe('line counts (limits.ts)', () => {
+  const news = (k: number) => Array.from({ length: k }, (_, i) => ({ role: 'news', text: `देश में: खबर नंबर ${i + 1} पर ये हुआ, और उसके बाद ये।` }));
+  const count = (r: { hard: string[] }) => r.hard.filter((h) => /^Too (short|long)/.test(h));
+  it('sizes a news update to its items, as the news prompt asks', () => {
+    const ctx: FreeContext = { station: 'hi', mode: 'update', factText: 'खबर नंबर 1 2 3 4 5 6 7' };
+    expect(count(freeChecks('news', news(7), { ...ctx, items: 4 }))).toEqual([]);
+    expect(count(freeChecks('news', news(7), { ...ctx, items: 3 }))).toHaveLength(1);
+    expect(count(freeChecks('news', news(5), ctx))).toEqual([]);
+  });
+  it('lets a full bulletin from a short slate run short instead of padding it', () => {
+    const ctx: FreeContext = { station: 'hi', mode: 'full', factText: Array.from({ length: 16 }, (_, i) => i + 1).join(' ') + ' खबर नंबर' };
+    expect(count(freeChecks('news', news(9), { ...ctx, items: 5 }))).toEqual([]);
+    expect(count(freeChecks('news', news(9), { ...ctx, items: 6 }))).toHaveLength(1);
+    expect(count(freeChecks('news', news(11), ctx))).toHaveLength(1);
+  });
+  it('adds a line per studio call, and skips the count when the RJ mode is unknown', () => {
+    const six = Array.from({ length: 6 }, (_, i) => rj(`लाइन ${['पहली', 'दूसरी', 'तीसरी', 'चौथी', 'पाँचवीं', 'छठी'][i]}, अपनी बात के साथ।`));
+    expect(count(freeChecks('rj_link', six, { ...HI, mode: 'payload' }))).toHaveLength(1);
+    expect(count(freeChecks('rj_link', six, { ...HI, mode: 'payload', calls: 1 }))).toEqual([]);
+    expect(count(freeChecks('rj_link', six, HI))).toEqual([]);
   });
 });

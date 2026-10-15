@@ -11,6 +11,10 @@
  * rewrite note.
  */
 import type { StationId } from '../../shared/types';
+import {
+  AD_BRAND_MENTIONS, AD_CHARS, AD_LINES, ENDING_OVERLAP, FILLER_MAX, KAHANI_LINES, LATIN_RUN_WORDS, MONOLOGUE_LINES, NARRATOR_MAX_SHARE,
+  NEWS_MIN_AFTER_DROP, PUNCHLINE_OVERLAP, RHYTHM_MIN_LINES, RHYTHM_MIN_SPREAD, newsLines, rjLines, type Range,
+} from './limits';
 
 export type FreeSegmentType = 'rj_link' | 'news' | 'ad_break' | 'kahani';
 
@@ -43,6 +47,10 @@ export interface FreeContext {
   nextAllowed?: string;
   /** The next segment's type, so a handover line can be recognised */
   nextType?: string;
+  /** rj_link: studio calls read on air (one line each, on top of the mode's lines) */
+  calls?: number;
+  /** news: how many slate items the bulletin was given (sets its line count) */
+  items?: number;
   /** Words the segment may always say: station name, frequency, RJ or newsreader name, city, state */
   frame?: string[];
   /** The exact TIME phrase (opener and news) */
@@ -213,7 +221,7 @@ export function copiedFragment(text: string, extra: string[] = []): string | und
 
 // ---- Fillers and tics -------------------------------------------------------------------------------------------------
 
-/** Bible §3.1: the filler words, per station language. Counted in code, at most 2 per segment. */
+/** Bible §3.1: the filler words, per station language. Counted in code, at most FILLER_MAX per segment. */
 export const FILLERS: Partial<Record<StationId, string[]>> = {
   hi: ['अरे', 'यार', 'वैसे', 'सच में', 'बिल्कुल', 'बिलकुल', 'मतलब', 'हाँ जी', 'उफ़्फ़', 'उफ़', 'अरे बाप रे', 'सच बताऊँ तो'],
   mr: ['अरे', 'बरं', 'म्हणजे', 'खरंच'],
@@ -595,17 +603,6 @@ function saysName(text: string, name: string): boolean {
 
 // ---- Per-type shape checks -----------------------------------------------------------------------------------------
 
-const LINE_RANGE: Record<string, [number, number]> = {
-  'rj_link:opener': [3, 4],
-  'rj_link:payload': [3, 5],
-  'rj_link:kahani_in': [2, 3],
-  'rj_link:kahani_out': [3, 5],
-  'news:full': [10, 15],
-  'news:update': [4, 6],
-  ad_break: [3, 6],
-  kahani: [12, 18],
-};
-
 const NEWS_WORDS = /खबर|ख़बर|समाचार|news|बातम्या|செய்தி|খবর|সংবাদ|સમાચાર/iu;
 const BREAK_WORDS = /break|ब्रेक|विज्ञापन|जाहिरात|இடைவேளை|বিরতি|બ્રેક/iu;
 const STORY_WORDS = /कहानी|कड़ी|story|गोष्ट|भाग|கதை|பகுதி|গল্প|পর্ব|વાર્તા|ભાગ/iu;
@@ -614,13 +611,14 @@ const HEARSAY = /बताया जा रहा है|सूत्रों �
 /** A call to action as the last line (the ad ended on "buy it" instead of the joke) */
 const CTA_END = /आज ही|अभी\s+(?:call|order|मंगा|ख़रीद|खरीद)|ख़रीदिए|खरीदिए|लीजिए|मंगाइए|मंगवाइए|order now|buy now|call now/iu;
 const TNC = /T\s*&\s*C|terms|conditions|शर्तें|शर्त|अटी|நிபந்தனை|শর্ত|શરત|\*/iu;
-/** Five or more Latin words in a row: a full English sentence */
-const LATIN_RUN = /(?:\b[A-Za-z][A-Za-z'&.-]*\b[\s,!?]+){4,}\b[A-Za-z][A-Za-z'&.-]*\b/u;
+/** LATIN_RUN_WORDS or more Latin words in a row: a full English sentence */
+const LATIN_RUN = new RegExp(String.raw`(?:\b[A-Za-z][A-Za-z'&.-]*\b[\s,!?]+){${LATIN_RUN_WORDS - 1},}\b[A-Za-z][A-Za-z'&.-]*\b`, 'u');
 
-function rangeFor(type: FreeSegmentType, mode?: string): [number, number] | undefined {
-  if (type === 'rj_link') return LINE_RANGE[`rj_link:${mode ?? 'payload'}`] ?? LINE_RANGE['rj_link:payload'];
-  if (type === 'news') return LINE_RANGE[`news:${mode === 'update' ? 'update' : 'full'}`];
-  return LINE_RANGE[type];
+/** The line count the segment needs (limits.ts); undefined when it can't be known (an RJ link of unknown mode). */
+function rangeFor(type: FreeSegmentType, ctx: Pick<FreeContext, 'mode' | 'items' | 'calls'>): Range | undefined {
+  if (type === 'rj_link') return rjLines(ctx.mode, ctx.calls);
+  if (type === 'news') return newsLines(ctx.mode, ctx.items);
+  return type === 'ad_break' ? AD_LINES : KAHANI_LINES;
 }
 
 /** Lines said twice in this segment (exact or near-exact), and lines that already aired this session. */
@@ -639,9 +637,9 @@ export function repeatedLines(lines: FreeLine[], aired: string[] = []): { line: 
 /** Rhythm (bible §3.2): soft notes only. */
 function rhythmNotes(lines: FreeLine[]): string[] {
   const soft: string[] = [];
-  if (lines.length >= 4) {
+  if (lines.length >= RHYTHM_MIN_LINES) {
     const lens = lines.map((l) => l.text.length);
-    if (Math.max(...lens) - Math.min(...lens) < 30) soft.push(`Lines are all ${Math.min(...lens)}-${Math.max(...lens)} characters: add one short line (under 6 words) and one longer one.`);
+    if (Math.max(...lens) - Math.min(...lens) < RHYTHM_MIN_SPREAD) soft.push(`Lines are all ${Math.min(...lens)}-${Math.max(...lens)} characters: add one short line (under 6 words) and one longer one.`);
   }
   const firsts = lines.map((l) => wordsOf(l.text)[0] ?? '');
   const dup = firsts.findIndex((w, i) => w && w.length > 1 && firsts.indexOf(w) !== i);
@@ -665,7 +663,7 @@ export function freeChecks(type: FreeSegmentType, lines: FreeLine[], ctx: FreeCo
   if (!n) return { pass: false, hard: ['The script has no lines.'], soft: [] };
 
   // Line count
-  const range = rangeFor(type, ctx.mode);
+  const range = rangeFor(type, ctx);
   if (range) {
     const [min, max] = range;
     if (n < min) hard.push(`Too short: ${n} lines; this segment needs ${min}-${max}.`);
@@ -692,9 +690,9 @@ export function freeChecks(type: FreeSegmentType, lines: FreeLine[], ctx: FreeCo
   // Fillers and tics (not news: "आपके लिए मतलब:" is a news cue)
   if (type !== 'news') {
     const f = fillerReport(lines, station);
-    if (f.total > 2) {
+    if (f.total > FILLER_MAX) {
       const where = [...f.found.entries()].map(([i, ws]) => `${n1(i)}: ${ws.join(', ')}`).join('; ');
-      hard.push(`${f.total} filler words (${where}): at most 2 in the whole script.`);
+      hard.push(`${f.total} filler words (${where}): at most ${FILLER_MAX} in the whole script.`);
     }
     if (f.starts.includes(0)) hard.push(`${n1(0)} opens on a filler word: open on the point instead.`);
     const otherStarts = f.starts.filter((i) => i > 0);
@@ -778,7 +776,7 @@ function checkNews(lines: FreeLine[], ctx: FreeContext, hard: string[], soft: st
       soft.push(`${n1(i)} says "${m[0]}", which no item says: dropped.`);
     }
   });
-  const min = ctx.mode === 'update' ? 4 : 8;
+  const min = ctx.mode === 'update' ? NEWS_MIN_AFTER_DROP.update : NEWS_MIN_AFTER_DROP.full;
   const left = lines.length - drop.size;
   if (drop.size && left < min) hard.push(`Only ${left} lines are left after dropping invented ones: rewrite from the items only.`);
   const first = lines.find((_, i) => !drop.has(i));
@@ -788,15 +786,15 @@ function checkNews(lines: FreeLine[], ctx: FreeContext, hard: string[], soft: st
 function checkAd(lines: FreeLine[], ctx: FreeContext, hard: string[], soft: string[]): void {
   const n = lines.length;
   const chars = lines.reduce((s, l) => s + l.text.length, 0);
-  if (chars > 520) hard.push(`Too long to say in 20 seconds (${chars} characters): under 400.`);
-  else if (chars > 420) soft.push(`${chars} characters: aim for under 400.`);
+  if (chars > AD_CHARS.max) hard.push(`Too long to say in 20 seconds (${chars} characters): under ${AD_CHARS.target}.`);
+  else if (chars > AD_CHARS.target) soft.push(`${chars} characters: aim for under ${AD_CHARS.target}.`);
 
   const brand = (ctx.brand ?? '').trim();
   const brandKey = brand ? squash(brand.split(/\s+/)[0]) : '';
   if (brandKey.length >= 2) {
     const mentions = lines.reduce((s, l) => s + (squash(l.text).split(brandKey).length - 1), 0);
-    if (mentions === 0) hard.push(`The brand "${brand}" is never said: say it once or twice.`);
-    else if (mentions > 3) hard.push(`The brand is said ${mentions} times: once or twice, never chanted.`);
+    if (mentions < AD_BRAND_MENTIONS[0]) hard.push(`The brand "${brand}" is never said: say it once or twice.`);
+    else if (mentions > AD_BRAND_MENTIONS[1]) hard.push(`The brand is said ${mentions} times: once or twice, never chanted.`);
     lines.forEach((l, i) => {
       const rest = wordsOf(l.text).filter((w) => !squash(w).startsWith(brandKey.slice(0, Math.max(2, brandKey.length - 1))) && w.length > 1);
       if (rest.length < 2) hard.push(`${n1(i)} is only the brand name: every line must move the joke.`);
@@ -817,13 +815,14 @@ function checkAd(lines: FreeLine[], ctx: FreeContext, hard: string[], soft: stri
     if (LATIN_RUN.test(l.text)) hard.push(`${n1(i)} is a full English sentence: keep the sentence in the station language, English only for single words.`);
   });
 
-  // The punchline: planned and landed at the end, or at least not a bare call to action
+  // The punchline: planned and landed at the end, or at least not a bare call to action. Soft: §5.1 leaves
+  // whether the joke landed to the judge (point_landed), and a reworded punchline is still a punchline.
   const tail = lines.slice(-2).map((l) => l.text).join(' ');
   if (ctx.punchline && wordsOf(ctx.punchline).length >= 2) {
-    if (overlap(tail, ctx.punchline) < 0.25) hard.push('The punchline you planned never lands in the last two lines: end on the joke.');
+    if (overlap(tail, ctx.punchline) < PUNCHLINE_OVERLAP) soft.push('The punchline you planned never lands in the last two lines: end on the joke.');
   }
   const last = lines[n - 1]?.text ?? '';
-  if (CTA_END.test(last) && !TNC.test(last) && (!ctx.punchline || overlap(last, ctx.punchline) < 0.25)) soft.push(`${n1(n - 1)} ends on "buy it now": the last laugh should be the punchline, not a call to action.`);
+  if (CTA_END.test(last) && !TNC.test(last) && (!ctx.punchline || overlap(last, ctx.punchline) < PUNCHLINE_OVERLAP)) soft.push(`${n1(n - 1)} ends on "buy it now": the last laugh should be the punchline, not a call to action.`);
 
   // Real landmarks in a fictional ad (no local pack in ads)
   for (const group of LANDMARKS) {
@@ -843,7 +842,7 @@ function checkKahani(lines: FreeLine[], ctx: FreeContext, hard: string[], soft: 
   if (!final && n && /^(?:क्यों|क्या|अचानक|why|what)\s*[?？!।.]*$/iu.test(fold(last).replace(/[?？!।.\s]+$/u, '').trim())) {
     hard.push(`${n1(n - 1)} ends on a vague word, not a new concrete fact.`);
   }
-  if (ctx.expectedLastLine && overlap(last, ctx.expectedLastLine) < 0.3) {
+  if (ctx.expectedLastLine && overlap(last, ctx.expectedLastLine) < ENDING_OVERLAP) {
     hard.push(`The part must end on the outline's line: "${ctx.expectedLastLine}".`);
   }
 
@@ -876,11 +875,11 @@ function checkKahani(lines: FreeLine[], ctx: FreeContext, hard: string[], soft: 
 
   // Narrator share and monologues
   const narr = lines.filter((l) => l.role === 'narrator').length;
-  if (n >= 8 && narr / n > 0.4) soft.push(`The narrator has ${narr} of ${n} lines: at most 40%, let the dialogue carry it.`);
+  if (n >= 8 && narr / n > NARRATOR_MAX_SHARE) soft.push(`The narrator has ${narr} of ${n} lines: at most ${Math.round(NARRATOR_MAX_SHARE * 100)}%, let the dialogue carry it.`);
   let run = 1;
   for (let i = 1; i < n; i++) {
     run = lines[i].role === lines[i - 1].role ? run + 1 : 1;
-    if (run === 4 && lines[i].role !== 'narrator') hard.push(`Lines ${i - 2}-${i + 1}: ${lines[i].role} speaks 4 lines in a row to nobody: give the other character a reply.`);
+    if (run === MONOLOGUE_LINES && lines[i].role !== 'narrator') hard.push(`Lines ${i - MONOLOGUE_LINES + 2}-${i + 1}: ${lines[i].role} speaks ${MONOLOGUE_LINES} lines in a row to nobody: give the other character a reply.`);
   }
   const roles = new Set(lines.map((l) => l.role));
   for (const r of Object.keys(names)) if (names[r] && !roles.has(r)) soft.push(`${r} (${names[r]}) never speaks in this part.`);
