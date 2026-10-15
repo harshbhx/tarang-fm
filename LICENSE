@@ -1,0 +1,27 @@
+Tarang FM
+Copyright (c) 2026 Harsh Bhanushali. All rights reserved.
+
+This repository and everything in it (source code, prompts, show writing,
+station designs, artwork, documentation and the compiled site) is proprietary.
+
+No license is granted. Without prior written permission from the copyright
+holder, you may not use, copy, modify, merge, publish, distribute, sublicense,
+sell, deploy, host, or create derivative works from any part of this
+repository, in whole or in part, for any purpose, commercial or not.
+
+Making this repository visible on GitHub does not grant any rights beyond those
+GitHub's Terms of Service require for public repositories (viewing and forking
+within GitHub). A fork made under those terms gives no right to use, run, deploy
+or redistribute the code.
+
+Third-party components keep their own licenses. Where a file states that it is
+adapted from an outside source (for example in src/components/bits/), that
+source's license applies to the adapted portion. Sarvam AI, Cloudflare and other
+named services and trademarks belong to their owners.
+
+To request permission, open an issue at https://github.com/harshbhx/tarang-fm
+or contact the copyright holder through GitHub.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE.

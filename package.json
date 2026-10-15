@@ -1,6 +1,7 @@
 {
   "name": "tarang-fm",
   "private": true,
+  "license": "UNLICENSED",
   "version": "0.1.0",
   "description": "An AI radio station in your language, voiced by Sarvam Bulbul v4 Flash.",
   "type": "module",
