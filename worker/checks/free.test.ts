@@ -19,6 +19,13 @@ describe('leaksDirection', () => {
     expect(leaksDirection('रात के सवा आठ, आसमान एकदम साफ़।')).toBe(false);
     expect(leaksDirection('T&C: पंखा अलग से आता है।')).toBe(false);
   });
+  it('reads the fine-print asterisk as fine print, but starred text as a direction', () => {
+    expect(leaksDirection('*शर्तें लागू।')).toBe(false);
+    expect(leaksDirection('90% तक छूट*! *सिर्फ़ बाएँ पैर के मोज़ों पर।')).toBe(false);
+    expect(leaksDirection('*धीरे से* ये मेरा राज़ है।')).toBe(true);
+    expect(leaksDirection('ये **बहुत** ज़रूरी है।')).toBe(true);
+    expect(leaksDirection('ये * बहुत ज़रूरी है।')).toBe(true);
+  });
 });
 
 describe('copiedFragment', () => {
@@ -55,6 +62,31 @@ describe('time and weather', () => {
     expect(saysTimeOrWeather('रात के सवा आठ, 27 डिग्री।', 'hi')).toBe(true);
     expect(saysTimeOrWeather('இன்னைக்கு மாலை 8:15 மணி', 'ta')).toBe(true);
     expect(saysTimeOrWeather('मेरा सीधा हिसाब है: पहले खाना।', 'hi')).toBe(false);
+  });
+  it('hears the clock and the weather in every station language', () => {
+    expect(saysTimeOrWeather('अभी सवा आठ बजे हैं।', 'hi')).toBe(true);
+    expect(saysTimeOrWeather('साढ़े नौ हो गए, और मैं अभी भी यहीं हूँ।', 'hi')).toBe(true);
+    expect(saysTimeOrWeather('घड़ी में आठ बजकर दस मिनट।', 'hi')).toBe(true);
+    expect(saysTimeOrWeather('आज का मौसम एकदम सुहाना है।', 'hi')).toBe(true);
+    expect(saysTimeOrWeather('मौसम बहुत ठंडा हो गया है।', 'hi')).toBe(true);
+    expect(saysTimeOrWeather('रात्री सव्वा आठ वाजता भेटूया।', 'mr')).toBe(true);
+    expect(saysTimeOrWeather('बाहेर २७ अंश आहे।', 'mr')).toBe(true);
+    expect(saysTimeOrWeather('રાત્રે સવા આઠ વાગ્યે ગરબા શરૂ.', 'gu')).toBe(true);
+    expect(saysTimeOrWeather('এখন রাত সাড়ে আটটা বাজে।', 'bn')).toBe(true);
+    expect(saysTimeOrWeather('ராத்திரி எட்டு மணிக்கு சந்திப்போம்.', 'ta')).toBe(true);
+    expect(saysTimeOrWeather('வானிலை இன்னிக்கு அருமை.', 'ta')).toBe(true);
+  });
+  it('does not mistake a season, a price, a count or a ringing bell for the time or the weather', () => {
+    expect(saysTimeOrWeather('शादियों का मौसम आ गया, और मेरा suit अभी भी tight है।', 'hi')).toBe(false);
+    expect(saysTimeOrWeather('त्योहारों के मौसम में मिठाई का हिसाब कौन रखता है?', 'hi')).toBe(false);
+    expect(saysTimeOrWeather('साढ़े तीन सौ रुपये का एक समोसा? भाई, ये तो लूट है।', 'hi')).toBe(false);
+    expect(saysTimeOrWeather('सवा लाख की बात है, सवा सौ लोग आए।', 'hi')).toBe(false);
+    expect(saysTimeOrWeather('साढ़े तीन घंटे की meeting, और नतीजा एक coffee।', 'hi')).toBe(false);
+    expect(saysTimeOrWeather('जब भी फ़ोन की घंटी बजे, समझ जाइए कि मम्मी हैं।', 'hi')).toBe(false);
+    expect(saysTimeOrWeather('साडे तीनशे रुपये फक्त।', 'mr')).toBe(false);
+    expect(saysTimeOrWeather('সাড়ে তিনশো টাকা দিয়ে দুটো বই কিনলাম।', 'bn')).toBe(false);
+    expect(saysTimeOrWeather('சைக்கிள் மணி சத்தம் கேட்டுச்சு.', 'ta')).toBe(false);
+    expect(saysTimeOrWeather('સાડા ત્રણસો રૂપિયાની ચા?', 'gu')).toBe(false);
   });
   it('fails a non-opener link that gives the time or weather, but not the opener', () => {
     const lines = [rj('रात के सवा आठ, आसमान साफ़ है।'), rj('मेरा सीधा हिसाब है: शादी में पहले खाना, फोटो बाद में।'), rj('बस एक छोटा सा break।')];
@@ -123,7 +155,13 @@ describe('ad shape', () => {
     const all = r.hard.join(' ');
     expect(all).toMatch(/never chanted/);
     expect(all).toMatch(/real landmark/);
-    expect(all).toMatch(/punchline you planned/);
+    // §5.1 leaves the joke to the judge: a missed planned punchline is a note, not a failure
+    expect(r.soft.join(' ')).toMatch(/punchline you planned/);
+  });
+  it('allows the brand once or twice, never three times', () => {
+    const lines = (n: number) => [ad('ad_customer', 'मेहमान तीन दिन से गए ही नहीं, और कल फिर आ रहे हैं!'), ad('ad_announcer', `पेश है ${Array(n).fill('विदाई Express').join(' और ')}, एक बटन में विदा।`), ad('ad_announcer', 'घोषणा सुनकर मामाजी ने reservation दो दिन और बढ़ा लिया।', 'fast')];
+    expect(freeChecks('ad_break', lines(2), { station: 'hi', brand: 'विदाई Express' }).hard).toEqual([]);
+    expect(freeChecks('ad_break', lines(3), { station: 'hi', brand: 'विदाई Express' }).hard.join(' ')).toMatch(/said 3 times/);
   });
 });
 
@@ -146,5 +184,28 @@ describe('the calibration set', () => {
     expect(msg('before-hi-05-rj_link')).toMatch(/time or the weather/);
     expect(msg('before-hi-04-kahani')).toMatch(/on a question/);
     expect(msg('before-ta-01-rj_link')).toMatch(/லக்ஷ்மி விலாஸ்/);
+  });
+});
+
+describe('line counts (limits.ts)', () => {
+  const news = (k: number) => Array.from({ length: k }, (_, i) => ({ role: 'news', text: `देश में: खबर नंबर ${i + 1} पर ये हुआ, और उसके बाद ये।` }));
+  const count = (r: { hard: string[] }) => r.hard.filter((h) => /^Too (short|long)/.test(h));
+  it('sizes a news update to its items, as the news prompt asks', () => {
+    const ctx: FreeContext = { station: 'hi', mode: 'update', factText: 'खबर नंबर 1 2 3 4 5 6 7' };
+    expect(count(freeChecks('news', news(7), { ...ctx, items: 4 }))).toEqual([]);
+    expect(count(freeChecks('news', news(7), { ...ctx, items: 3 }))).toHaveLength(1);
+    expect(count(freeChecks('news', news(5), ctx))).toEqual([]);
+  });
+  it('lets a full bulletin from a short slate run short instead of padding it', () => {
+    const ctx: FreeContext = { station: 'hi', mode: 'full', factText: Array.from({ length: 16 }, (_, i) => i + 1).join(' ') + ' खबर नंबर' };
+    expect(count(freeChecks('news', news(9), { ...ctx, items: 5 }))).toEqual([]);
+    expect(count(freeChecks('news', news(9), { ...ctx, items: 6 }))).toHaveLength(1);
+    expect(count(freeChecks('news', news(11), ctx))).toHaveLength(1);
+  });
+  it('adds a line per studio call, and skips the count when the RJ mode is unknown', () => {
+    const six = Array.from({ length: 6 }, (_, i) => rj(`लाइन ${['पहली', 'दूसरी', 'तीसरी', 'चौथी', 'पाँचवीं', 'छठी'][i]}, अपनी बात के साथ।`));
+    expect(count(freeChecks('rj_link', six, { ...HI, mode: 'payload' }))).toHaveLength(1);
+    expect(count(freeChecks('rj_link', six, { ...HI, mode: 'payload', calls: 1 }))).toEqual([]);
+    expect(count(freeChecks('rj_link', six, HI))).toEqual([]);
   });
 });
