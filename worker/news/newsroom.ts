@@ -3,7 +3,7 @@ import type { Source, Station } from '../../shared/types';
 import { cadence, pickBulletin, slateSources } from './bulletin';
 import { cityKeyOf, HOME_STATE, localFeeds, newsStationOf, stateCodeOf } from './catalog';
 import { fetchAndStore } from './pipeline';
-import { localDecision, POLICY, stationDecision, topupDecision, type RefreshState } from './policy';
+import { localDecision, POLICY, requestDecision, stationDecision, topupDecision, type RefreshState } from './policy';
 import { claimRefresh, finishRefreshRow, loadStories, markAired, refreshRows, unairedCounts, type RefreshRow } from './store';
 import type { BulletinMode, NewsStation } from './types';
 import type { NewsRefreshParams } from './workflow';
@@ -78,8 +78,15 @@ async function slateFor(env: Env, pool: NewsStation, req: BulletinRequest): Prom
 
   // The first listener of a station starts its pool
   const stationRow = rows.get(stationScope);
-  if (!stationRow?.refreshed_at && (await claimRefresh(db, stationScope, now, staleClaim))) {
-    background(req, startRefresh(env, { station: pool, kind: 'refresh' }, now));
+  if (!stationRow?.refreshed_at) {
+    if (await claimRefresh(db, stationScope, now, staleClaim)) background(req, startRefresh(env, { station: pool, kind: 'refresh' }, now));
+  } else {
+    // A listener is here: refresh in the background when most of the pool aired, or when it is hours old
+    const d = requestDecision(toState(stationRow), now);
+    if (d.run && !(stationRow.running_since && stationRow.running_since > staleClaim) && (await claimRefresh(db, stationScope, now, staleClaim))) {
+      console.log(`[news] ${pool} refresh on demand: ${d.why}`);
+      background(req, startRefresh(env, { station: pool, kind: 'refresh' }, now));
+    }
   }
 
   // The listener's state and city pools: fetched now the first time (3 s budget), refreshed in the background later

@@ -1,7 +1,7 @@
 /** Refresh pipeline steps: fetch → normalize + prefilter → store; tag; embed + dedupe; expire + bookkeeping. */
 import { embed, tagBatch, type Tag, type TagInput } from './ai';
 import { cityKeyOf, publisherFromBing, spokenPublisher } from './catalog';
-import { assignClusters, fnv1a, LEXICAL_SUPPORT, titleKey, tokens, tokenSimilarity, type Neighbour } from './dedupe';
+import { assignClusters, clusterBatch, fnv1a, LEXICAL_SUPPORT, packVector, SAME_TOPIC, titleKey, tokens, tokenSimilarity, unpackVector, type Neighbour } from './dedupe';
 import { prefilter } from './filters';
 import { canonicalUrl, clampDate, FEED_HEADERS, parseFeed, stripSeoPrefix } from './parse';
 import {
@@ -12,7 +12,11 @@ import {
   existingIds,
   expire,
   insertItems,
+  itemsByIds,
+  mergeStories,
+  recentVectors,
   saveFeedResults,
+  saveVectors,
   untagged,
   unembedded,
   type FeedResult,
@@ -200,62 +204,100 @@ export function tagUpdate(r: PendingRow, tag: Tag | undefined): TagUpdate {
   };
 }
 
+/** Items embedded this recently are compared against D1's copy of their vector, not the index (which lags). */
+export const RECENT_VECTOR_MS = 30 * 60_000;
+
+/** Cosine of a float query against a packed int8 vector. */
+function cosineInt8(q: ArrayLike<number>, qNorm: number, v: Int8Array): number {
+  let dot = 0;
+  let nv = 0;
+  for (let i = 0; i < v.length; i++) {
+    dot += q[i] * v[i];
+    nv += v[i] * v[i];
+  }
+  return qNorm && nv ? dot / (qNorm * Math.sqrt(nv)) : 0;
+}
+
+function addNeighbour(map: Map<string, Neighbour[]>, rowId: string, n: Neighbour): void {
+  const list = map.get(rowId);
+  if (list) list.push(n);
+  else map.set(rowId, [n]);
+}
+
 /**
- * Embeds new items (bge-m3), finds near neighbours among earlier items (Vectorize, same pool, last 36 h) and among
- * each other, and assigns story clusters and topics. Without Workers AI or Vectorize, the lexical clusters stand.
+ * Embeds new items (bge-m3), finds near neighbours among earlier items and among each other, and assigns story
+ * clusters and topics. Earlier items come from the vector index (same pool, last 36 h), the vectors D1 keeps for
+ * the last half hour (the index lags behind, so items from an earlier step of this refresh are found there), and
+ * the stored titles (a strong word match). Neighbours are resolved to their item's current story in D1, so a
+ * merged story is never split again by stale index metadata. An item that is the same story as two existing
+ * stories merges them. Without Workers AI, the lexical clusters from the fetch step stand.
  */
 export async function dedupePending(env: NewsEnv, pool: NewsStation, now: number, limit = 400): Promise<{ embedded: number; merged: number; remaining: number }> {
-  const rows = await unembedded(env.NEWS_DB, pool, limit, now);
+  const db = env.NEWS_DB;
+  const rows = await unembedded(db, pool, limit, now);
   if (!rows.length) return { embedded: 0, merged: 0, remaining: 0 };
   if (!env.AI) {
-    await applyClusters(env.NEWS_DB, rows.map((r) => ({ id: r.id, clusterId: r.cluster_id, topicId: r.topic_id })));
-    return { embedded: 0, merged: 0, remaining: await countPending(env.NEWS_DB, pool, 'embedded', now) };
+    await applyClusters(db, rows.map((r) => ({ id: r.id, clusterId: r.cluster_id, topicId: r.topic_id })));
+    return { embedded: 0, merged: 0, remaining: await countPending(db, pool, 'embedded', now) };
   }
   const vectors = await embed(env.AI, rows.map((r) => `${r.title}. ${r.descr.slice(0, 160)}`));
-  const neighbours = new Map<string, Neighbour[]>();
+  const batch = new Set(rows.map((r) => r.id));
+  // rowId → (earlier item id → cosine)
+  const hits = new Map<string, Map<string, number>>();
+  const hit = (rowId: string, itemId: string, score: number) => {
+    if (batch.has(itemId)) return;
+    const m = hits.get(rowId) ?? new Map<string, number>();
+    m.set(itemId, Math.max(score, m.get(itemId) ?? 0));
+    hits.set(rowId, m);
+  };
   const index = env.NEWS_INDEX;
   if (index) {
     await mapLimit(rows.map((r, i) => ({ r, i })), 8, async ({ r, i }) => {
       try {
-        const res = await index.query(vectors[i], { topK: 5, returnMetadata: 'all', filter: { pool, ts: { $gte: now - 36 * HOUR } } });
-        neighbours.set(
-          r.id,
-          res.matches
-            .filter((m) => m.id !== r.id && m.metadata)
-            .map((m) => ({
-              clusterId: String(m.metadata!.cluster),
-              topicId: String(m.metadata!.topic),
-              score: m.score,
-              ...(typeof m.metadata!.title === 'string' ? { title: m.metadata!.title } : {}),
-            })),
-        );
+        const res = await index.query(vectors[i], { topK: 5, filter: { pool, ts: { $gte: now - 36 * HOUR } } });
+        for (const m of res.matches) hit(r.id, m.id, m.score);
       } catch (err) {
         console.error(`[news] vector query failed: ${String(err)}`);
       }
     });
   }
-  // Items embedded in an earlier step or refresh: a strong word match joins their story even before the vector
-  // index has caught up with them
-  for (const prior of await embeddedTitles(env.NEWS_DB, pool, now)) {
-    const toks = new Set(tokens(prior.title));
-    for (const r of rows) {
-      const lex = tokenSimilarity(toks, new Set(tokens(r.title)));
-      if (lex < LEXICAL_SUPPORT) continue;
-      const list = neighbours.get(r.id) ?? [];
-      const known = list.find((n) => n.clusterId === prior.cluster_id);
-      if (known) known.title = prior.title;
-      else list.push({ clusterId: prior.cluster_id, topicId: prior.topic_id, score: 0, title: prior.title });
-      neighbours.set(r.id, list);
+  const recent = (await recentVectors(db, pool, now - RECENT_VECTOR_MS)).filter((v) => !batch.has(v.id)).map((v) => ({ id: v.id, vec: unpackVector(v.vec) }));
+  if (recent.length) {
+    rows.forEach((r, i) => {
+      const q = vectors[i];
+      let qn = 0;
+      for (let k = 0; k < q.length; k++) qn += q[k] * q[k];
+      qn = Math.sqrt(qn);
+      for (const v of recent) {
+        const score = cosineInt8(q, qn, v.vec);
+        if (score >= SAME_TOPIC - 0.05) hit(r.id, v.id, score);
+      }
+    });
+  }
+  const neighbours = new Map<string, Neighbour[]>();
+  const current = await itemsByIds(db, [...new Set([...hits.values()].flatMap((m) => [...m.keys()]))]);
+  for (const [rowId, m] of hits) {
+    for (const [itemId, score] of m) {
+      const c = current.get(itemId);
+      if (c) addNeighbour(neighbours, rowId, { clusterId: c.cluster_id, topicId: c.topic_id, score, title: c.title });
     }
   }
-  // Lexical pre-clusters from the fetch step stay together: members follow their representative
-  const assigned = assignClusters(rows.map((r, i) => ({ id: r.id, title: r.title, vector: vectors[i] })), neighbours);
-  const out = rows.map((r) => {
-    const a = assigned.get(r.id)!;
-    const rep = r.cluster_id !== r.id ? assigned.get(r.cluster_id) : undefined;
-    return { id: r.id, clusterId: rep?.clusterId ?? a.clusterId, topicId: rep?.topicId ?? a.topicId };
-  });
-  await applyClusters(env.NEWS_DB, out);
+  // Items embedded in an earlier step or refresh: a strong word match joins their story whatever the vectors say
+  for (const prior of await embeddedTitles(db, pool, now)) {
+    const toks = new Set(tokens(prior.title));
+    for (const r of rows) {
+      if (tokenSimilarity(toks, new Set(tokens(r.title))) < LEXICAL_SUPPORT) continue;
+      addNeighbour(neighbours, r.id, { clusterId: prior.cluster_id, topicId: prior.topic_id, score: 0, title: prior.title });
+    }
+  }
+  const { assigned, mergedClusters, mergedTopics } = clusterBatch(rows.map((r, i) => ({ id: r.id, title: r.title, vector: vectors[i] })), neighbours);
+  const out = rows.map((r) => ({ id: r.id, ...assigned.get(r.id)! }));
+  await applyClusters(db, out);
+  if (mergedClusters.size || mergedTopics.size) {
+    console.log(`[news] ${pool}: ${mergedClusters.size} stories and ${mergedTopics.size} topics found to be one`);
+    await mergeStories(db, pool, mergedClusters, mergedTopics);
+  }
+  await saveVectors(db, pool, rows.map((r, i) => ({ id: r.id, vec: packVector(vectors[i]) })), now);
   if (index) {
     const vecs = rows.map((r, i) => ({
       id: r.id,
@@ -264,7 +306,11 @@ export async function dedupePending(env: NewsEnv, pool: NewsStation, now: number
     }));
     for (let i = 0; i < vecs.length; i += 200) await index.upsert(vecs.slice(i, i + 200));
   }
-  return { embedded: rows.length, merged: out.filter((o) => o.clusterId !== o.id).length, remaining: await countPending(env.NEWS_DB, pool, 'embedded', now) };
+  return {
+    embedded: rows.length,
+    merged: out.filter((o) => o.clusterId !== o.id).length + mergedClusters.size,
+    remaining: await countPending(db, pool, 'embedded', now),
+  };
 }
 
 /** Deletes expired items (and their vectors). */

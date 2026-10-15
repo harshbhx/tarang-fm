@@ -2,6 +2,10 @@
  * Near-duplicate stories: a lexical pre-pass, then bge-m3 embeddings. Thresholds calibrated on 32,131 pairs of real
  * Gujarati items (2026-10-15): unrelated pairs sit at cosine 0.34 (p90 0.43), same-story pairs from different outlets
  * at 0.79-0.97, so 0.80 is one story and 0.70 one topic.
+ *
+ * Across steps and refreshes, earlier items come from three places, because the vector index answers new vectors
+ * only after a lag (seconds to minutes): the index itself, the vectors D1 keeps for the last half hour (exact
+ * cosine), and the stored titles (lexical).
  */
 
 /** Cosine at or above which two items are the same story (one cluster). */
@@ -100,48 +104,125 @@ export interface Assignment {
   topicId: string;
 }
 
+/** Union-find over cluster or topic ids. A root that already exists in the pool wins over a new one. */
+class Merger {
+  private parent = new Map<string, string>();
+  constructor(private existing: Set<string>) {}
+  find(id: string): string {
+    let root = id;
+    while (this.parent.has(root)) root = this.parent.get(root)!;
+    // Path compression
+    for (let x = id; x !== root; ) {
+      const next = this.parent.get(x)!;
+      this.parent.set(x, root);
+      x = next;
+    }
+    return root;
+  }
+  /** Joins b into a (or a into b when only b is already in the pool). Returns the root. */
+  union(a: string, b: string): string {
+    let ra = this.find(a);
+    let rb = this.find(b);
+    if (ra === rb) return ra;
+    if (!this.existing.has(ra) && this.existing.has(rb)) [ra, rb] = [rb, ra];
+    this.parent.set(rb, ra);
+    return ra;
+  }
+  /** Every id that now points somewhere else, with its root. */
+  moved(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const id of this.parent.keys()) out.set(id, this.find(id));
+    return out;
+  }
+}
+
+export interface BatchClusters {
+  /** Cluster and topic of each new item */
+  assigned: Map<string, Assignment>;
+  /** Existing clusters (and topics) that turned out to be one story: old id → id it now belongs to */
+  mergedClusters: Map<string, string>;
+  mergedTopics: Map<string, string>;
+}
+
 /**
- * Greedy single pass over new items (best first): an item joins the first earlier new item, or the best existing
- * neighbour, that is the same story; failing that it takes the topic of the first one on the same topic; otherwise
- * it starts its own cluster and topic. Existing neighbours come from Vectorize (earlier refreshes).
+ * Greedy single pass over new items (best first). An item that is the same story as one or more earlier items or
+ * existing stories joins the best of them, and the stories it bridges become one (single-link: if A and C are both
+ * the same story as B, A and C are one story, even when A and C alone fall under the threshold). Failing that it
+ * takes the topic of the closest one on the same topic; otherwise it starts its own cluster and topic. Existing
+ * neighbours come from earlier steps and refreshes (vector index, recent vectors, stored titles).
  */
-export function assignClusters(items: DedupeInput[], existing: Map<string, Neighbour[]> = new Map()): Map<string, Assignment> {
-  const out = new Map<string, Assignment>();
+export function clusterBatch(items: DedupeInput[], existing: Map<string, Neighbour[]> = new Map()): BatchClusters {
+  const known = new Set<string>();
+  const knownTopics = new Set<string>();
+  for (const list of existing.values()) for (const n of list) {
+    known.add(n.clusterId);
+    knownTopics.add(n.topicId);
+  }
+  const clusters = new Merger(known);
+  const topics = new Merger(knownTopics);
+  const raw = new Map<string, Assignment>();
   const placed: (DedupeInput & { toks: Set<string> })[] = [];
   for (const item of items) {
     const it = { ...item, toks: new Set(tokens(item.title)) };
-    let story: Assignment | undefined;
+    const stories: { a: Assignment; score: number }[] = [];
     let topic: string | undefined;
-    let bestStory = 0;
     let bestTopic = 0;
-    for (const n of existing.get(it.id) ?? []) {
-      const score = n.title ? combined(n.score, tokenSimilarity(new Set(tokens(n.title)), it.toks)) : n.score;
+    const consider = (a: Assignment, score: number) => {
       const rel = relation(score);
-      if (rel === 'story' && score > bestStory) {
-        bestStory = score;
-        story = { clusterId: n.clusterId, topicId: n.topicId };
-      } else if (rel !== 'none' && score > bestTopic) {
-        bestTopic = score;
-        topic = n.topicId;
-      }
-    }
-    for (const p of placed) {
-      if (story && bestStory >= 0.95) break;
-      const lex = tokenSimilarity(p.toks, it.toks);
-      const cos = it.vector && p.vector ? cosine(it.vector, p.vector) : 0;
-      const score = combined(cos, lex);
-      const rel = relation(score);
-      const a = out.get(p.id)!;
-      if (rel === 'story' && score > bestStory) {
-        bestStory = score;
-        story = a;
-      } else if (rel === 'topic' && score > bestTopic) {
+      if (rel === 'story') stories.push({ a, score });
+      else if (rel === 'topic' && score > bestTopic) {
         bestTopic = score;
         topic = a.topicId;
       }
+    };
+    for (const n of existing.get(it.id) ?? []) {
+      consider({ clusterId: n.clusterId, topicId: n.topicId }, n.title ? combined(n.score, tokenSimilarity(new Set(tokens(n.title)), it.toks)) : n.score);
     }
-    out.set(it.id, story ?? { clusterId: it.id, topicId: topic ?? it.id });
+    for (const p of placed) {
+      const lex = tokenSimilarity(p.toks, it.toks);
+      const cos = it.vector && p.vector ? cosine(it.vector, p.vector) : 0;
+      consider(raw.get(p.id)!, combined(cos, lex));
+    }
+    if (stories.length) {
+      stories.sort((x, y) => y.score - x.score);
+      let cluster = clusters.find(stories[0].a.clusterId);
+      let top = topics.find(stories[0].a.topicId);
+      for (const { a } of stories.slice(1)) {
+        cluster = clusters.union(cluster, a.clusterId);
+        top = topics.union(top, a.topicId);
+      }
+      raw.set(it.id, { clusterId: cluster, topicId: top });
+    } else {
+      raw.set(it.id, { clusterId: it.id, topicId: topic ? topics.find(topic) : it.id });
+    }
     placed.push(it);
   }
+  const assigned = new Map<string, Assignment>();
+  for (const [id, a] of raw) assigned.set(id, { clusterId: clusters.find(a.clusterId), topicId: topics.find(a.topicId) });
+  const pick = (m: Map<string, string>, keep: Set<string>) => new Map([...m].filter(([id, root]) => keep.has(id) && id !== root));
+  return { assigned, mergedClusters: pick(clusters.moved(), known), mergedTopics: pick(topics.moved(), knownTopics) };
+}
+
+/** The cluster and topic of each new item (see clusterBatch). */
+export function assignClusters(items: DedupeInput[], existing: Map<string, Neighbour[]> = new Map()): Map<string, Assignment> {
+  return clusterBatch(items, existing).assigned;
+}
+
+/** int8 quantized unit vector as base64 (1 KB for bge-m3): enough precision for the 0.70 / 0.80 thresholds. */
+export function packVector(v: ArrayLike<number>): string {
+  let norm = 0;
+  for (let i = 0; i < v.length; i++) norm += v[i] * v[i];
+  norm = Math.sqrt(norm) || 1;
+  const bytes = new Uint8Array(v.length);
+  for (let i = 0; i < v.length; i++) bytes[i] = Math.max(-127, Math.min(127, Math.round((v[i] / norm) * 127))) & 0xff;
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
+export function unpackVector(b64: string): Int8Array {
+  const s = atob(b64);
+  const out = new Int8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = (s.charCodeAt(i) << 24) >> 24;
   return out;
 }

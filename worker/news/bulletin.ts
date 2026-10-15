@@ -61,9 +61,10 @@ const SLOT_OF: Partial<Record<Bucket, NewsSlot>> = { sports: 'sport', business: 
  */
 export function pickBulletin(stories: Story[], opts: PickOptions): SlateItem[] {
   const { now, station } = opts;
-  const sessionTopics = new Set(stories.filter((s) => opts.sessionAired.has(s.clusterId) || opts.sessionAired.has(s.itemId)).map((s) => s.topicId));
+  const heard = (s: Story) => opts.sessionAired.has(s.clusterId) || opts.sessionAired.has(s.itemId) || Boolean(s.memberIds?.some((id) => opts.sessionAired.has(id)));
+  const sessionTopics = new Set(stories.filter(heard).map((s) => s.topicId));
   const pool = stories
-    .filter((s) => !opts.sessionAired.has(s.clusterId) && !opts.sessionAired.has(s.itemId) && !sessionTopics.has(s.topicId))
+    .filter((s) => !heard(s) && !sessionTopics.has(s.topicId))
     .filter((s) => !(s.topicAiredAt !== undefined && now - s.topicAiredAt < TOPIC_COOLDOWN_MS && s.stationAiredAt === undefined))
     .map((s) => ({ s, score: scoreStory(s, now, station) }))
     .sort((a, b) => b.score - a.score);

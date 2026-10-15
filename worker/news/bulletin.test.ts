@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cadence, pickBulletin, scoreStory, slateSources, TOPIC_COOLDOWN_MS, type PickOptions } from './bulletin';
 import { cityKeyOf, coreFeeds, localFeeds, spokenPublisher, stateCodeOf } from './catalog';
-import { localDecision, stationDecision, topupDecision } from './policy';
+import { consumed, localDecision, requestDecision, stationDecision, topupDecision } from './policy';
 import type { Bucket, Story } from './types';
 
 const NOW = Date.parse('2026-10-15T09:00:00Z');
@@ -86,6 +86,14 @@ describe('pickBulletin', () => {
     expect(new Set(seen).size).toBe(seen.length);
   });
 
+  it('never re-airs a story that was merged with another after the session heard it', () => {
+    const stories = pool();
+    const merged = stories[4];
+    // The session heard the story under the id of an item that later joined this cluster
+    merged.memberIds = [merged.itemId, 'old-cluster-id'];
+    const slate = pickBulletin(stories, base({ sessionAired: new Set(['old-cluster-id']) }));
+    expect(slate.map((s) => s.story.clusterId)).not.toContain(merged.clusterId);
+  });
   it('rotates the category slot and skips an empty category', () => {
     expect(pickBulletin(pool(), base({ rotation: 1 })).find((s) => ['sport', 'business', 'entertainment'].includes(s.slot))?.slot).toBe('business');
     const noBusiness = pool().filter((s) => s.bucket !== 'business');
@@ -184,6 +192,20 @@ describe('refresh policy', () => {
     expect(stationDecision(row({ airedSince: 30, servedSince: 5 }), NOW).run).toBe(false); // 30 % aired
     expect(stationDecision(row({ airedSince: 50, servedSince: 8 }), NOW).run).toBe(true); // 50 %
     expect(stationDecision(row({ refreshedAt: NOW - 4.5 * H, airedSince: 25, servedSince: 4 }), NOW).run).toBe(true); // stale, 25 %
+  });
+  it('measures consumption against the 3 h working pool, not the whole 24 h supply', () => {
+    // Hindi holds 500+ stories: 48 aired (2 h of bulletins) is half the working pool
+    expect(consumed({ airedSince: 48, unairedAtRefresh: 544 })).toBeGreaterThanOrEqual(0.5);
+    expect(stationDecision(row({ unairedAtRefresh: 544, airedSince: 48, servedSince: 8 }), NOW).run).toBe(true);
+    // A small pool is measured against itself
+    expect(consumed({ airedSince: 20, unairedAtRefresh: 40 })).toBe(0.5);
+  });
+  it('refreshes on demand for a listener: when the scheduled rule would, or when the pool is 6 h old', () => {
+    expect(requestDecision(undefined, NOW).run).toBe(false);
+    expect(requestDecision(row({ refreshedAt: NOW - 3 * H, airedSince: 10, servedSince: 0 }), NOW).run).toBe(false);
+    expect(requestDecision(row({ refreshedAt: NOW - 3 * H, airedSince: 50, servedSince: 0 }), NOW).run).toBe(true);
+    expect(requestDecision(row({ refreshedAt: NOW - 7 * H }), NOW)).toEqual({ run: true, why: 'pool is 7 h old' });
+    expect(requestDecision(row({ refreshedAt: NOW - H, airedSince: 90 }), NOW).run).toBe(false);
   });
   it('tops up a low pool once per hour', () => {
     const ok = { national: 20, state: 5, total: 60 };

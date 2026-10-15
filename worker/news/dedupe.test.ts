@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assignClusters, combined, cosine, LEXICAL_MERGE, relation, similarity, titleKey } from './dedupe';
+import { assignClusters, clusterBatch, combined, cosine, LEXICAL_MERGE, packVector, relation, similarity, titleKey, unpackVector } from './dedupe';
 import { DUP_PAIRS } from './dup-pairs.fixture';
 
 describe('lexical similarity', () => {
@@ -57,5 +57,40 @@ describe('embedding clusters', () => {
       { id: 'b', title: 'स्टारलिंक पर संसदीय समिति की नजर, मंजूरी मिलने में देरी क्यों?' },
     ]);
     expect(out.get('b')?.clusterId).toBe('a');
+  });
+  it('merges two stories that one item bridges (A ~ B and B ~ C make one story even when A and C differ more)', () => {
+    // The real miss of 2026-10-15: three outlets on the Supreme Court's counting-video order
+    const out = clusterBatch([
+      { id: 'au', title: 'x', vector: v(1, 0, 0) },
+      { id: 'n18', title: 'y', vector: v(0.6, 0.8, 0) }, // cos(au, n18) = 0.6: apart on their own
+      { id: 'bh', title: 'z', vector: v(0.89, 0.45, 0) }, // ≥ 0.8 with both
+    ]);
+    const ids = ['au', 'n18', 'bh'].map((id) => out.assigned.get(id)!.clusterId);
+    expect(new Set(ids).size).toBe(1);
+  });
+  it('reports existing stories that turned out to be one, keeping the existing id', () => {
+    const out = clusterBatch(
+      [{ id: 'new', title: 'x', vector: v(1, 0) }],
+      new Map([['new', [
+        { clusterId: 'old1', topicId: 'T1', score: 0.9 },
+        { clusterId: 'old2', topicId: 'T2', score: 0.85 },
+      ]]]),
+    );
+    expect(out.assigned.get('new')).toEqual({ clusterId: 'old1', topicId: 'T1' });
+    expect(out.mergedClusters).toEqual(new Map([['old2', 'old1']]));
+    expect(out.mergedTopics).toEqual(new Map([['T2', 'T1']]));
+  });
+  it('a topic-only match does not merge stories', () => {
+    const out = clusterBatch([{ id: 'n', title: 'x', vector: v(1, 0) }], new Map([['n', [{ clusterId: 'o', topicId: 'T', score: 0.75 }]]]));
+    expect(out.assigned.get('n')).toEqual({ clusterId: 'n', topicId: 'T' });
+    expect(out.mergedClusters.size).toBe(0);
+  });
+  it('packs vectors to int8 without moving cosine past the thresholds', () => {
+    const a = Array.from({ length: 1024 }, (_, i) => Math.sin(i * 0.37));
+    const b = a.map((x, i) => x + 0.35 * Math.cos(i * 1.3));
+    const exact = cosine(a, b);
+    const packed = cosine(unpackVector(packVector(a)), unpackVector(packVector(b)));
+    expect(Math.abs(exact - packed)).toBeLessThan(0.01);
+    expect(packVector(a).length).toBeLessThan(1400);
   });
 });

@@ -97,6 +97,48 @@ export async function embeddedTitles(db: D1Database, pool: NewsStation, now: num
   return results;
 }
 
+/** The current story (cluster, topic) and title of items, by id. Missing ids were expired or dropped. */
+export async function itemsByIds(db: D1Database, ids: string[]): Promise<Map<string, { cluster_id: string; topic_id: string; title: string }>> {
+  const out = new Map<string, { cluster_id: string; topic_id: string; title: string }>();
+  for (const part of chunks(ids, 90)) {
+    const { results } = await db
+      .prepare(`SELECT id, cluster_id, topic_id, title FROM news_item WHERE id IN (${part.map(() => '?').join(',')})`)
+      .bind(...part)
+      .all<{ id: string; cluster_id: string; topic_id: string; title: string }>();
+    for (const r of results) out.set(r.id, r);
+  }
+  return out;
+}
+
+/** Vectors embedded since `since` (packed int8): the ones the vector index may not answer yet. */
+export async function recentVectors(db: D1Database, pool: NewsStation, since: number): Promise<{ id: string; vec: string }[]> {
+  const { results } = await db.prepare('SELECT id, vec FROM news_vec WHERE pool = ? AND at >= ? LIMIT 3000').bind(pool, since).all<{ id: string; vec: string }>();
+  return results;
+}
+
+export async function saveVectors(db: D1Database, pool: NewsStation, rows: { id: string; vec: string }[], now: number): Promise<void> {
+  for (const part of chunks(rows)) {
+    await db.batch(part.map((r) => db.prepare('INSERT OR REPLACE INTO news_vec (id, pool, at, vec) VALUES (?, ?, ?, ?)').bind(r.id, pool, now, r.vec)));
+  }
+}
+
+/**
+ * Stories found to be one: every item of a merged cluster (or topic) moves to the one it joined, and so do the
+ * aired records, so "never twice" still holds for whatever aired under the old id.
+ */
+export async function mergeStories(db: D1Database, pool: NewsStation, clusters: Map<string, string>, topics: Map<string, string>): Promise<void> {
+  const stmts: D1PreparedStatement[] = [];
+  for (const [from, to] of clusters) {
+    stmts.push(db.prepare('UPDATE news_item SET cluster_id = ? WHERE pool = ? AND cluster_id = ?').bind(to, pool, from));
+    stmts.push(db.prepare('UPDATE OR REPLACE news_aired SET cluster_id = ? WHERE station = ? AND cluster_id = ?').bind(to, pool, from));
+  }
+  for (const [from, to] of topics) {
+    stmts.push(db.prepare('UPDATE news_item SET topic_id = ? WHERE pool = ? AND topic_id = ?').bind(to, pool, from));
+    stmts.push(db.prepare('UPDATE news_aired SET topic_id = ? WHERE station = ? AND topic_id = ?').bind(to, pool, from));
+  }
+  for (const part of chunks(stmts, 50)) await db.batch(part);
+}
+
 export interface TagUpdate {
   id: string;
   drop: boolean;
@@ -199,6 +241,7 @@ export function groupStories(rows: ItemRow[], pool: NewsStation, topicAired: Map
       publisherSpoken: rep.publisher_spoken ?? undefined,
       publishedAt: Math.max(...list.map((r) => r.published_at)),
       sources: publishers.size,
+      memberIds: list.map((r) => r.id),
       light: list.some((r) => r.light === 1),
       death: list.some((r) => r.death === 1),
       question: rep.question === 1,
@@ -314,6 +357,8 @@ export async function expire(db: D1Database, pool: NewsStation, now: number): Pr
   await db.batch([
     db.prepare('DELETE FROM news_item WHERE pool = ? AND expires_at <= ?').bind(pool, now),
     db.prepare('DELETE FROM news_aired WHERE station = ? AND aired_at < ?').bind(pool, now - 48 * 3_600_000),
+    // Recent vectors only bridge the vector index's lag
+    db.prepare('DELETE FROM news_vec WHERE pool = ? AND at < ?').bind(pool, now - 2 * 3_600_000),
   ]);
   return results.map((r) => r.id);
 }

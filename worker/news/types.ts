@@ -80,6 +80,8 @@ export interface Story {
   publishedAt: number;
   /** Distinct publishers carrying the story */
   sources: number;
+  /** Every item id in the story (a story merged later still matches the id a session heard it under) */
+  memberIds?: string[];
   light: boolean;
   death: boolean;
   question: boolean;

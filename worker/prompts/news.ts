@@ -235,7 +235,7 @@ Write 12–15 lines, all role "news":
 3. "${p.details}"
 4. Every item, in order, starting with its cue exactly as given (the cue names the city or state: keep it).
    - First line: what happened, from its title, with its attribution phrase (e.g. "${fill(p.attribution, { S: '<source>' })}").
-   - An optional second line, only if its detail has one: one concrete fact from the detail (a date, a route, a price, a number, who said what). Nothing the detail doesn't say.
+   - An optional second line, only if its detail has one: one concrete fact from the detail (a date, a route, a price, a number, who said what). Nothing the detail doesn't say. At most ${Math.min(3, Math.max(0, 11 - headlines.length))} items get this line, so the bulletin stays within 15 lines.
 5. Kicker: only an item with light=yes, and only if MOOD HINT says "kicker ok", after its cue.
 6. Sign-off: "${fill(p.signoff, vars)}"
 Every item named in the roundup is read in detail later. Don't read the roundup and the details of the same item back to back.
