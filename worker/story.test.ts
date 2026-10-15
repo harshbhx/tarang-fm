@@ -4,6 +4,7 @@ import { CAST_SPEAKERS, rjVoiceAt, STATION_BY_ID, STATIONS, storyVoices } from '
 import type { RecapSource, Station } from '../shared/types';
 import { castCharacters, castFromRecord, castRecord, castSerial, type SerialCast } from './casting';
 import {
+  castPeople,
   oneShotJsonSchema,
   oneShotPrompt,
   outlineJsonSchema,
@@ -317,7 +318,8 @@ describe('Kahani part prompts', () => {
 
   it('names the cast and the relations, and opens part 1 the way the outline chose', () => {
     const p = partPrompt(hindi, OUTLINE, cast, 1);
-    expect(p).toContain('char_a = कबीर');
+    expect(p).toContain('- कबीर: an adult');
+    expect(p).not.toContain('char_a');
     expect(p).toContain(OUTLINE.relations_en);
     expect(p).toContain('Cold open:');
     expect(p).toContain(`"${OUTLINE.title_native}"`);
@@ -382,8 +384,16 @@ describe('flat schemas', () => {
     expect(outline.properties.final_line_role.enum).toEqual(castCharacters(cast));
     const ta = castSerial(tamil, { hour: 20, random: seeded(2) }).cast;
     const one = oneShotJsonSchema(ta, false) as unknown as Schema;
+    // Speakers are the characters' names (picked in code for a one-shot), mapped back to roles in code
+    const people = castPeople(tamil, ta, storyBrief('ta', 'evening', seeded(3)), seeded(3));
+    const named = oneShotJsonSchema(ta, false, people) as unknown as Schema;
+    const names = castCharacters(ta).map((r) => people.names[r]!);
+    expect(named.properties.last_line_role.enum).toEqual(names);
+    expect(named.properties.lines.items!.properties.speaker.enum).toEqual(['narrator', ...names]);
+    for (const n of names) expect(n).toMatch(/\p{Script=Tamil}/u);
     expect(one.properties.last_line_role.enum).toEqual(castCharacters(ta));
-    expect(one.properties.lines.items!.properties.role.enum).toEqual(['narrator', ...castCharacters(ta)]);
+    const part = partJsonSchema(cast, false, OUTLINE) as unknown as Schema;
+    expect(part.properties.lines.items!.properties.speaker.enum).toEqual(['narrator', ...castCharacters(cast).map((r) => OUTLINE[`${r}_name_native`])]);
     expect(one.required.indexOf('last_line_native')).toBeLessThan(one.required.indexOf('lines'));
   });
 });

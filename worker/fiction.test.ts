@@ -409,6 +409,39 @@ describe('ad break', () => {
     expect(segment.lines[0].text).toBe(hindi.stationIdText);
   });
 
+  it('never airs a failed first draft when its rewrite times out: one shorter try, else the station ID', async () => {
+    const slow = writer((_name, n) => {
+      if (n === 1) return LEAKY_AD;
+      if (n === 2) throw new Error('chat timed out');
+      return CLEAN_AD;
+    });
+    const rescued = await buildFiction(slow.sarvam, hindi, adReq(), new Timings());
+    expect(slow.calls).toHaveLength(3);
+    expect(slow.user(slow.calls[2])).toContain('PRODUCER NOTE');
+    expect(slow.user(slow.calls[2])).not.toContain('Examples (style only');
+    expect(rescued.fallback).toBeUndefined();
+    expect(rescued.title).toBe('फ़ोन-फ़ंड प्लान');
+    const down = writer((_name, n) => {
+      if (n === 1) return { ...CLEAN_AD, lines: CLEAN_AD.lines.map((x) => ({ ...x, text: x.text.replace('शर्तें लागू: ', '') })), title: 'Phone Fund' };
+      throw new Error('chat timed out');
+    });
+    const sting = await buildFiction(down.sarvam, hindi, adReq(), new Timings());
+    expect(down.calls).toHaveLength(3);
+    expect(sting.fallback).toBe(true);
+    expect(sting.lines[0].role).toBe('station_id');
+  });
+
+  it('closes a serial part on its outline when the part cannot be written', async () => {
+    const w = writer(() => {
+      throw new Error('chat timed out');
+    });
+    const segment = await buildFiction(w.sarvam, hindi, kahani({ part: 3, serial: serial(2), recapSource: recap }), new Timings());
+    expect(segment.lines.map((x) => x.text)).toEqual([OUTLINE.payoff_native, OUTLINE.final_line_native]);
+    expect(segment.lines[1].role).toBe('char_a');
+    expect(segment.serial!.part).toBe(3);
+    expect(segment.serial!.outline.aired_cliffhanger_en).toBe('resolved');
+  });
+
   it('plays the station ID when the writer is down', async () => {
     const w = writer(() => {
       throw new Error('model down');

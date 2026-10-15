@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { STATION_BY_ID } from '../../shared/stations';
 import type { Station } from '../../shared/types';
-import { copiesFictionExample, endsWithQuestion, fillerCount, kinshipOutside, leaksDirection, lineOverlap, namesLate, saysName, serialShape, type CheckLine, type SerialShapeOptions } from './story';
+import { addressSlips, beatCoverage, copiesFictionExample, endsWithQuestion, fillerCount, kinTargets, kinshipOutside, leaksDirection, lineOverlap, namesLate, saysName, serialShape, type CheckLine, type SerialShapeOptions } from './story';
 
 const hindi = STATION_BY_ID.hi as Station;
 const line = (role: string, text: string): CheckLine => ({ role, text });
@@ -69,7 +69,46 @@ describe('names early', () => {
 
   it('sends back a character who calls out their own name', () => {
     const self = PLAY.map((l, i) => (i === 3 ? { ...l, text: 'पीहू ने सब देखा है, पर पीहू कुछ नहीं बताएगी।' } : l));
-    expect(serialShape(hindi, self, OPTS).hard.some((p) => p.includes('own name'))).toBe(true);
+    expect(serialShape(hindi, self, OPTS).hard.some((p) => p.includes('पीहू by name'))).toBe(true);
+  });
+
+  it('catches the line spoken to its own speaker: the name or the kinship word for them', () => {
+    const names = OPTS.names;
+    // Round 1, part 2: Vihaan's line aired in Zoya's voice ("ज़ोया, ..."), and the kid's "मम्मी?" in the mother's
+    const slips = addressSlips(
+      [
+        line('char_b', 'कबीर, ये ढक्कन देखो।'),
+        line('char_b', 'अरे मेहर, मैं जल्दी करता हूँ।'),
+        line('char_a', 'मेहर? अब हम क्या करें?'),
+        line('char_b', 'मम्मी? अब हम क्या करें?'),
+        line('char_b', 'मेहर counter के नीचे हाथ डालती है।'),
+        line('char_b', 'मैं मेहर हूँ, और ये मेरा टिफ़िन है।'),
+      ],
+      names,
+      { मम्मी: 'char_b' },
+    );
+    expect(slips.map((s) => [s.line, s.kind])).toEqual([
+      [1, 'own_name'],
+      [3, 'kin'],
+      [4, 'self_mention'],
+    ]);
+    expect(serialShape(hindi, PLAY, OPTS).hard).toEqual([]);
+  });
+
+  it('reads who each kinship word means from the relations, in either script', () => {
+    const kin = kinTargets('Pranav calls Zoya "मम्मी"; Pranav calls विहान "भैया"', { char_a: ['ज़ोया', 'Zoya'], char_b: ['विहान', 'Vihaan'], char_kid: ['प्रणव', 'Pranav'] });
+    expect(kin).toEqual({ मम्मी: 'char_a', भैया: 'char_b' });
+  });
+
+  it('finds each planned beat in the lines, or says it never played', () => {
+    const hits = beatCoverage(PLAY, [
+      { key: 'want', text: 'मेहर को दो बजे तक अपना टिफ़िन दफ़्तर ले जाना है।' },
+      { key: 'twist', text: 'चोर एक बिल्ली है, जिसे पीहू खाना देती है।' },
+      { key: 'payoff', text: 'स्टेशन पर ट्रेन छूट गई।' },
+    ]);
+    expect(hits[0].overlap).toBeGreaterThanOrEqual(0.5);
+    expect(hits[1].at).toBeGreaterThan(hits[0].at);
+    expect(hits[2].overlap).toBeLessThan(0.25);
   });
 });
 

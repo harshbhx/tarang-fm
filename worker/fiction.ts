@@ -8,17 +8,34 @@
 import { z } from 'zod';
 import type { SegmentRequest } from '../shared/schemas';
 import type { Line, RecapSource, Role, Segment, SerialState, Station } from '../shared/types';
-import { castCharacters, castFromRecord, castRecord, castSerial, type SerialCast } from './casting';
+import { castCharacters, castFromRecord, castRecord, castSerial, type CharacterRole, type SerialCast } from './casting';
 import { adShape } from './checks/ad';
-import { blockCount, endsWithQuestion, latinShare, leaksDirection, lineOverlap, serialShape, type CheckResult } from './checks/story';
+import {
+  addressSlips,
+  blockCount,
+  copiesFictionExample,
+  endsWithQuestion,
+  fold,
+  kinTargets,
+  latinShare,
+  leaksDirection,
+  lineOverlap,
+  serialShape,
+  words,
+  type AddressSlip,
+  type CheckResult,
+} from './checks/story';
 import type { JudgeInput } from './judge/types';
 import { normalizeTitle, type ShowMemory } from './memory';
-import { pickAd } from './pools/ads';
+import { pickAd, punChoices } from './pools/ads';
 import { maxTokensFor, SEGMENT_PLAN, subtitlesOn, systemPreamble, type LlmPlan } from './prompts';
 import { adJsonSchema, adPrompt, type AdPlan } from './prompts/ad';
 import { subtitleRule } from './prompts/common';
 import {
+  castPeople,
   expectedLast,
+  ONE_SHOT_BEATS,
+  ONE_SHOT_FIELDS,
   OUTLINE_FIELDS,
   oneShotJsonSchema,
   oneShotPrompt,
@@ -30,13 +47,14 @@ import {
   partTitle,
   pickOpening,
   storyRoles,
+  storySystem,
   type SerialOutline,
   type StoryPlan,
 } from './prompts/kahani';
 import type { ChatMessage, Sarvam } from './sarvam';
 import { applyGaps, fallbackSegment, limitNameTokens, toLine } from './segment';
 import { isDelivery } from './show';
-import { isSpooky, storyBrief } from './story';
+import { isSpooky, STORY_NAMES_NATIVE, storyBrief } from './story';
 import { modelSubtitle } from './subtitle';
 import { cleanText, processLines, type RawLine } from './text';
 import type { Timings } from './timing';
@@ -57,6 +75,9 @@ const OUTLINE_BUDGET_MS = 55_000;
 const STORY_BUDGET_MS = 55_000;
 const AD_BUDGET_MS = 26_000;
 const MIN_ATTEMPT_MS = 5000;
+/** The rescue try after a timed-out rewrite may run this far past the budget, with this timeout. */
+const RESCUE_GRACE_MS = { story: 20_000, ad: 9000 };
+const RESCUE_TIMEOUT_MS = { story: 22_000, ad: 10_000 };
 
 /** Line counts: a part 12-16 (accept up to 18), a one-shot 16-18 (accept 14-20). Never truncated. */
 const PART_LINES = { min: 12, max: 18 };
@@ -71,7 +92,9 @@ const OUTLINE_VALUE_MAX = 600;
 // ---- Model output (flat, lenient: limits are enforced here, not in the schema) -------------------------------
 
 const ModelLine = z.object({
-  role: z.string().max(24),
+  /** Stories: the character's name (or "narrator"); code maps it to a role */
+  speaker: z.string().max(60).optional(),
+  role: z.string().max(60).optional(),
   text: z.string().min(1).max(600),
   delivery: z.string().max(20).optional(),
   en: z.string().max(600).optional(),
@@ -103,7 +126,8 @@ const OutlineSchema = z.preprocess(
   z.object(Object.fromEntries(OUTLINE_FIELDS.map((f) => [f, z.string().optional()]))),
 );
 
-type ModelScript = { lines: z.infer<typeof ModelLine>[] } & Record<string, unknown>;
+type ScriptLine = { role: string; speaker?: string; text: string; delivery?: string; en?: string };
+type ModelScript = { lines: ScriptLine[] } & Record<string, unknown>;
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
 // ---- One checked write: one rewrite with the problems as the note, the better attempt kept --------------------
@@ -116,11 +140,25 @@ interface WriteSpec<T> {
   plan: LlmPlan;
   subtitles: boolean;
   check: (raw: T) => CheckResult;
+  /** Code's reading of the model's answer before any check (speaker names back to roles) */
+  normalize?: (raw: T) => T;
   /** Code's own repairs to an attempt (dropping lines that must never air, the safety net), checked again after */
   repair?: (raw: T, check: CheckResult) => T;
   deadline: number;
   /** The plan for the attempt after a failed call (e.g. reasoning off when reasoning used up the tokens) */
   afterError?: LlmPlan;
+  /**
+   * The shorter task sent once when the rewrite of a draft with a hard problem failed (timed out): that first
+   * draft never airs. It may run up to `graceMs` past the deadline.
+   */
+  rescue?: { user: string; graceMs: number; timeoutMs: number };
+}
+
+/** What a checked write came to: the draft that may air (if any), the first draft, and the path taken. */
+export interface Written<T> {
+  draft?: Draft<T>;
+  first?: Draft<T>;
+  path: 'first' | 'rewrite' | 'first_kept' | 'first_repaired' | 'second' | 'rescue' | 'rescue_failed' | 'none';
 }
 
 /** A draft as it would air: after code's repairs, with the problems it still has. */
@@ -146,43 +184,68 @@ export function atLeastAsGood(a: CheckResult, b: CheckResult): boolean {
  * and checked again, and the better repaired draft is returned with its problems (a tie goes to the rewrite,
  * which already fixed what the note named). Throws only when no attempt came back at all.
  */
-async function writeChecked<T>(sarvam: Sarvam, timings: Timings, spec: WriteSpec<T>): Promise<Draft<T>> {
+async function writeChecked<T>(sarvam: Sarvam, timings: Timings, spec: WriteSpec<T>): Promise<Written<T>> {
   let best: Draft<T> | undefined;
-  let lastError: unknown;
+  let first: (Draft<T> & { sent: CheckResult }) | undefined;
   let note = '';
   let plan = spec.plan;
+  let rewriteFailed = false;
+  const call = async (messages: ChatMessage[], now: LlmPlan, timeoutMs: number): Promise<Draft<T> & { sent: CheckResult }> => {
+    const answer = await timings.measure('llm', () =>
+      sarvam.chatJson(messages, spec.schema, spec.zod, {
+        name: spec.name,
+        temperature: now.temperature,
+        maxTokens: Math.min(MAX_TOKENS_CAP, maxTokensFor(now, spec.subtitles)),
+        reasoningEffort: now.reasoningEffort,
+        timeoutMs,
+      }),
+    );
+    const raw = spec.normalize ? spec.normalize(answer) : answer;
+    const check = spec.check(raw);
+    const fixed = spec.repair ? spec.repair(raw, check) : raw;
+    return { raw: fixed, check: fixed === raw ? check : spec.check(fixed), sent: check };
+  };
+  const withNote = (user: string | undefined, text: string): ChatMessage[] =>
+    spec.messages.map((m, i) => (i === spec.messages.length - 1 ? { ...m, content: `${user ?? m.content}${text ? `\n\n${text}` : ''}` } : m));
   for (let attempt = 0; attempt < 2; attempt++) {
     const remaining = spec.deadline - Date.now();
-    if (remaining < MIN_ATTEMPT_MS) break;
-    const messages = note
-      ? spec.messages.map((m, i) => (i === spec.messages.length - 1 ? { ...m, content: `${m.content}\n\n${note}` } : m))
-      : spec.messages;
-    const now = plan;
+    if (remaining < MIN_ATTEMPT_MS) {
+      if (attempt === 1 && first) rewriteFailed = true;
+      break;
+    }
     try {
-      const raw = await timings.measure('llm', () =>
-        sarvam.chatJson(messages, spec.schema, spec.zod, {
-          name: spec.name,
-          temperature: now.temperature,
-          maxTokens: Math.min(MAX_TOKENS_CAP, maxTokensFor(now, spec.subtitles)),
-          reasoningEffort: now.reasoningEffort,
-          timeoutMs: Math.min(now.timeoutMs, remaining),
-        }),
-      );
-      const check = spec.check(raw);
-      const fixed = spec.repair ? spec.repair(raw, check) : raw;
-      const draft: Draft<T> = { raw: fixed, check: fixed === raw ? check : spec.check(fixed) };
+      const draft = await call(withNote(undefined, note), plan, Math.min(plan.timeoutMs, remaining));
+      if (attempt === 0) first = draft;
       if (!best || atLeastAsGood(draft.check, best.check)) best = draft;
-      if (!check.hard.length) break;
-      console.error(`[fiction] ${spec.name} attempt ${attempt + 1} sent back: ${check.hard.slice(0, 3).join(' | ')}`);
-      note = producerNote(check);
+      if (!draft.sent.hard.length) break;
+      console.error(`[fiction] ${spec.name} attempt ${attempt + 1} sent back: ${draft.sent.hard.slice(0, 3).join(' | ')}`);
+      note = producerNote(draft.sent);
     } catch (err) {
-      lastError = err;
+      if (attempt === 1 && first) rewriteFailed = true;
       if (spec.afterError) plan = spec.afterError;
       console.error(`[fiction] ${spec.name} attempt ${attempt + 1} failed: ${String(err)}`);
     }
   }
-  if (!best) throw lastError ?? new Error(`${spec.name}: budget exhausted`);
-  return best;
+  const done = (path: Written<T>['path'], draft?: Draft<T>): Written<T> => {
+    console.log(`[fiction] ${spec.name} path=${path}${draft ? ` hard=${draft.check.hard.length} blocks=${blockCount(draft.check)}` : ''}`);
+    return { draft, first, path };
+  };
+  if (!first) return done(best ? 'second' : 'none', best);
+  if (!first.sent.hard.length) return done('first', first);
+  if (!rewriteFailed) return done(best === first ? 'first_kept' : 'rewrite', best);
+  // Code's repairs (a dropped line, a line given to the right speaker) already fixed the first draft
+  if (!first.check.hard.length) return done('first_repaired', first);
+  // The first draft failed a hard check and its rewrite never came back: it never airs. One shorter try, else nothing
+  if (!spec.rescue) return done('rescue_failed');
+  const left = spec.deadline + spec.rescue.graceMs - Date.now();
+  if (left < MIN_ATTEMPT_MS) return done('rescue_failed');
+  try {
+    const draft = await call(withNote(spec.rescue.user, producerNote(first.check)), spec.plan, Math.min(spec.rescue.timeoutMs, left));
+    return done('rescue', draft);
+  } catch (err) {
+    console.error(`[fiction] ${spec.name} rescue failed: ${String(err)}`);
+    return done('rescue_failed');
+  }
 }
 
 /** How far the line-dropping repair may go: a story keeps its ending line and loses at most 2 lines. */
@@ -244,7 +307,7 @@ async function verdictFor(judge: FictionJudge | undefined, check: CheckResult, i
     console.error(`[fiction] judge failed: ${String(err)}`);
     return undefined;
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -256,7 +319,7 @@ const reviewLines = (lines: { role: string; text: string; delivery?: string }[])
 function toAir(
   station: Station,
   type: 'kahani' | 'ad_break',
-  raw: z.infer<typeof ModelLine>[],
+  raw: { role: string; text: string; delivery?: string; en?: string }[],
   roles: Role[],
   subtitles: boolean,
   voices: Partial<Record<Role, SerialCast['narrator']>> = {},
@@ -310,8 +373,8 @@ function definedPeople(outline: SerialOutline): string {
     .join(' | ');
 }
 
-function castNames(outline: SerialOutline, cast: SerialCast): Partial<Record<string, string>> {
-  return Object.fromEntries(castCharacters(cast).map((r) => [r, outline[`${r}_name_native`] ?? '']));
+function castNames(outline: SerialOutline, cast: SerialCast): Partial<Record<CharacterRole, string>> {
+  return Object.fromEntries(castCharacters(cast).map((r) => [r, (outline[`${r}_name_native`] ?? '').trim()]));
 }
 
 /** Problems with an outline that would break the parts. */
@@ -357,7 +420,7 @@ async function writeOutline(sarvam: Sarvam, station: Station, req: SegmentReques
   };
   const check = (raw: Record<string, string | undefined>): CheckResult => ({ hard: outlineProblems(tidy(raw), plan.cast, plan.airedTitles), soft: [] });
   try {
-    const { raw } = await writeChecked(sarvam, timings, {
+    const { draft } = await writeChecked(sarvam, timings, {
       name: 'tarang_kahani_outline',
       messages,
       schema: outlineJsonSchema(plan.cast),
@@ -368,7 +431,8 @@ async function writeOutline(sarvam: Sarvam, station: Station, req: SegmentReques
       check,
       deadline,
     });
-    const outline = tidy(raw);
+    if (!draft) return undefined;
+    const outline = tidy(draft.raw);
     // The parts can be written from an outline with small flaws, never from one without names or endings
     const critical = outlineProblems(outline, plan.cast).filter((p) => /has no name|_last_line_native is|final_line_native is|payoff_native is|name_native is in English|is a question/.test(p));
     return critical.length ? undefined : outline;
@@ -419,8 +483,8 @@ export function withSafetyNet<T extends { role: string; text: string; delivery?:
   return { lines: out, appended: out.length > lines.length };
 }
 
-function storyMessages(station: Station, req: SegmentRequest, cast: SerialCast, user: string, subtitles: boolean): ChatMessage[] {
-  const system = systemPreamble(station, storyRoles(cast) as Role[], req.listener, cast);
+function storyMessages(station: Station, cast: SerialCast, names: Partial<Record<CharacterRole, string>>, user: string, subtitles: boolean): ChatMessage[] {
+  const system = storySystem(station, cast, names);
   return [
     { role: 'system', content: subtitles ? `${system}\n\n${subtitleRule('kahani')}` : system },
     { role: 'user', content: user },
@@ -430,54 +494,173 @@ function storyMessages(station: Station, req: SegmentRequest, cast: SerialCast, 
 const clipOutline = (o: SerialOutline): SerialOutline =>
   Object.fromEntries(Object.entries(o).map(([k, v]) => [k.slice(0, 40), String(v).slice(0, OUTLINE_VALUE_MAX)]));
 
-async function buildOneShot(sarvam: Sarvam, station: Station, req: SegmentRequest, timings: Timings, memory?: ShowMemory): Promise<Segment> {
+/**
+ * The model names each line's speaker by the character's name; code maps names back to roles. A role id or
+ * "narrator" passes through; a name spelt loosely (nukta, vowel length) still finds its role.
+ */
+export function speakersToRoles<S extends { lines: { role?: string; speaker?: string }[] } & Record<string, unknown>>(
+  raw: S,
+  names: Partial<Record<string, string>>,
+): S {
+  const byName = new Map<string, string>();
+  for (const [role, name] of Object.entries(names)) if (name && !/^none$/i.test(name)) byName.set(fold(name).trim(), role);
+  const byFirst = new Map([...byName].map(([n, role]) => [words(n)[0] ?? n, role]));
+  const map = (v: string | undefined): string => {
+    const t = (v ?? '').trim();
+    if (!t || t === 'narrator' || /^char_(a|b|kid)$/u.test(t)) return t || 'narrator';
+    return byName.get(fold(t)) ?? byFirst.get(words(t)[0] ?? '') ?? t;
+  };
+  const lines = raw.lines.map((l) => ({ ...l, role: map(l.speaker ?? l.role) }));
+  const out: Record<string, unknown> = { ...raw, lines };
+  if (typeof raw.last_line_role === 'string') out.last_line_role = map(raw.last_line_role);
+  return out as S;
+}
+
+/**
+ * Gives a line that was spoken to its own speaker to the right voice: talk about oneself by name is the
+ * narrator's; a line calling out the speaker's name (or the kinship word for them) goes to the other character
+ * (with three, the one nearest in the scene).
+ */
+export function reassignSlips<L extends { role: string }>(lines: L[], slips: AddressSlip[], characters: string[]): L[] {
+  if (!slips.length) return lines;
+  const out = lines.map((l) => ({ ...l }));
+  for (const slip of slips) {
+    const i = slip.line;
+    const from = out[i].role;
+    let to: string | undefined;
+    if (slip.kind === 'self_mention') to = 'narrator';
+    else {
+      const others = characters.filter((c) => c !== from);
+      if (others.length === 1) to = others[0];
+      for (let j = i - 1; j >= 0 && !to; j--) if (out[j].role !== 'narrator' && out[j].role !== from) to = out[j].role;
+      for (let j = i + 1; j < out.length && !to; j++) if (out[j].role !== 'narrator' && out[j].role !== from) to = out[j].role;
+    }
+    if (to) out[i].role = to;
+  }
+  return out;
+}
+
+/** Code's repair of a story draft: wrong speakers reassigned, then lines that must never air dropped (at most 2). */
+function storyRepair(names: Partial<Record<string, string>>, kin: Record<string, string>, characters: string[], check: (raw: ModelScript) => CheckResult) {
+  return (raw: ModelScript): ModelScript => {
+    const slips = addressSlips(raw.lines, names, kin);
+    const moved = slips.length ? { ...raw, lines: reassignSlips(raw.lines, slips, characters) } : raw;
+    const recheck = moved === raw ? undefined : check(moved);
+    const blocks = recheck ?? check(raw);
+    const kept = dropBlocked(moved.lines, blocks, STORY_DROPS);
+    return kept === moved.lines && moved === raw ? raw : { ...moved, lines: kept };
+  };
+}
+
+/** The draft that may air, after the judge (when there is one) and the must-never-air rule. */
+async function gate(written: Written<ModelScript>, judge: FictionJudge | undefined, input: (raw: ModelScript) => JudgeInput): Promise<ModelScript | undefined> {
+  const draft = written.draft;
+  if (!draft) return undefined;
+  const verdict = await verdictFor(judge, draft.check, () => input(draft.raw));
+  if (mayAir(draft.check, verdict)) return draft.raw;
+  console.error(`[fiction] draft held back: ${draft.check.hard.slice(0, 3).join(' | ')}`);
+  return undefined;
+}
+
+/** Outline or plan text that may be read on air as it is: in the station script, nothing that must never air. */
+const nativeOk = (station: Station, text: string | undefined): text is string =>
+  Boolean(text && text.trim() && !/^none$/i.test(text.trim()) && latinShare(text) <= (station.language === "en-IN" ? 1 : 0.5) && !leaksDirection(text) && !copiesFictionExample(text));
+
+/**
+ * The outline-based safe close, when a part could not be written: the serial ends here, on the outline's own
+ * payoff and last line (part 1 opens on its tease and setting first). Every line is outline text already checked.
+ */
+function safeCloseLines(station: Station, outline: SerialOutline, part: 1 | 2 | 3): { role: string; text: string; delivery: string }[] {
+  const lines: { role: string; text: string; delivery: string }[] = [];
+  if (part === 1) {
+    if (nativeOk(station, outline.tease_native)) lines.push({ role: 'narrator', text: outline.tease_native, delivery: 'dramatic' });
+    if (nativeOk(station, outline.setting_native)) lines.push({ role: 'narrator', text: outline.setting_native, delivery: 'normal' });
+  }
+  if (nativeOk(station, outline.payoff_native)) lines.push({ role: 'narrator', text: outline.payoff_native, delivery: 'warm' });
+  if (nativeOk(station, outline.final_line_native) && !endsWithQuestion(outline.final_line_native)) {
+    lines.push({ role: outline.final_line_role && outline.final_line_role !== 'narrator' ? outline.final_line_role : 'narrator', text: outline.final_line_native, delivery: 'warm' });
+  }
+  return lines.length >= 2 ? lines : [];
+}
+
+/** A one-shot's safe close: the narrator tells its planned beats and the planned last line closes it. */
+function oneShotCloseLines(station: Station, raw: ModelScript | undefined): { role: string; text: string; delivery: string }[] {
+  if (!raw) return [];
+  const beats = ONE_SHOT_BEATS.map((b) => str(raw[`plan_${b}_native`]));
+  if (!beats.every((b) => nativeOk(station, b))) return [];
+  const last = str(raw.last_line_native);
+  const lines = beats.map((text, i) => ({ role: 'narrator', text, delivery: i === 0 ? 'dramatic' : 'normal' }));
+  if (nativeOk(station, last) && !endsWithQuestion(last)) lines.push({ role: str(raw.last_line_role) || 'narrator', text: last, delivery: 'warm' });
+  return lines;
+}
+
+const judgeLines = (lines: { role: string; text: string; delivery?: string }[]) => reviewLines(lines);
+
+async function buildOneShot(sarvam: Sarvam, station: Station, req: SegmentRequest, timings: Timings, memory?: ShowMemory, judge?: FictionJudge): Promise<Segment> {
   const subtitles = subtitlesOn(station, req.subtitles);
-  const plan = await timings.measure('memory', () => planStory(station, req, memory));
+  const base = await timings.measure('memory', () => planStory(station, req, memory));
+  const people = castPeople(station, base.cast, base.brief);
+  const plan: StoryPlan & { openingsUsed: string[] } = { ...base, people };
   const roles = storyRoles(plan.cast) as Role[];
   const characters = castCharacters(plan.cast);
-  const fields = ['plan_story_en', 'char_a_name_native', 'char_b_name_native', 'char_kid_name_native', 'relations_en', 'plan_want', 'plan_clue', 'plan_twist', 'plan_payoff', 'last_line_native', 'last_line_role', 'title', 'lines', 'summary_en'];
+  const names = people.names as Partial<Record<string, string>>;
+  const fields = [...ONE_SHOT_FIELDS];
   const check = (raw: ModelScript): CheckResult => {
-    const names = Object.fromEntries(characters.map((r) => [r, str(raw[`${r}_name_native`])]));
     const result = serialShape(station, raw.lines, {
       part: 0,
       characters,
       names,
-      defined: [raw.relations_en, ...Object.values(names)].map(str).join(' | '),
+      defined: [people.relations, ...Object.values(names)].map(str).join(' | '),
       expectedLast: undefined,
       min: ONE_SHOT_LINES.min,
       max: ONE_SHOT_LINES.max,
+      kin: people.kin,
+      beats: ONE_SHOT_BEATS.map((key) => ({ key, text: str(raw[`plan_${key}_native`]) })),
     });
     if (plan.airedTitles?.has(normalizeTitle(str(raw.title)))) result.hard.push(`The title "${str(raw.title)}" already aired: pick another.`);
     const last = str(raw.last_line_native);
     if (last && lineOverlap(raw.lines[raw.lines.length - 1]?.text ?? '', last) < 0.3) result.soft.push(`End on your planned last line: "${last}".`);
     return result;
   };
-  let written: { raw: ModelScript; check: CheckResult };
+  let written: Written<ModelScript>;
   try {
     written = await writeChecked(sarvam, timings, {
       name: 'tarang_kahani_story',
-      messages: storyMessages(station, req, plan.cast, oneShotPrompt(station, req, plan), subtitles),
-      schema: oneShotJsonSchema(plan.cast, subtitles),
+      messages: storyMessages(station, plan.cast, people.names, oneShotPrompt(station, req, plan), subtitles),
+      schema: oneShotJsonSchema(plan.cast, subtitles, people),
       zod: scriptSchema(fields) as unknown as z.ZodType<ModelScript>,
       plan: ONE_SHOT_PLAN,
       subtitles,
       check,
+      normalize: (raw) => speakersToRoles(raw, names),
+      repair: storyRepair(names, people.kin, characters, check),
       deadline: Date.now() + STORY_BUDGET_MS,
+      rescue: { user: oneShotPrompt(station, req, plan, { short: true }), graceMs: RESCUE_GRACE_MS.story, timeoutMs: RESCUE_TIMEOUT_MS.story },
     });
   } catch {
     return fallbackSegment(station, 'kahani', subtitles);
   }
-  const { raw } = written;
-  const net = withSafetyNet(raw.lines, { last: str(raw.last_line_native), lastRole: str(raw.last_line_role) }, (role, text, delivery) => ({ role, text, delivery }));
-  const lines = toAir(station, 'kahani', net.lines, roles, subtitles, plan.cast);
-  if (lines.length < 6) return fallbackSegment(station, 'kahani', subtitles);
-  const title = cleanTitle(str(raw.title), station.nativeName, station);
-  const summary = `Kahani "${title}": ${str(raw.summary_en)}`.slice(0, 200);
-  const segment: Segment = { id: crypto.randomUUID(), station: station.id, type: 'kahani', title, lines, summary };
+  const raw = await gate(written, judge, (r) => ({ type: 'kahani', oneShot: true, station: station.id, lines: judgeLines(r.lines), context: { names, relations: people.relations } }));
+  let modelLines: { role: string; text: string; delivery?: string; en?: string }[];
+  let summary = str(raw?.summary_en);
+  let title = cleanTitle(str(raw?.title ?? written.first?.raw.title), station.nativeName, station);
+  if (raw) {
+    modelLines = withSafetyNet(raw.lines, { last: str(raw.last_line_native), lastRole: str(raw.last_line_role) }, (role, text, delivery) => ({ role, text, delivery })).lines;
+  } else {
+    // Never air a draft that failed: the narrator tells the planned beats instead (or the station fills the gap)
+    modelLines = oneShotCloseLines(station, written.first?.raw);
+    console.log(`[fiction] tarang_kahani_story safe close (${modelLines.length} lines)`);
+    if (modelLines.length < 4) return fallbackSegment(station, 'kahani', subtitles);
+    summary = str(written.first?.raw.plan_story_en);
+    if (airedTitle(plan, title)) title = station.nativeName;
+  }
+  const lines = toAir(station, 'kahani', modelLines, roles, subtitles, plan.cast);
+  if (lines.length < 4) return fallbackSegment(station, 'kahani', subtitles);
+  const segment: Segment = { id: crypto.randomUUID(), station: station.id, type: 'kahani', title, lines, summary: `Kahani "${title}": ${summary}`.slice(0, 200) };
   memory?.rememberStory(station.id, {
     at: new Date().toISOString(),
     title,
-    summary: str(raw.summary_en).slice(0, 200),
+    summary: summary.slice(0, 200),
     setting: plan.brief.setting,
     hook: plan.brief.hook,
     twist: plan.brief.twist,
@@ -485,6 +668,8 @@ async function buildOneShot(sarvam: Sarvam, station: Station, req: SegmentReques
   });
   return segment;
 }
+
+const airedTitle = (plan: Pick<StoryPlan, 'airedTitles'>, title: string) => Boolean(plan.airedTitles?.has(normalizeTitle(title)));
 
 async function buildPart(
   sarvam: Sarvam,
@@ -494,6 +679,7 @@ async function buildPart(
   part: 1 | 2 | 3,
   memory?: ShowMemory,
   given?: SerialState,
+  judge?: FictionJudge,
 ): Promise<Segment> {
   const subtitles = subtitlesOn(station, req.subtitles);
   let outline: SerialOutline | undefined = given?.outline;
@@ -503,7 +689,7 @@ async function buildPart(
     const plan = await timings.measure('memory', () => planStory(station, req, memory));
     outline = await timings.measure('outline', () => writeOutline(sarvam, station, req, plan, timings));
     // No usable outline: a complete story instead of a serial that can't continue
-    if (!outline) return buildOneShot(sarvam, station, req, timings, memory);
+    if (!outline) return buildOneShot(sarvam, station, req, timings, memory, judge);
     outline.opening = pickOpening(plan.openingsUsed);
     cast = plan.cast;
     serialId = crypto.randomUUID();
@@ -522,6 +708,7 @@ async function buildPart(
   const roles = storyRoles(cast) as Role[];
   const characters = castCharacters(cast);
   const names = castNames(outline, cast);
+  const kin = kinTargets(outline.relations_en ?? '', Object.fromEntries(characters.map((r) => [r, [names[r] ?? '', ...latinSpellings(station, names[r])]])));
   const end = expectedLast(outline, part);
   const recap: RecapSource | undefined =
     part > 1
@@ -541,23 +728,51 @@ async function buildPart(
       min: PART_LINES.min,
       max: PART_LINES.max,
       recapLines: recap?.lastLines.map((l) => l.text),
+      kin,
     });
-  let written: { raw: ModelScript; check: CheckResult };
+  let written: Written<ModelScript>;
   try {
     written = await writeChecked(sarvam, timings, {
       name: `tarang_kahani_part${part}`,
-      messages: storyMessages(station, req, cast, partPrompt(station, outline, cast, part, recap), subtitles),
-      schema: partJsonSchema(cast, subtitles),
+      messages: storyMessages(station, cast, names, partPrompt(station, outline, cast, part, recap), subtitles),
+      schema: partJsonSchema(cast, subtitles, outline),
       zod: scriptSchema(['plan_scene', 'plan_names', 'plan_turn', 'lines', 'summary_en', 'cliffhanger_en']) as unknown as z.ZodType<ModelScript>,
       plan: SEGMENT_PLAN.kahani,
       subtitles,
       check,
+      normalize: (raw) => speakersToRoles(raw, names),
+      repair: storyRepair(names, kin, characters, check),
       deadline: Date.now() + STORY_BUDGET_MS,
+      rescue: { user: partPrompt(station, outline, cast, part, recap, { short: true }), graceMs: RESCUE_GRACE_MS.story, timeoutMs: RESCUE_TIMEOUT_MS.story },
     });
   } catch {
-    return fallbackSegment(station, 'kahani', subtitles);
+    written = { path: 'none' };
   }
-  const { raw } = written;
+  const raw = await gate(written, judge, (r) => ({
+    type: 'kahani',
+    part,
+    station: station.id,
+    lines: judgeLines(r.lines),
+    context: { outline: outline!, names, relations: outline!.relations_en, expectedLastLine: end.text, ...(recap ? { recap } : {}) },
+  }));
+  const title = partTitle(station.id, cleanTitle(outline.title_native, station.nativeName, station), part);
+  if (!raw) {
+    // Never air a part that failed: the serial closes here, on the outline's payoff and last line
+    const close = safeCloseLines(station, outline, part);
+    console.log(`[fiction] tarang_kahani_part${part} safe close (${close.length} lines)`);
+    if (!close.length) return fallbackSegment(station, 'kahani', subtitles);
+    const lines = toAir(station, 'kahani', close, roles, subtitles, cast);
+    const summary = outline.payoff_en ? `The serial closed early: ${outline.payoff_en}` : 'The serial closed early.';
+    return {
+      id: crypto.randomUUID(),
+      station: station.id,
+      type: 'kahani',
+      title,
+      lines,
+      summary: `Kahani part ${part} of 3: ${summary}`.slice(0, 200),
+      serial: { id: serialId!, part: 3, outline: clipOutline({ ...outline, aired_heard_en: summary, aired_cliffhanger_en: 'resolved' }), cast: castRecord(cast) },
+    };
+  }
   let modelLines = raw.lines;
   let summary = str(raw.summary_en);
   if (part === 3) {
@@ -578,17 +793,25 @@ async function buildPart(
     id: crypto.randomUUID(),
     station: station.id,
     type: 'kahani',
-    title: partTitle(station.id, cleanTitle(outline.title_native, station.nativeName, station), part),
+    title,
     lines,
     summary: `Kahani part ${part} of 3: ${summary}`.slice(0, 200),
     serial,
   };
 }
 
-export async function buildKahani(sarvam: Sarvam, station: Station, req: SegmentRequest, timings: Timings, memory?: ShowMemory): Promise<Segment> {
+/** The Latin spellings of a native name (RELATIONS is English and may spell names in Latin). */
+function latinSpellings(station: Station, native: string | undefined): string[] {
+  if (!native) return [];
+  return Object.entries(STORY_NAMES_NATIVE[station.id] ?? {})
+    .filter(([, n]) => fold(n) === fold(native))
+    .map(([latin]) => latin);
+}
+
+export async function buildKahani(sarvam: Sarvam, station: Station, req: SegmentRequest, timings: Timings, memory?: ShowMemory, judge?: FictionJudge): Promise<Segment> {
   const mode = kahaniMode(req);
-  if (mode.kind === 'one_shot') return buildOneShot(sarvam, station, req, timings, memory);
-  return buildPart(sarvam, station, req, timings, mode.part, memory, mode.serial);
+  if (mode.kind === 'one_shot') return buildOneShot(sarvam, station, req, timings, memory, judge);
+  return buildPart(sarvam, station, req, timings, mode.part, memory, mode.serial, judge);
 }
 
 // ---- Ads ----------------------------------------------------------------------------------------------------------
@@ -608,14 +831,16 @@ export async function planAd(station: Station, req: SegmentRequest, memory?: Sho
     region: req.listener.region,
     avoid: memory ? { formats: records.map((r) => r.format), problems: records.map((r) => r.category) } : undefined,
   });
+  const airedTitles = new Set(records.map((r) => normalizeTitle(r.title)));
   return {
     ...pick,
     aired: records.slice(-8).map((r) => `${r.title}${r.summary ? `: ${r.summary}` : ''}`),
-    airedTitles: new Set(records.map((r) => normalizeTitle(r.title))),
+    airedTitles,
+    puns: punChoices(station.id, pick.card.id, pick.problem.id, { avoid: airedTitles, normalize: normalizeTitle }),
   };
 }
 
-export async function buildAd(sarvam: Sarvam, station: Station, req: SegmentRequest, timings: Timings, memory?: ShowMemory): Promise<Segment> {
+export async function buildAd(sarvam: Sarvam, station: Station, req: SegmentRequest, timings: Timings, memory?: ShowMemory, judge?: FictionJudge): Promise<Segment> {
   const subtitles = subtitlesOn(station, req.subtitles);
   const plan = await timings.measure('memory', () => planAd(station, req, memory));
   const pick = plan;
@@ -627,28 +852,34 @@ export async function buildAd(sarvam: Sarvam, station: Station, req: SegmentRequ
     if (raw.lines.some((l) => /\{\s*(name|nickname)\s*\}/iu.test(l.text))) result.hard.push('No {name} in an ad.');
     return result;
   };
-  let written: { raw: ModelScript; check: CheckResult };
+  const messages: ChatMessage[] = [
+    { role: 'system', content: subtitles ? `${system}\n\n${subtitleRule('ad_break')}` : system },
+    { role: 'user', content: adPrompt(station, req, plan) },
+  ];
+  let written: Written<ModelScript>;
   try {
     written = await writeChecked(sarvam, timings, {
       name: 'tarang_ad_break',
-      messages: [
-        { role: 'system', content: subtitles ? `${system}\n\n${subtitleRule('ad_break')}` : system },
-        { role: 'user', content: adPrompt(station, req, plan) },
-      ],
+      messages,
       schema: adJsonSchema(subtitles),
       zod: scriptSchema(fields) as unknown as z.ZodType<ModelScript>,
       plan: SEGMENT_PLAN.ad_break,
       subtitles,
       check,
+      // A line that reads a direction aloud (or copies an example) is dropped; the check then runs again
+      repair: (raw, result) => {
+        const kept = dropBlocked(raw.lines, result, AD_DROPS);
+        return kept === raw.lines ? raw : { ...raw, lines: kept };
+      },
       deadline: Date.now() + AD_BUDGET_MS,
+      rescue: { user: adPrompt(station, req, plan, { short: true }), graceMs: RESCUE_GRACE_MS.ad, timeoutMs: RESCUE_TIMEOUT_MS.ad },
     });
   } catch {
     return stingSegment(station, subtitles);
   }
-  const { raw } = written;
-  // A line that still reads a direction aloud after the rewrite is dropped; too little left means no ad
-  const kept = raw.lines.filter((l) => !leaksDirection(l.text));
-  const lines = toAir(station, 'ad_break', kept, ['ad_announcer', 'ad_customer'], subtitles);
+  const raw = await gate(written, judge, (r) => ({ type: 'ad_break', station: station.id, lines: judgeLines(r.lines), context: { ad: { format: pick.card.id, signature: pick.card.signature, ...(pick.card.tnc === 'none' ? {} : { tnc: pick.card.tnc }) } } }));
+  if (!raw) return stingSegment(station, subtitles);
+  const lines = toAir(station, 'ad_break', raw.lines.filter((l) => !leaksDirection(l.text)), ['ad_announcer', 'ad_customer'], subtitles);
   if (lines.length < 3) return stingSegment(station, subtitles);
   const title = cleanTitle(str(raw.title), station.nativeName, station);
   const summary = str(raw.summary_en).slice(0, 200) || undefined;
@@ -662,8 +893,8 @@ export async function buildFiction(
   station: Station,
   req: SegmentRequest,
   timings: Timings,
-  opts: { memory?: ShowMemory } = {},
+  opts: { memory?: ShowMemory; judge?: FictionJudge } = {},
 ): Promise<Segment> {
-  if (req.type === 'ad_break') return buildAd(sarvam, station, req, timings, opts.memory);
-  return buildKahani(sarvam, station, req, timings, opts.memory);
+  if (req.type === 'ad_break') return buildAd(sarvam, station, req, timings, opts.memory, opts.judge);
+  return buildKahani(sarvam, station, req, timings, opts.memory, opts.judge);
 }

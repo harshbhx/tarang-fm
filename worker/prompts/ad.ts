@@ -2,11 +2,13 @@
  * The ad break (bible §4.3, prompt pack §5): one parody of a format every Indian listener knows, for an
  * invented product that solves a real everyday problem, built backwards from its punchline. The ad gets
  * no show log, city, weather or listener; only the time of year, and a festival when code allows one.
+ * The brand comes from a curated pun pool in the station language (or the writer coins one on its pattern),
+ * and every example is in the station language.
  */
 import { DELIVERIES } from '../../shared/constants';
 import type { SegmentRequest } from '../../shared/schemas';
 import type { Station } from '../../shared/types';
-import { festivalLine, pickAd, seasonLine, type AdPick } from '../pools/ads';
+import { festivalLine, pickAd, seasonLine, type AdPick, type AdPun } from '../pools/ads';
 import { fictionLocale } from '../story';
 import { EN_FIELD, genderWord, languageName, personNoun } from './common';
 
@@ -17,6 +19,8 @@ export const AD_PLAN_FIELDS: string[] = ['plan_punchline', 'plan_product', 'plan
 export interface AdPlan extends AdPick {
   aired?: string[];
   airedTitles?: ReadonlySet<string>;
+  /** Up to 3 curated brand puns for this card and problem, in the station language */
+  puns?: AdPun[];
 }
 
 export function adJsonSchema(subtitles: boolean): Record<string, unknown> {
@@ -53,16 +57,26 @@ function tncRule(station: Station, plan: AdPick): string {
   return 'none.';
 }
 
+/** One native example set (never of this ad's own format), chosen at random, and the lines an ad must never sound like. */
 function examples(station: Station, plan: AdPick): string {
-  const sets = fictionLocale(station.id).adExamples.filter((e) => e.format !== plan.card.id);
+  const loc = fictionLocale(station.id);
+  const sets = loc.adExamples.filter((e) => e.format !== plan.card.id);
   const set = sets[Math.floor(Math.random() * sets.length)];
   const good = set ? `GOOD (${set.format.replace('_', ' ')}): ${set.lines.map((l) => `${l.role} · ${l.delivery} · "${l.text}"`).join(' then ')}\n` : '';
+  const bad = loc.adBad.map((e) => `BAD (${e.note}): "${e.text}"`).join('\n');
   return `Examples (style only. Never copy the wording, brand or joke):
-${good}BAD: "This product will change your life, buy it today!" (no format, no joke)
-BAD: "In a low voice: this is my secret, delivery hushed." (a stage direction read aloud)`;
+${good}${bad}`;
 }
 
-export function adPrompt(station: Station, req: SegmentRequest, plan?: AdPlan): string {
+function brandLine(station: Station, plan: AdPlan): string {
+  const lang = languageName(station);
+  if (!plan.puns?.length) return `BRAND: invent a ${lang} pun on the problem or on what the product does.`;
+  return `BRAND: take one of these ${lang} puns (they work in ${lang}), or coin a better one on the same pattern:
+${plan.puns.map((x) => `- ${x.brand} (the pun: ${x.on})`).join('\n')}`;
+}
+
+/** The ad's task. `short` is the rescue prompt, sent once when a rewrite timed out: no examples, no aired list. */
+export function adPrompt(station: Station, req: SegmentRequest, plan?: AdPlan, opts: { short?: boolean } = {}): string {
   const pick: AdPlan = plan ?? pickAd(station.id, { localDate: req.listener.localDate, region: req.listener.region });
   const lang = languageName(station);
   const [min, max] = pick.card.lines;
@@ -72,23 +86,23 @@ export function adPrompt(station: Station, req: SegmentRequest, plan?: AdPlan): 
   const festive = pick.festival
     ? `FESTIVAL: it may touch ${festivalLine(pick.festival, station.id)}. One light mention, no religious content.`
     : 'No festival, no city, no weather, no listener.';
-  return `Write one 15-20 second spoof ad in ${lang}: ${min}-${max} lines, under 400 characters in all.
+  const body = `Write one 15-20 second spoof ad in ${lang}: ${min}-${max} lines, under 400 characters in all.
 
 FORMAT: ${pick.card.name}. Listeners must recognise it from line 1: ${pick.card.signature}
 BEATS (role · delivery · what happens):
 ${pick.card.beats.map((b, i) => `${i + 1}. ${b}`).join('\n')}
 THE PUNCHLINE goes in: ${pick.card.punchline}
-HOW THE JOKE WORKS: ${pick.card.pattern}${pick.problem.id !== pick.card.exampleProblem ? `\nTHE PATTERN ON ANOTHER PROBLEM (for the logic only; never reuse it): ${pick.card.example}` : ''}
+HOW THE JOKE WORKS: ${pick.card.pattern}
 FINE PRINT: ${tncRule(station, pick)}
 EVERYDAY PROBLEM it solves: ${pick.problem.en}
+${brandLine(station, pick)}
 TIME OF YEAR: ${seasonLine(station.id, pick.month)}. Everything in the ad must fit it.
-${festive}
-ALREADY AIRED (make this one different in product, brand and joke): ${aired.length ? aired.join(' | ') : 'none'}
+${festive}${opts.short ? '' : `\nALREADY AIRED (make this one different in product, brand and joke): ${aired.length ? aired.join(' | ') : 'none'}`}
 
 Rules:
 - Write the punchline first (plan_punchline), then lines that set it up. The product really solves the PROBLEM; the joke is the format's one twist. One joke, landed once, in the last or second-to-last line. After it, nothing but the brand or a tagline.
 - It must make sense to a listener: a real situation, a product that logically fits the problem, a punchline that follows from the setup. No random objects, no magic powers.
-- Brand: invented, a ${lang} pun on the problem or on what the product does, said once or twice. Never a real brand, person or slogan.
+- Brand: from BRAND above (or your own pun on the same pattern), said once or twice. Never a real brand, person or slogan.
 - "text" holds only the spoken words. The delivery cues in BEATS go in "delivery", never in "text": no brackets, no labels, no "delivery:".
 - ${lang} sentences. English only for single everyday words, the fine print or a 2-4 word tagline. No real medical, legal or money promises; no jokes about bodies, skin colour, caste or region.
 Role values: ad_announcer = the announcer (${genderWord(station.cast.ad_announcer)}); ad_customer = the customer, and any second voice (${personNoun('ad_customer', station.cast.ad_customer)}).
@@ -97,8 +111,7 @@ plan_punchline: the joke, in ${lang} (at most 12 words): HOW THE JOKE WORKS appl
 plan_product: the invented product and how it solves the PROBLEM, in one English line.
 plan_brand_pun: the brand, and what the pun is on.
 plan_signature: how line 1 makes the format obvious.
-title: the brand name, a ${lang} word in ${lang} script (an English word may follow it, in Latin).
-summary_en: the format, product, brand and punchline in one sentence, only as the lines say it.
-
-${examples(station, pick)}`;
+title: the brand name, exactly as the lines say it.
+summary_en: the format, product, brand and punchline in one sentence, only as the lines say it.`;
+  return opts.short ? body : `${body}\n\n${examples(station, pick)}`;
 }

@@ -236,6 +236,39 @@ export const STORY_NAMES: Partial<Record<StationId, { masculine: string[]; femin
   },
 };
 
+/**
+ * The same names in each station's script, so code can fix a story's names before the writer starts and every
+ * part spells them the same way (a name is also the speaker value of its lines). Kin-suffixed names are left
+ * out: a relation belongs in RELATIONS, not in a name.
+ */
+export const STORY_NAMES_NATIVE: Partial<Record<StationId, Record<string, string>>> = {
+  hi: {
+    Kabir: 'कबीर', Ishaan: 'इशान', Vihaan: 'विहान', Pranav: 'प्रणव', Aditya: 'आदित्य', Yash: 'यश', Imran: 'इमरान', Devansh: 'देवांश', Rohit: 'रोहित', Anmol: 'अनमोल',
+    Meher: 'मेहर', Tara: 'तारा', Zoya: 'ज़ोया', Naina: 'नैना', Kavya: 'काव्या', Riddhi: 'रिद्धि', Ananya: 'अनन्या', Shabnam: 'शबनम', Pallavi: 'पल्लवी', Gunjan: 'गुंजन',
+  },
+  mr: {
+    Aniket: 'अनिकेत', Omkar: 'ओंकार', Sahil: 'साहिल', Chinmay: 'चिन्मय', Tejas: 'तेजस', Mandar: 'मंदार', Baban: 'बबन', Vinayak: 'विनायक', Rohan: 'रोहन',
+    Gauri: 'गौरी', Mrunal: 'मृणाल', Sai: 'सई', Ketaki: 'केतकी', Rutuja: 'ऋतुजा', Manasi: 'मानसी', Pooja: 'पूजा', Radha: 'राधा',
+  },
+  gu: {
+    Dhruv: 'ધ્રુવ', Parth: 'પાર્થ', Jignesh: 'જીગ્નેશ', Kunal: 'કુણાલ', Malhar: 'મલ્હાર', Bhavesh: 'ભાવેશ', Nirav: 'નિરવ', Tirth: 'તીર્થ',
+    Hetvi: 'હેત્વી', Krupa: 'કૃપા', Diya: 'દિયા', Nidhi: 'નિધિ', Mansi: 'માનસી', Foram: 'ફોરમ', Riya: 'રિયા', Kinjal: 'કિંજલ', Urvi: 'ઉર્વી',
+  },
+  bn: {
+    Arko: 'অর্ক', Rishi: 'ঋষি', Tathagata: 'তথাগত', Sayan: 'সায়ন', Ritam: 'ঋতম', Bappa: 'বাপ্পা', Tublu: 'টুবলু', Sourav: 'সৌরভ',
+    Mishti: 'মিষ্টি', Ishani: 'ঈশানী', Tithi: 'তিথি', Rupsha: 'রূপসা', Moumita: 'মৌমিতা', Poulami: 'পৌলমী', Tumpa: 'টুম্পা', Srabanti: 'শ্রাবন্তী', Chumki: 'চুমকি',
+  },
+  ta: {
+    Arjun: 'அர்ஜுன்', Karthik: 'கார்த்திக்', Vetri: 'வெற்றி', Surya: 'சூர்யா', Balu: 'பாலு', Prabhu: 'பிரபு', Dinesh: 'தினேஷ்', Hari: 'ஹரி',
+    Meena: 'மீனா', Nila: 'நிலா', Divya: 'திவ்யா', Kayal: 'கயல்', Janani: 'ஜனனி', Revathi: 'ரேவதி', Malar: 'மலர்', Anjali: 'அஞ்சலி',
+  },
+};
+
+/** A name in the station's script, or undefined when the table has no spelling for it. */
+export function nativeName(station: StationId, latin: string): string | undefined {
+  return STORY_NAMES_NATIVE[station]?.[latin];
+}
+
 // ---- How a Kahani opens and closes -------------------------------------------------------------------
 
 export interface StoryOpening {
@@ -354,13 +387,25 @@ export function isSpooky(genre: string): boolean {
 
 // ---- Each language's storytelling words ----------------------------------------------------------------
 
-/** One example line for the writer (style only; every one is registered in the copied-example check). */
+/**
+ * One example line for the writer (style only; every one is registered in the copied-example check). Examples
+ * are in the station language only, never English, and use names no story is ever given.
+ */
 export interface ExampleLine {
+  /** "a character" or "narrator" for a story; ad_announcer or ad_customer for an ad */
   role: string;
   delivery: string;
   text: string;
   /** What it shows, in English */
   note: string;
+}
+
+/** How a child addresses a parent, and the loose words for an older neighbour (not checked as kinship). */
+export interface KinWords {
+  mother: string;
+  father: string;
+  elderSister: string;
+  elderBrother: string;
 }
 
 export interface FictionLocale {
@@ -376,11 +421,23 @@ export interface FictionLocale {
   fillers: string[];
   /** How the characters talk, one line for the writer */
   dialogue: string;
-  /** Kahani examples: sets of a cold open and a sound said in words (one set is shown per call) */
+  kin: KinWords;
+  /** Kahani examples: 2-3 sets of a cold open and a sound said in words (one set is shown per call) */
   storyExamples: ExampleLine[][];
+  /** Two lines a story must never sound like: a stub, and the payoff summarised */
+  storyBad: ExampleLine[];
   /** Ad examples by the format they show (an ad never sees the example of its own format) */
   adExamples: { format: string; lines: ExampleLine[] }[];
+  /** Two lines an ad must never sound like: no format and no joke, and a stage direction read aloud */
+  adBad: ExampleLine[];
 }
+
+const C = 'a character';
+const bad = (text: string, note: string): ExampleLine => ({ role: '', delivery: '', text, note });
+const NO_JOKE = 'no format, no joke';
+const DIRECTION = 'a stage direction read aloud';
+const STUB = 'a stub anyone could say; tells us nothing';
+const SUMMARY = 'the payoff summarised, not played';
 
 export const FICTION_LOCALE: Partial<Record<StationId, FictionLocale>> = {
   hi: {
@@ -390,16 +447,22 @@ export const FICTION_LOCALE: Partial<Record<StationId, FictionLocale>> = {
     tnc: 'शर्तें लागू',
     fillers: ['अरे', 'यार', 'वैसे', 'सच में', 'बिल्कुल', 'मतलब', 'हाँ जी', 'उफ़्फ़'],
     dialogue: 'Everyday spoken Hindi, the way families and friends really talk; an English word only where people really say it (phone, tiffin, race, office).',
+    kin: { mother: 'मम्मी', father: 'पापा', elderSister: 'दीदी', elderBrother: 'भैया' },
     storyExamples: [
       [
-        { role: 'char_b', delivery: 'shout', text: 'इशान, तूने फिर मेरी साइकिल की घंटी बेच दी? कल सुबह 6 बजे race है!', note: 'cold open, a name in line 1, a want with a clock' },
+        { role: C, delivery: 'shout', text: 'शेखर, तूने फिर मेरी साइकिल की घंटी बेच दी? कल सुबह 6 बजे race है!', note: 'cold open, a name in line 1, a want with a clock' },
         { role: 'narrator', delivery: 'dramatic', text: 'बाहर कुकर की तीसरी सीटी बजी, और उसी पल पूरी गली की बत्ती चली गई।', note: 'a sound said in words' },
       ],
       [
-        { role: 'char_a', delivery: 'fast', text: 'ज़ोया, तूने मेरा टिफ़िन फिर बदल दिया? आज उसमें गिनकर बारह लड्डू थे!', note: 'cold open, a name in line 1, one concrete number' },
+        { role: C, delivery: 'fast', text: 'मीनू, तूने मेरा टिफ़िन फिर बदल दिया? आज उसमें गिनकर बारह लड्डू थे!', note: 'cold open, a name in line 1, one concrete number' },
         { role: 'narrator', delivery: 'hushed', text: 'ऊपर वाले flat में किसी ने तीन बार दरवाज़ा खटखटाया, और फिर सन्नाटा।', note: 'a sound said in words' },
       ],
+      [
+        { role: C, delivery: 'hushed', text: "'जो ये पढ़े, रात 9 बजे छत की टंकी के पास आए।' चिंटू, ये पर्ची तेरे बस्ते में कैसे आई?", note: 'a note read aloud, a name in line 1, a clock' },
+        { role: 'narrator', delivery: 'dramatic', text: 'नीचे गली में कोई सीटी बजाता हुआ गुज़रा, तीन लंबी, एक छोटी।', note: 'a sound said in words' },
+      ],
     ],
+    storyBad: [bad('अरे, ये क्या है?', STUB), bad('और फिर सबको सच पता चल गया, और सब ख़ुश हो गए।', SUMMARY)],
     adExamples: [
       {
         format: 'coaching_topper',
@@ -415,7 +478,15 @@ export const FICTION_LOCALE: Partial<Record<StationId, FictionLocale>> = {
           { role: 'ad_announcer', delivery: 'fast', text: '10 मिनट, अगर आप ख़ुद उड़ सकें। पंख शामिल नहीं।', note: 'the asterisk is the joke' },
         ],
       },
+      {
+        format: 'lab_coat_expert',
+        lines: [
+          { role: 'ad_announcer', delivery: 'normal', text: "देश के experts की राय: गहरी नींद के लिए सबसे असरदार है 'ऊँघ-अमृत'।", note: 'the white-coat voice in line 1' },
+          { role: 'ad_announcer', delivery: 'normal', text: 'Experts, यानी park की bench पर रोज़ दोपहर सोने वाले दो uncle।', note: "the expert's credentials are the joke" },
+        ],
+      },
     ],
+    adBad: [bad('ये product आपकी ज़िंदगी बदल देगा, आज ही ख़रीदिए!', NO_JOKE), bad('धीमी आवाज़ में: ये है मेरा राज़, delivery hushed।', DIRECTION)],
   },
   mr: {
     partWord: 'भाग',
@@ -424,12 +495,18 @@ export const FICTION_LOCALE: Partial<Record<StationId, FictionLocale>> = {
     tnc: 'अटी लागू',
     fillers: ['अरे', 'बरं', 'म्हणजे', 'खरंच'],
     dialogue: 'Everyday spoken Marathi (बोलीभाषा) with Marathi grammar and Marathi words only: never Hindi words such as है, नहीं, क्या, बहुत (say आहे, नाही, काय, खूप). Sentences end with ".".',
+    kin: { mother: 'आई', father: 'बाबा', elderSister: 'ताई', elderBrother: 'दादा' },
     storyExamples: [
       [
-        { role: 'char_b', delivery: 'shout', text: 'सई, तू पुन्हा माझ्या सायकलची घंटी विकलीस? उद्या सकाळी 6 वाजता race आहे!', note: 'cold open, a name in line 1, a want with a clock' },
+        { role: C, delivery: 'shout', text: 'पिंट्या, तू पुन्हा माझ्या सायकलची घंटी विकलीस? उद्या सकाळी 6 वाजता race आहे!', note: 'cold open, a name in line 1, a want with a clock' },
         { role: 'narrator', delivery: 'dramatic', text: 'बाहेर कुकरची तिसरी शिट्टी वाजली, आणि त्याच क्षणी अख्ख्या गल्लीतले दिवे गेले.', note: 'a sound said in words' },
       ],
+      [
+        { role: C, delivery: 'fast', text: 'बंड्या, माझा डबा पुन्हा बदललास? त्यात मोजून बारा मोदक होते!', note: 'cold open, a name in line 1, one concrete number' },
+        { role: 'narrator', delivery: 'hushed', text: 'वरच्या मजल्यावर कोणीतरी तीनदा दार ठोठावलं, आणि मग शांतता.', note: 'a sound said in words' },
+      ],
     ],
+    storyBad: [bad('अरे, हे काय आहे?', STUB), bad('आणि मग सगळ्यांना खरं कळलं, आणि सगळे खूश झाले.', SUMMARY)],
     adExamples: [
       {
         format: 'coaching_topper',
@@ -446,6 +523,7 @@ export const FICTION_LOCALE: Partial<Record<StationId, FictionLocale>> = {
         ],
       },
     ],
+    adBad: [bad('हे product तुमचं आयुष्य बदलून टाकेल, आजच घ्या!', NO_JOKE), bad('हळू आवाजात: हे माझं गुपित आहे, delivery hushed.', DIRECTION)],
   },
   ta: {
     partWord: 'பகுதி',
@@ -454,12 +532,18 @@ export const FICTION_LOCALE: Partial<Record<StationId, FictionLocale>> = {
     tnc: 'T&C apply',
     fillers: ['அட', 'சரி', 'ஆமா', 'அப்புறம்'],
     dialogue: 'Colloquial Chennai Tamil (பேச்சுத் தமிழ், never formal written Tamil) with natural English words in Latin script. Every voice is male: every character is a man or a boy (masculine verb forms). Sentences end with ".".',
+    kin: { mother: 'அம்மா', father: 'அப்பா', elderSister: 'அக்கா', elderBrother: 'அண்ணா' },
     storyExamples: [
       [
-        { role: 'char_kid', delivery: 'shout', text: 'கார்த்திக் அண்ணா, நீ மறுபடியும் என் சைக்கிள் மணியை வித்துட்டியா? நாளைக்கு காலைல 6 மணிக்கு race!', note: 'cold open, a name in line 1, a want with a clock' },
+        { role: C, delivery: 'shout', text: 'மணி அண்ணா, நீ மறுபடியும் என் சைக்கிள் மணியை வித்துட்டியா? நாளைக்கு காலைல 6 மணிக்கு race!', note: 'cold open, a name in line 1, a want with a clock' },
         { role: 'narrator', delivery: 'dramatic', text: 'வெளியே குக்கர் மூணாவது விசில் அடிச்சுது, அதே நொடியில தெரு முழுக்க கரண்ட் போச்சு.', note: 'a sound said in words' },
       ],
+      [
+        { role: C, delivery: 'fast', text: 'சின்னா, என் tiffin-ஐ மறுபடியும் மாத்திட்டியா? அதுல எண்ணி பன்னிரண்டு லட்டு இருந்துச்சு!', note: 'cold open, a name in line 1, one concrete number' },
+        { role: 'narrator', delivery: 'hushed', text: 'மேல் வீட்டுல யாரோ மூணு தடவை கதவைத் தட்டினாங்க, அப்புறம் அமைதி.', note: 'a sound said in words' },
+      ],
     ],
+    storyBad: [bad('அட, இது என்ன?', STUB), bad('அப்புறம் எல்லாருக்கும் உண்மை தெரிஞ்சுது, எல்லாரும் சந்தோஷமா ஆனாங்க.', SUMMARY)],
     adExamples: [
       {
         format: 'coaching_topper',
@@ -476,6 +560,7 @@ export const FICTION_LOCALE: Partial<Record<StationId, FictionLocale>> = {
         ],
       },
     ],
+    adBad: [bad('இந்த product உங்க வாழ்க்கையையே மாத்திடும், இன்னிக்கே வாங்குங்க!', NO_JOKE), bad('மெதுவான குரலில்: இது என் ரகசியம், delivery hushed.', DIRECTION)],
   },
   bn: {
     partWord: 'পর্ব',
@@ -484,12 +569,18 @@ export const FICTION_LOCALE: Partial<Record<StationId, FictionLocale>> = {
     tnc: 'শর্তাবলী প্রযোজ্য',
     fillers: ['আরে', 'আসলে', 'মানে', 'সত্যি'],
     dialogue: 'Natural spoken Bangla (চলিত ভাষা, never সাধু), witty, the way a Kolkata family argues; English words only where people really say them. Sentences end with "।".',
+    kin: { mother: 'মা', father: 'বাবা', elderSister: 'দিদি', elderBrother: 'দাদা' },
     storyExamples: [
       [
-        { role: 'char_b', delivery: 'shout', text: 'ঋষি, তুই আবার আমার সাইকেলের ঘণ্টি বেচে দিলি? কাল সকাল 6টায় race!', note: 'cold open, a name in line 1, a want with a clock' },
+        { role: C, delivery: 'shout', text: 'বুবাই, তুই আবার আমার সাইকেলের ঘণ্টি বেচে দিলি? কাল সকাল 6টায় race!', note: 'cold open, a name in line 1, a want with a clock' },
         { role: 'narrator', delivery: 'dramatic', text: 'বাইরে প্রেশার কুকারের তিন নম্বর সিটি বাজল, আর ঠিক তখনই গোটা গলির আলো নিভে গেল।', note: 'a sound said in words' },
       ],
+      [
+        { role: C, delivery: 'fast', text: 'পিকলু, আমার টিফিন আবার বদলে দিলি? ওতে গুনে গুনে বারোটা রসগোল্লা ছিল!', note: 'cold open, a name in line 1, one concrete number' },
+        { role: 'narrator', delivery: 'hushed', text: 'ওপরের ফ্ল্যাটে কেউ তিনবার দরজায় টোকা দিল, তারপর সব চুপ।', note: 'a sound said in words' },
+      ],
     ],
+    storyBad: [bad('আরে, এটা কী?', STUB), bad('তারপর সবাই সত্যিটা জেনে গেল, আর সবাই খুশি হয়ে গেল।', SUMMARY)],
     adExamples: [
       {
         format: 'coaching_topper',
@@ -506,6 +597,7 @@ export const FICTION_LOCALE: Partial<Record<StationId, FictionLocale>> = {
         ],
       },
     ],
+    adBad: [bad('এই product আপনার জীবন বদলে দেবে, আজই কিনুন!', NO_JOKE), bad('নিচু গলায়: এটাই আমার গোপন কথা, delivery hushed।', DIRECTION)],
   },
   gu: {
     partWord: 'ભાગ',
@@ -514,12 +606,22 @@ export const FICTION_LOCALE: Partial<Record<StationId, FictionLocale>> = {
     tnc: 'શરતો લાગુ',
     fillers: ['અરે', 'હા', 'એટલે', 'ખરેખર'],
     dialogue: 'Warm everyday spoken Gujarati with Gujarati grammar and Gujarati words only: never Hindi words such as है, नहीं, क्या, बहुत (say છે, નથી, શું, બહુ). Sentences end with ".".',
+    kin: { mother: 'મમ્મી', father: 'પપ્પા', elderSister: 'બેન', elderBrother: 'ભાઈ' },
     storyExamples: [
       [
-        { role: 'char_b', delivery: 'shout', text: 'ધ્રુવ, તેં ફરી મારી સાઇકલની ઘંટડી વેચી દીધી? કાલે સવારે 6 વાગ્યે race છે!', note: 'cold open, a name in line 1, a want with a clock' },
+        { role: C, delivery: 'shout', text: 'ભોલુ, તેં ફરી મારી સાઇકલની ઘંટડી વેચી દીધી? કાલે સવારે 6 વાગ્યે race છે!', note: 'cold open, a name in line 1, a want with a clock' },
         { role: 'narrator', delivery: 'dramatic', text: 'બહાર કૂકરની ત્રીજી સીટી વાગી, અને એ જ પળે આખી શેરીની લાઇટ જતી રહી.', note: 'a sound said in words' },
       ],
+      [
+        { role: C, delivery: 'fast', text: 'ટીનુ, તેં મારો ડબ્બો ફરી બદલી નાખ્યો? એમાં ગણીને બાર લાડુ હતા!', note: 'cold open, a name in line 1, one concrete number' },
+        { role: 'narrator', delivery: 'hushed', text: 'ઉપરના ફ્લેટમાં કોઈએ ત્રણ વાર બારણું ખખડાવ્યું, અને પછી સન્નાટો.', note: 'a sound said in words' },
+      ],
+      [
+        { role: C, delivery: 'hushed', text: "'જે આ વાંચે, એ રાતે 9 વાગ્યે ધાબાની ટાંકી પાસે આવે.' પપ્પુ, આ ચિઠ્ઠી તારા દફતરમાં ક્યાંથી આવી?", note: 'a note read aloud, a name in line 1, a clock' },
+        { role: 'narrator', delivery: 'dramatic', text: 'નીચે પોળમાં કોઈ સીટી વગાડતું પસાર થયું, ત્રણ લાંબી, એક ટૂંકી.', note: 'a sound said in words' },
+      ],
     ],
+    storyBad: [bad('અરે, આ શું છે?', STUB), bad('અને પછી બધાને સાચી વાત ખબર પડી ગઈ, અને બધા ખુશ થઈ ગયા.', SUMMARY)],
     adExamples: [
       {
         format: 'coaching_topper',
@@ -535,7 +637,15 @@ export const FICTION_LOCALE: Partial<Record<StationId, FictionLocale>> = {
           { role: 'ad_announcer', delivery: 'fast', text: '10 મિનિટ, જો તમે જાતે ઊડી શકો તો. પાંખો સામેલ નથી.', note: 'the asterisk is the joke' },
         ],
       },
+      {
+        format: 'lab_coat_expert',
+        lines: [
+          { role: 'ad_announcer', delivery: 'normal', text: "નિષ્ણાતોની ભલામણ: ગાઢ ઊંઘ માટે સૌથી અસરકારક છે 'ઝોકું-અમૃત'.", note: 'the white-coat voice in line 1' },
+          { role: 'ad_announcer', delivery: 'normal', text: 'નિષ્ણાત એટલે બગીચાના બાંકડે રોજ બપોરે સૂતા બે વડીલો.', note: "the expert's credentials are the joke" },
+        ],
+      },
     ],
+    adBad: [bad('આ product તમારી જિંદગી બદલી નાખશે, આજે જ ખરીદો!', NO_JOKE), bad('ધીમા અવાજે: આ મારું રહસ્ય છે, delivery hushed.', DIRECTION)],
   },
 };
 
