@@ -62,14 +62,9 @@ export function workersAiBackend(ai: AiRunner, model: string = DEFAULT_JUDGE_MOD
   const schema = opts.schema ?? DEFAULT_JUDGE_SCHEMA;
   return {
     id: `workers-ai:${model}${schema ? '' : ':free-json'}`,
+    // The binding takes no AbortSignal: runJudge's race ends the wait at the time box
     async complete(prompt, opts) {
-      const run = ai.run(model, workersAiBody(model, prompt, { ...opts, schema }));
-      // The binding takes no AbortSignal: race it against the time box instead
-      const aborted = new Promise<never>((_, reject) => {
-        if (opts.signal.aborted) reject(new Error('judge timed out'));
-        opts.signal.addEventListener('abort', () => reject(new Error('judge timed out')), { once: true });
-      });
-      return responseContent(await Promise.race([run, aborted]));
+      return responseContent(await ai.run(model, workersAiBody(model, prompt, { ...opts, schema })));
     },
   };
 }
@@ -128,12 +123,19 @@ export async function runJudge(backend: JudgeBackend, input: JudgeInput, opts: R
   const t0 = Date.now();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 3000);
+  // Not every backend honours the signal, so the race is what enforces the time box
+  const timedOut = new Promise<never>((_, reject) => {
+    ctrl.signal.addEventListener('abort', () => reject(new Error('judge timed out')), { once: true });
+  });
   try {
-    const raw = await backend.complete(judgePrompt(input), {
-      temperature: opts.temperature ?? JUDGE_TEMPERATURE,
-      maxTokens: opts.maxTokens ?? JUDGE_MAX_TOKENS,
-      signal: ctrl.signal,
-    });
+    const raw = await Promise.race([
+      backend.complete(judgePrompt(input), {
+        temperature: opts.temperature ?? JUDGE_TEMPERATURE,
+        maxTokens: opts.maxTokens ?? JUDGE_MAX_TOKENS,
+        signal: ctrl.signal,
+      }),
+      timedOut,
+    ]);
     const verdict = parseVerdict(raw, input);
     return { verdict, ms: Date.now() - t0, raw, ...(verdict ? {} : { error: 'unparseable verdict' }) };
   } catch (err) {
