@@ -112,11 +112,6 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const NB = String.raw`(?<![\p{L}\p{M}])`;
 const NA = String.raw`(?![\p{L}\p{M}])`;
 
-/** A regex matching any of `list` as a whole word (Indic-safe: no \b), on folded text. */
-function wordRe(list: string[], flags = 'u'): RegExp {
-  return new RegExp(`${NB}(?:${list.map((w) => escapeRe(fold(w))).join('|')})${NA}`, flags);
-}
-
 /** Indic digits as ASCII, so "२०२६" and "2026" compare equal. */
 export function asciiDigits(text: string): string {
   return text.replace(/[०-९০-৯૦-૯௦-௯]/gu, (c) => String((c.codePointAt(0)! - 0x0966) % 16 % 10));
@@ -145,17 +140,29 @@ const LEAKS: RegExp[] = [
   /(delivery|role|narrator|char_[a-z]+|ad_(?:announcer|customer)|hushed|excited|dramatic|whisper\w*|sfx|sound|speaker|voice)\s*[:：=]/iu,
   new RegExp(`\\bdelivery\\s*[-=:]?\\s*(?:${DELIVERY_WORDS})\\b`, 'iu'),
   /\b(?:char_[a-z]+|ad_announcer|ad_customer|narrator)\b/iu,
-  /[()[\]{}*#<>♪🎵]/u,
+  /[()[\]{}#<>♪🎵]/u,
+  // Starred text, markdown-style: "*धीरे से*", "**ज़ोर से**"
+  /\*+(?=[\p{L}\p{M}\p{N}])[^*\n]{1,60}(?<=[\p{L}\p{M}\p{N}।.!?])\*+/u,
   /\bSFX\b/iu,
   /\p{Extended_Pictographic}/u,
   /(?:धीमी|ऊँची|ऊंची|तेज़|तेज|हल्की|भारी)\s+आवाज़?\s+में\s*[:：]?|आवाज़\s+में\s*[:：]/u,
   /(?:फुसफुसा\S*|चिल्ला\S*|हँसते हुए|रोते हुए|ज़ोर से|धीरे से)\s*[:：]/u,
 ];
 
+/**
+ * The fine-print asterisk is how an ad's T&C beat is written ("*शर्तें लागू।", "90% तक छूट*"): a single star
+ * opening a sentence or closing a word (the text cleaner never voices it). Starred text ("*धीरे से*") is a leak.
+ */
+function withoutFinePrintStars(t: string): string {
+  return t.replace(/^\*\s*/u, '').replace(/(?<=[\s।.!?])\*(?=[\p{L}\p{N}])/gu, '').replace(/(?<=[\p{L}\p{M}\p{N}%])\*(?=[\s\p{P}]|$)/gu, '');
+}
+
 /** A stage direction, role name, speaker label, bracket or emoji inside spoken text. */
 export function leaksDirection(text: string): boolean {
-  const t = (text ?? '').trim();
-  if (LEAKS.some((re) => re.test(t))) return true;
+  const raw = (text ?? '').trim();
+  if (LEAKS.some((re) => re.test(raw))) return true;
+  const t = withoutFinePrintStars(raw);
+  if (t.includes('*')) return true;
   // A one-word speaker label at the start ("मेहर: …"), except the fine print ("T&C: …", "शर्तें: …")
   return /^[^\s:：]{1,24}\s*[:：]\s/u.test(t) && !/^(t\s*&\s*c|शर्तें|शर्त|terms)/iu.test(t);
 }
@@ -263,13 +270,91 @@ export function fillerReport(lines: FreeLine[], station: StationId): FillerRepor
 
 // ---- Time and weather -------------------------------------------------------------------------------------------------
 
-const TIME_WEATHER: Partial<Record<StationId, RegExp>> = {
-  hi: wordRe(['सवा', 'साढ़े', 'पौने', 'बजे', 'बजकर', 'डिग्री', 'तापमान', 'मौसम']),
-  mr: wordRe(['वाजले', 'वाजता', 'वाजून', 'सव्वा', 'साडे', 'पावणे', 'अंश', 'डिग्री', 'तापमान', 'हवामान']),
-  bn: wordRe(['টা বাজে', 'সাড়ে', 'সোয়া', 'পৌনে', 'ডিগ্রি', 'তাপমাত্রা', 'আবহাওয়া']),
-  gu: wordRe(['વાગ્યે', 'વાગ્યા', 'સવા', 'સાડા', 'પોણા', 'ડિગ્રી', 'તાપમાન', 'હવામાન']),
-  ta: /மணி|டிகிரி|வெப்பநிலை|வானிலை/u,
+/**
+ * The words that tell the clock time and the weather, per station language. The quarter and half words also
+ * count money and things ("साढ़े तीन सौ रुपये", "सवा लाख"), the o'clock words also mean "ring" ("घंटी बजे"),
+ * and मौसम also means a season ("शादियों का मौसम"), so each counts only in a clock or weather phrase.
+ */
+interface ClockWords {
+  /** Only ever the weather */
+  weather: string[];
+  /** The weather only after a number ("27 अंश"; "एक अंश" is "a part") */
+  units?: string[];
+  /** The hours 1-12 as words */
+  hours: string[];
+  /** Match hours and o'clock words as a prefix (Tamil glues case endings on: "மணிக்கு") */
+  prefix?: boolean;
+  /** Quarter, half and three-quarter words */
+  fractions: string[];
+  /** O'clock words: need an hour right before them */
+  oclock: string[];
+  /** Verbs that follow a time ("सवा आठ हो गए") */
+  verbs: string[];
+  /** Dayparts that make "<daypart> के सवा आठ" a time */
+  dayparts: string[];
+  /** Words allowed between a daypart and the time ("के", "की") */
+  links?: string[];
+  /** A daypart right before an hour word is the time (the hour words are clock-only: "রাত আটটা") */
+  daypartHour?: boolean;
+  /** Other weather phrases, on folded text */
+  weatherRe?: RegExp;
+}
+
+const CLOCK: Partial<Record<StationId, ClockWords>> = {
+  hi: {
+    weather: ['डिग्री', 'तापमान'],
+    hours: ['एक', 'दो', 'तीन', 'चार', 'पाँच', 'पांच', 'छह', 'छः', 'छे', 'सात', 'आठ', 'नौ', 'दस', 'ग्यारह', 'बारह'],
+    fractions: ['सवा', 'साढ़े', 'पौने'],
+    oclock: ['बजे', 'बजकर', 'बज'],
+    verbs: ['बजे', 'बजकर', 'बज', 'बजने', 'हो', 'हुए', 'होने'],
+    dayparts: ['सुबह', 'दोपहर', 'शाम', 'रात', 'तड़के'],
+    links: ['के', 'की'],
+    // मौसम is the weather only with a "today/outside" or a weather adjective; otherwise it may be a season
+    weatherRe: new RegExp(
+      `${NB}(?:(?:${['आज', 'अभी', 'बाहर', 'शहर', 'यहाँ', 'यहां', 'सुबह', 'दोपहर', 'शाम', 'रात'].map(fold).join('|')})\\s+(?:का|के)\\s+मौसम|मौसम\\s+(?:(?:भी|एकदम|बड़ा|बहुत|काफ़ी|काफी|तो)\\s+)*(?:${['सुहाना', 'सुहावना', 'ठंडा', 'गर्म', 'गरम', 'साफ़', 'साफ', 'बढ़िया', 'ख़ुशनुमा', 'खुशनुमा', 'बदल', 'ख़राब', 'खराब', 'मस्त', 'ठंडक', 'उमस', 'गीला', 'कैसा'].map(fold).join('|')}))${NA}`,
+      'u',
+    ),
+  },
+  mr: {
+    weather: ['तापमान', 'हवामान'],
+    units: ['अंश', 'डिग्री'],
+    hours: ['एक', 'दोन', 'तीन', 'चार', 'पाच', 'सहा', 'सात', 'आठ', 'नऊ', 'दहा', 'अकरा', 'बारा'],
+    fractions: ['सव्वा', 'साडे', 'पावणे', 'पावणेदोन'],
+    oclock: ['वाजले', 'वाजता', 'वाजून', 'वाजलेत', 'वाजत'],
+    verbs: ['वाजले', 'वाजता', 'वाजून', 'वाजलेत', 'वाजत', 'झाले', 'होत'],
+    dayparts: ['सकाळी', 'सकाळचे', 'दुपारी', 'दुपारचे', 'संध्याकाळी', 'संध्याकाळचे', 'रात्री', 'रात्रीचे'],
+  },
+  gu: {
+    weather: ['તાપમાન', 'હવામાન', 'ડિગ્રી'],
+    hours: ['એક', 'બે', 'ત્રણ', 'ચાર', 'પાંચ', 'છ', 'સાત', 'આઠ', 'નવ', 'દસ', 'અગિયાર', 'બાર'],
+    fractions: ['સવા', 'સાડા', 'પોણા'],
+    oclock: ['વાગ્યે', 'વાગ્યા', 'વાગ્યાં', 'વાગે'],
+    verbs: ['વાગ્યે', 'વાગ્યા', 'વાગ્યાં', 'વાગે', 'થયા'],
+    dayparts: ['સવારે', 'સવારના', 'બપોરે', 'બપોરના', 'સાંજે', 'સાંજના', 'રાત્રે', 'રાતના'],
+  },
+  bn: {
+    weather: ['ডিগ্রি', 'তাপমাত্রা', 'আবহাওয়া'],
+    // Bangla tells the hour with the classifier: আটটা বাজে
+    hours: ['একটা', 'দুটো', 'দুটা', 'তিনটে', 'তিনটা', 'চারটে', 'চারটা', 'পাঁচটা', 'ছটা', 'ছয়টা', 'সাতটা', 'আটটা', 'নটা', 'নয়টা', 'দশটা', 'এগারোটা', 'বারোটা'],
+    fractions: ['সাড়ে', 'সোয়া', 'পৌনে'],
+    oclock: ['বাজে', 'বাজল', 'বাজছে', 'বাজতে'],
+    verbs: ['বাজে', 'বাজল', 'বাজছে', 'বাজতে'],
+    dayparts: ['সকাল', 'সকালের', 'দুপুর', 'দুপুরের', 'বিকেল', 'বিকেলের', 'সন্ধ্যা', 'সন্ধ্যার', 'রাত', 'রাতের'],
+    daypartHour: true,
+  },
+  ta: {
+    weather: ['டிகிரி', 'வெப்பநிலை', 'வானிலை'],
+    hours: ['ஒன்று', 'ரெண்டு', 'இரண்டு', 'மூணு', 'மூன்று', 'நாலு', 'நான்கு', 'அஞ்சு', 'ஐந்து', 'ஆறு', 'ஏழு', 'எட்டு', 'எட்டே', 'ஒன்பது', 'பத்து', 'பதினொரு', 'பன்னிரண்டு'],
+    prefix: true,
+    fractions: [],
+    // மணி is also a bell ("சைக்கிள் மணி"): the hour only after a number
+    oclock: ['மணி'],
+    verbs: [],
+    dayparts: ['காலை', 'மதியம்', 'மாலை', 'ராத்திரி', 'இரவு'],
+    daypartHour: true,
+  },
 };
+
 const TIME_COMMON = /\d{1,2}\s?[:.]\s?\d{2}(?!\d)|°|\bdegrees?\b|\btemperature\b|\b[ap]\.?m\.?\b/iu;
 
 /** True when the line says the clock time or the weather. */
@@ -277,7 +362,33 @@ export function saysTimeOrWeather(text: string, station: StationId, timePhrase?:
   const t = fold(asciiDigits(text));
   if (TIME_COMMON.test(t)) return true;
   if (timePhrase && squash(timePhrase).length >= 4 && squash(text).includes(squash(timePhrase))) return true;
-  return Boolean(TIME_WEATHER[station]?.test(t));
+  const w = CLOCK[station];
+  if (!w) return false;
+  if (w.weatherRe?.test(t)) return true;
+  const toks = t.split(/[^\p{L}\p{M}\p{N}]+/u).filter(Boolean);
+  const set = (xs: string[] = []) => xs.map(fold);
+  const [weather, units, hours, fractions, oclock, verbs, dayparts, links] = [w.weather, w.units, w.hours, w.fractions, w.oclock, w.verbs, w.dayparts, w.links].map(set);
+  const is = (tok: string | undefined, list: string[], prefix = false) => tok != null && list.some((x) => tok === x || (prefix && tok.startsWith(x)));
+  const isNumber = (tok: string | undefined) => tok != null && /^\d{1,2}[\p{L}\p{M}]{0,4}$/u.test(tok);
+  const isHour = (tok: string | undefined) => isNumber(tok) || is(tok, hours, w.prefix);
+  return toks.some((tok, i) => {
+    if (weather.some((x) => tok.startsWith(x))) return true;
+    if (is(tok, units) && isNumber(toks[i - 1])) return true;
+    // "आठ बजे", "எட்டு மணிக்கு"
+    if (is(tok, oclock, w.prefix) && isHour(toks[i - 1])) return true;
+    // "सवा आठ बजे" / "सवा आठ हो गए" / "रात के सवा आठ"
+    if (is(tok, fractions) && isHour(toks[i + 1])) {
+      if (is(toks[i + 2], verbs, true)) return true;
+      const before = toks.slice(Math.max(0, i - 2), i);
+      if (before.some((b) => is(b, dayparts))) return true;
+    }
+    // "ராத்திரி எட்டே கால்", "রাত আটটা": a daypart right before an hour (a link word may sit between)
+    if (w.daypartHour && is(tok, dayparts)) {
+      const next = is(toks[i + 1], links) ? toks[i + 2] : toks[i + 1];
+      if (isHour(next)) return true;
+    }
+    return false;
+  });
 }
 
 // ---- Invented names and numbers ---------------------------------------------------------------------------------------

@@ -19,6 +19,13 @@ describe('leaksDirection', () => {
     expect(leaksDirection('रात के सवा आठ, आसमान एकदम साफ़।')).toBe(false);
     expect(leaksDirection('T&C: पंखा अलग से आता है।')).toBe(false);
   });
+  it('reads the fine-print asterisk as fine print, but starred text as a direction', () => {
+    expect(leaksDirection('*शर्तें लागू।')).toBe(false);
+    expect(leaksDirection('90% तक छूट*! *सिर्फ़ बाएँ पैर के मोज़ों पर।')).toBe(false);
+    expect(leaksDirection('*धीरे से* ये मेरा राज़ है।')).toBe(true);
+    expect(leaksDirection('ये **बहुत** ज़रूरी है।')).toBe(true);
+    expect(leaksDirection('ये * बहुत ज़रूरी है।')).toBe(true);
+  });
 });
 
 describe('copiedFragment', () => {
@@ -55,6 +62,31 @@ describe('time and weather', () => {
     expect(saysTimeOrWeather('रात के सवा आठ, 27 डिग्री।', 'hi')).toBe(true);
     expect(saysTimeOrWeather('இன்னைக்கு மாலை 8:15 மணி', 'ta')).toBe(true);
     expect(saysTimeOrWeather('मेरा सीधा हिसाब है: पहले खाना।', 'hi')).toBe(false);
+  });
+  it('hears the clock and the weather in every station language', () => {
+    expect(saysTimeOrWeather('अभी सवा आठ बजे हैं।', 'hi')).toBe(true);
+    expect(saysTimeOrWeather('साढ़े नौ हो गए, और मैं अभी भी यहीं हूँ।', 'hi')).toBe(true);
+    expect(saysTimeOrWeather('घड़ी में आठ बजकर दस मिनट।', 'hi')).toBe(true);
+    expect(saysTimeOrWeather('आज का मौसम एकदम सुहाना है।', 'hi')).toBe(true);
+    expect(saysTimeOrWeather('मौसम बहुत ठंडा हो गया है।', 'hi')).toBe(true);
+    expect(saysTimeOrWeather('रात्री सव्वा आठ वाजता भेटूया।', 'mr')).toBe(true);
+    expect(saysTimeOrWeather('बाहेर २७ अंश आहे।', 'mr')).toBe(true);
+    expect(saysTimeOrWeather('રાત્રે સવા આઠ વાગ્યે ગરબા શરૂ.', 'gu')).toBe(true);
+    expect(saysTimeOrWeather('এখন রাত সাড়ে আটটা বাজে।', 'bn')).toBe(true);
+    expect(saysTimeOrWeather('ராத்திரி எட்டு மணிக்கு சந்திப்போம்.', 'ta')).toBe(true);
+    expect(saysTimeOrWeather('வானிலை இன்னிக்கு அருமை.', 'ta')).toBe(true);
+  });
+  it('does not mistake a season, a price, a count or a ringing bell for the time or the weather', () => {
+    expect(saysTimeOrWeather('शादियों का मौसम आ गया, और मेरा suit अभी भी tight है।', 'hi')).toBe(false);
+    expect(saysTimeOrWeather('त्योहारों के मौसम में मिठाई का हिसाब कौन रखता है?', 'hi')).toBe(false);
+    expect(saysTimeOrWeather('साढ़े तीन सौ रुपये का एक समोसा? भाई, ये तो लूट है।', 'hi')).toBe(false);
+    expect(saysTimeOrWeather('सवा लाख की बात है, सवा सौ लोग आए।', 'hi')).toBe(false);
+    expect(saysTimeOrWeather('साढ़े तीन घंटे की meeting, और नतीजा एक coffee।', 'hi')).toBe(false);
+    expect(saysTimeOrWeather('जब भी फ़ोन की घंटी बजे, समझ जाइए कि मम्मी हैं।', 'hi')).toBe(false);
+    expect(saysTimeOrWeather('साडे तीनशे रुपये फक्त।', 'mr')).toBe(false);
+    expect(saysTimeOrWeather('সাড়ে তিনশো টাকা দিয়ে দুটো বই কিনলাম।', 'bn')).toBe(false);
+    expect(saysTimeOrWeather('சைக்கிள் மணி சத்தம் கேட்டுச்சு.', 'ta')).toBe(false);
+    expect(saysTimeOrWeather('સાડા ત્રણસો રૂપિયાની ચા?', 'gu')).toBe(false);
   });
   it('fails a non-opener link that gives the time or weather, but not the opener', () => {
     const lines = [rj('रात के सवा आठ, आसमान साफ़ है।'), rj('मेरा सीधा हिसाब है: शादी में पहले खाना, फोटो बाद में।'), rj('बस एक छोटा सा break।')];
