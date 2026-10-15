@@ -27,11 +27,20 @@ export const SEGMENT_ROLES: Record<LlmSegmentType, Role[]> = {
 
 export const SEGMENT_PLAN: Record<LlmSegmentType, LlmPlan> = {
   rj_link: { temperature: 0.7, maxTokens: 1400, reasoningEffort: null, timeoutMs: 10_000 },
-  news: { temperature: 0.3, maxTokens: 3000, reasoningEffort: null, timeoutMs: 16_000 },
+  // A full bulletin is at most 12 short lines (an update 5); a higher cap only gave a runaway bulletin more room
+  news: { temperature: 0.3, maxTokens: 1600, reasoningEffort: null, timeoutMs: 16_000 },
   ad_break: { temperature: 0.9, maxTokens: 1400, reasoningEffort: null, timeoutMs: 13_000 },
   // A serial part (prefetched as soon as the previous part is accepted); the outline and the one-shot story have their own plans in ../fiction
   kahani: { temperature: 0.8, maxTokens: 3200, reasoningEffort: null, timeoutMs: 25_000 },
 };
+
+/** A short news update (at most 5 lines) gets a smaller token budget than a full bulletin. */
+const NEWS_UPDATE_PLAN: LlmPlan = { ...SEGMENT_PLAN.news, maxTokens: 700, timeoutMs: 10_000 };
+
+/** The plan for one request: SEGMENT_PLAN by type, with the smaller budget for a news update. */
+export function segmentPlanFor(type: LlmSegmentType, req: Pick<SegmentRequest, 'mode'>): LlmPlan {
+  return type === 'news' && req.mode === 'update' ? NEWS_UPDATE_PLAN : SEGMENT_PLAN[type];
+}
 
 /** Most lines the model may write per type (lines can still be split later). */
 export const MAX_LINES: Record<LlmSegmentType, number> = { rj_link: 5, news: NEWS_HEADLINES * 2 + 2, ad_break: 5, kahani: 16 };
@@ -52,19 +61,32 @@ export function segmentJsonSchema(type: LlmSegmentType, subtitles = false): Reco
   const plan = PLAN_FIELDS[type];
   const lines = {
     type: 'array',
-    // A bounded array: a bulletin with no upper bound has run on to the token cap under strict decoding
-    ...(type === 'news' ? { maxItems: MAX_LINES.news } : {}),
-    items: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['role', 'text', ...(subtitles ? ['en'] : []), 'delivery'],
-      properties: {
-        role: { type: 'string', enum: SEGMENT_ROLES[type] },
-        text: { type: 'string' },
-        ...(subtitles ? EN_FIELD : {}),
-        delivery: { type: 'string', enum: [...DELIVERIES] },
-      },
-    },
+    // A news line's delivery comes before its text: after the text the newsreader closes the line, where a
+    // required "delivery" after the text left it writing whitespace until the token cap (2026-10-15)
+    items:
+      type === 'news'
+        ? {
+            type: 'object',
+            additionalProperties: false,
+            required: ['role', 'delivery', 'text', ...(subtitles ? ['en'] : [])],
+            properties: {
+              role: { type: 'string', enum: SEGMENT_ROLES[type] },
+              delivery: { type: 'string', enum: [...DELIVERIES] },
+              text: { type: 'string' },
+              ...(subtitles ? EN_FIELD : {}),
+            },
+          }
+        : {
+            type: 'object',
+            additionalProperties: false,
+            required: ['role', 'text', ...(subtitles ? ['en'] : []), 'delivery'],
+            properties: {
+              role: { type: 'string', enum: SEGMENT_ROLES[type] },
+              text: { type: 'string' },
+              ...(subtitles ? EN_FIELD : {}),
+              delivery: { type: 'string', enum: [...DELIVERIES] },
+            },
+          },
   };
   const extra = type === 'news' ? ['mood'] : [];
   return {
@@ -72,7 +94,7 @@ export function segmentJsonSchema(type: LlmSegmentType, subtitles = false): Reco
     additionalProperties: false,
     required: [...plan, 'title', 'lines', ...extra, 'summary_en'],
     properties: {
-      ...Object.fromEntries(plan.map((k) => [k, type === 'news' ? { type: 'string', maxLength: 160 } : { type: 'string' }])),
+      ...Object.fromEntries(plan.map((k) => [k, { type: 'string' }])),
       title: { type: 'string' },
       lines,
       ...(type === 'news' ? { mood: { type: 'string', enum: ['light', 'heavy'] } } : {}),

@@ -283,10 +283,22 @@ export function createSarvam(apiKey: string) {
       console.error(`[sarvam] chat ${opts.name} empty content finish=${choice?.finish_reason ?? '-'} id=${data.id ?? '-'}`);
       throw new SarvamError('empty model output', 502, 'empty_output', data.id);
     }
+    // finish=length: the model wrote until max_tokens (a loop, or a list with no end). The tail of the output
+    // (model text only) shows where it ran on. A complete JSON object before the cap (trailing whitespace) still counts.
+    const runaway = choice?.finish_reason === 'length';
+    if (runaway) {
+      // A whitespace loop leaves only blanks at the very end, so the tail is taken before the trailing whitespace
+      const body = content.trimEnd();
+      const tail = body.slice(-300).replace(/\s+/g, ' ');
+      console.error(
+        `[sarvam] chat ${opts.name} hit max_tokens=${opts.maxTokens} finish=length chars=${content.length} trailing_ws=${content.length - body.length} id=${data.id ?? '-'} tail: …${tail}`,
+      );
+    }
     let parsed: unknown;
     try {
       parsed = extractJson(content);
     } catch (err) {
+      if (runaway) throw new SarvamError(`model output hit the ${opts.maxTokens}-token cap`, 502, 'output_truncated', data.id);
       console.error(`[sarvam] chat ${opts.name} bad JSON finish=${choice?.finish_reason ?? '-'} id=${data.id ?? '-'}: ${String(err)}`);
       throw new SarvamError('model output was not JSON', 502, 'invalid_output', data.id);
     }
