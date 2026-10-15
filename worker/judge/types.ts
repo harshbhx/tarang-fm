@@ -43,6 +43,8 @@ export interface ReviewContext {
   catchphrase?: { text: string; allowed: boolean };
   /** Lines that already aired this session */
   airedLines?: string[];
+  /** rj_link: studio calls read on air (each adds one line to the mode's range) */
+  calls?: number;
   /** Place-name groups (aliases across scripts) known to the station */
   knownPlaces?: string[][];
   /** Kahani: the serial outline (flat fields) and the recap source */
@@ -87,6 +89,8 @@ export interface JudgeVerdict {
   heardSummaryEn: string;
   /** Real-world claims not in the context, each with its line ("L5: ...") */
   invented: string[];
+  /** Problems a listener would notice, each with its line ("L3: ..."), listed before the scores */
+  faults: string[];
   scores: Scores;
   /** The quoted evidence per scored dimension */
   evidence: Partial<Record<Dim, string>>;

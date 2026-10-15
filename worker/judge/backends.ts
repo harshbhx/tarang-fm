@@ -17,33 +17,44 @@ export interface JudgeBackend {
   complete(prompt: JudgePrompt, opts: CompleteOptions): Promise<unknown>;
 }
 
-/** Calibrated on the 2026-10-15 set (see scripts/calibrate-judge.mjs): the default scorer. */
-export const DEFAULT_JUDGE_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
-/** Whether the default judge uses constrained JSON decoding */
-export const DEFAULT_JUDGE_SCHEMA = true;
+/** Calibrated on the 2026-10-15 set (scripts/calibrate-judge.mjs, rubric producer-v5.2): the most accurate judge (0 false passes, 0 false fails). */
+export const DEFAULT_JUDGE_MODEL = '@cf/google/gemma-4-26b-a4b-it';
+/** Whether the default judge uses constrained JSON decoding (off: 40% faster on Gemma 4, the lenient parser reads it) */
+export const DEFAULT_JUDGE_SCHEMA = false;
 export const JUDGE_TEMPERATURE = 0.1;
-export const JUDGE_MAX_TOKENS = 900;
+/** The compact verdict is about 200 tokens; the cap leaves room for long Indic quotes */
+export const JUDGE_MAX_TOKENS = 600;
 
 /** The part of the Workers AI binding the judge needs. */
 export interface AiRunner {
   run(model: string, inputs: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
 }
 
-/** The model's content from either Workers AI response shape (native `response` or OpenAI-style `choices`). */
+/**
+ * The model's content from either Workers AI response shape (native `response` or OpenAI-style `choices`). Some
+ * served models put the whole answer in `reasoning_content` when thinking is off; a JSON-looking one is taken.
+ */
 export function responseContent(res: unknown): unknown {
-  const r = res as { response?: unknown; result?: unknown; choices?: { message?: { content?: unknown } }[] };
+  const r = res as { response?: unknown; result?: unknown; choices?: { message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown } }[] };
   if (r && typeof r === 'object' && 'result' in r && r.result && typeof r.result === 'object') return responseContent(r.result);
   if (r?.response !== undefined && r.response !== null) return r.response;
-  const content = r?.choices?.[0]?.message?.content;
-  return content ?? undefined;
+  const msg = r?.choices?.[0]?.message;
+  if (msg?.content != null && msg.content !== '') return msg.content;
+  const alt = msg?.reasoning_content ?? msg?.reasoning;
+  return typeof alt === 'string' && /^\s*(```(json)?\s*)?\{/.test(alt) ? alt : undefined;
 }
+
+/** Models that think before answering unless told not to (the judge wants the answer, not the reasoning). */
+const THINKERS = /qwen3|gemma-4|glm-|deepseek-v4|kimi|nemotron|clef/;
 
 /** Request body for a Workers AI chat model (binding or REST). */
 export function workersAiBody(model: string, prompt: JudgePrompt, opts: Omit<CompleteOptions, 'signal'> & { schema?: boolean }): Record<string, unknown> {
+  const qwen = /qwen3/.test(model);
   const body: Record<string, unknown> = {
     messages: [
       { role: 'system', content: prompt.system },
-      { role: 'user', content: prompt.user },
+      { role: 'user', content: qwen ? `${prompt.user}
+/no_think` : prompt.user },
     ],
     temperature: opts.temperature,
     max_tokens: opts.maxTokens,
@@ -52,9 +63,9 @@ export function workersAiBody(model: string, prompt: JudgePrompt, opts: Omit<Com
   if (opts.schema !== false) body.response_format = { type: 'json_schema', json_schema: VERDICT_SCHEMA };
   if (model.includes('gpt-oss')) {
     body.reasoning = { effort: 'low' };
-    body.max_tokens = opts.maxTokens + 2000;
+    body.max_tokens = opts.maxTokens + 1500;
   }
-  if (model.includes('gemma-4') || model.includes('qwen3')) body.chat_template_kwargs = { enable_thinking: false };
+  if (THINKERS.test(model)) body.chat_template_kwargs = { enable_thinking: false, thinking: false };
   return body;
 }
 

@@ -5,6 +5,8 @@
  *   if (!review.pass) rewrite with rewriteNote(review, lines) appended to the writer's user message.
  *
  * - A hard free-check failure fails the script without a model call.
+ * - Lines the free checks may cut (`dropLines`: an invented news line, a catchphrase that was not allowed) are cut
+ *   before the judge hears the script; line numbers in the review always refer to the original lines.
  * - The judge is time-boxed (3 s by default) and failure-tolerant: an error or a timeout passes the script on
  *   the free checks alone (`judged: false`).
  * - `heardSummaryEn` is what actually aired: it replaces the writer's summary in the show log and the recap.
@@ -32,7 +34,11 @@ export interface Thresholds {
   minEnding: number;
 }
 
-/** Bible §5.3, confirmed on the calibration set (scripts/calibrate-judge.mjs) with the default judge. */
+/**
+ * Bible §5.3, confirmed on the 2026-10-15 calibration set (scripts/calibrate-judge.mjs, rubric producer-v5.2):
+ * with the default judge (Gemma 4) these thresholds pass all 8 good scripts and fail all 9 old ones and all 6
+ * subtly broken variants. Looser grids also scored 0 errors there; the bible's stricter bar is kept.
+ */
 export const DEFAULT_THRESHOLDS: Thresholds = {
   minEach: 3,
   minMean: 3.6,
@@ -41,6 +47,14 @@ export const DEFAULT_THRESHOLDS: Thresholds = {
   fidelityOther: 4,
   minEnding: 4,
 };
+
+/** The judge's time box: the scorer is skipped (free checks only) past this. */
+export const JUDGE_TIME_BOX_MS = 3000;
+/**
+ * A longer box for a segment written well ahead of air (a Kahani part prefetched 60 s or more early): the default
+ * judge's p90 was 6.5 s on the calibration set, so 8 s lets it finish nearly every time.
+ */
+export const PREFETCH_TIME_BOX_MS = 8000;
 
 export interface ReviewRequest {
   type: ReviewType;
@@ -58,7 +72,7 @@ export interface ProducerConfig {
   /** null or undefined: free checks only */
   backend?: JudgeBackend | null;
   thresholds?: Partial<Thresholds>;
-  /** The judge's time box (default 3000 ms) */
+  /** The judge's time box (default JUDGE_TIME_BOX_MS) */
   timeoutMs?: number;
 }
 
@@ -71,7 +85,9 @@ export interface Review {
   heardSummaryEn: string;
   /** Real-world claims not in the context ("L5: ..."), from the free checks and the judge */
   invented: string[];
-  /** 1-based */
+  /** Problems the judge heard ("L3: ..."), listed before it scored */
+  faults: string[];
+  /** 1-based, in the original lines */
   worstLine: number | null;
   /** One sentence the writer must act on */
   fixNote: string;
@@ -79,7 +95,7 @@ export interface Review {
   softNotes: string[];
   /** Why the scores failed the thresholds */
   scoreFailures: string[];
-  /** 0-based lines the caller may cut instead of rewriting */
+  /** 0-based lines the caller should cut before airing (the judge heard the script without them) */
   dropLines: number[];
   /** True when the judge's verdict was used */
   judged: boolean;
@@ -100,7 +116,7 @@ function onAirName(s: ReviewRequest['station']): string | undefined {
 }
 
 /** The free checks' view of the review context. */
-export function freeContextOf(req: ReviewRequest): FreeContext {
+export function freeContextOf(req: Pick<ReviewRequest, 'context' | 'station' | 'mode' | 'part' | 'oneShot' | 'plan' | 'type'>): FreeContext {
   const c = req.context;
   const blocks = (c.blocks ?? []).map((b) => b.text).join('\n');
   const slate = (c.slate ?? []).map((h) => `${h.title} ${h.detail ?? ''} ${h.source ?? ''}`).join('\n');
@@ -116,6 +132,8 @@ export function freeContextOf(req: ReviewRequest): FreeContext {
     showLog: c.showLog,
     nextAllowed: c.next?.allowed,
     nextType: c.next?.type,
+    calls: c.calls,
+    items: req.type === 'news' && c.slate?.length ? c.slate.length : undefined,
     frame: c.frame,
     timePhrase: c.timePhrase,
     catchphrase: c.catchphrase,
@@ -155,10 +173,10 @@ export function scoreFailures(req: Pick<ReviewRequest, 'type' | 'mode' | 'part' 
 }
 
 /** What aired, when the judge didn't say: the writer's summary, else the first and last line. */
-function fallbackHeard(req: ReviewRequest): string {
+function fallbackHeard(req: ReviewRequest, lines: ReviewLine[]): string {
   if (req.plan?.summary_en) return req.plan.summary_en;
-  const first = req.lines[0]?.en ?? req.lines[0]?.text ?? '';
-  const last = req.lines.length > 1 ? (req.lines[req.lines.length - 1]?.en ?? req.lines[req.lines.length - 1]?.text ?? '') : '';
+  const first = lines[0]?.en ?? lines[0]?.text ?? '';
+  const last = lines.length > 1 ? (lines[lines.length - 1]?.en ?? lines[lines.length - 1]?.text ?? '') : '';
   return `${first}${last ? ` … ${last}` : ''}`.slice(0, 240);
 }
 
@@ -174,31 +192,43 @@ function inventedFromFree(free: FreeResult): string[] {
   return [...free.hard, ...free.soft].filter((m) => /not in the context|which no item gives|which no item says|which you were not given/.test(m));
 }
 
+/** Maps the judge's line numbers (in the kept lines) back to the original lines: "L3: x" → "L4: x". */
+function remapRefs(text: string, kept: number[]): string {
+  return text.replace(/\b(L|Line |Lines? )(\d+)\b/g, (m, p: string, n: string) => {
+    const orig = kept[Number(n) - 1];
+    return orig == null ? m : `${p}${orig + 1}`;
+  });
+}
+
 /**
  * Reviews one script. Never throws: a judge failure passes on the free checks alone. The judge sees the lines
- * and the context, never the plan.
+ * (without the ones the free checks cut) and the context, never the plan.
  */
 export async function reviewScript(req: ReviewRequest, config: ProducerConfig = {}): Promise<Review> {
   const t0 = Date.now();
   const thresholds = { ...DEFAULT_THRESHOLDS, ...config.thresholds };
   const free = freeChecks(req.type, req.lines, freeContextOf(req));
+  const dropLines = free.dropLines ?? [];
+  const kept = req.lines.map((_, i) => i).filter((i) => !dropLines.includes(i));
+  const heardLines = kept.map((i) => req.lines[i]);
   const base: Review = {
     pass: free.pass,
     scores: EMPTY_SCORES(),
     mean: null,
-    heardSummaryEn: fallbackHeard(req),
+    heardSummaryEn: fallbackHeard(req, heardLines),
     invented: inventedFromFree(free),
+    faults: [],
     worstLine: firstLineOf(free.hard),
     fixNote: free.hard[0] ?? '',
     hardFailures: free.hard,
     softNotes: free.soft,
     scoreFailures: [],
-    dropLines: free.dropLines ?? [],
+    dropLines,
     judged: false,
     ms: 0,
   };
   // A hard failure goes back without a model call
-  if (!free.pass || !config.backend) return { ...base, ms: Date.now() - t0 };
+  if (!free.pass || !config.backend || !heardLines.length) return { ...base, ms: Date.now() - t0 };
 
   const input: JudgeInput = {
     type: req.type,
@@ -207,26 +237,28 @@ export async function reviewScript(req: ReviewRequest, config: ProducerConfig = 
     oneShot: req.oneShot,
     station: stationId(req.station),
     onAir: onAirName(req.station),
-    lines: req.lines,
+    lines: heardLines,
     context: req.context,
   };
-  const result = await runJudge(config.backend, input, { timeoutMs: config.timeoutMs ?? 3000 });
+  const result = await runJudge(config.backend, input, { timeoutMs: config.timeoutMs ?? JUDGE_TIME_BOX_MS });
   if (!result.verdict) {
     console.warn(`[producer] judge ${config.backend.id} skipped: ${result.error ?? 'no verdict'} (${result.ms} ms)`);
     return { ...base, judgeError: result.error ?? 'no verdict', backend: config.backend.id, ms: Date.now() - t0 };
   }
   const v = result.verdict;
-  const invented = [...new Set([...base.invented, ...v.invented])];
-  const failures = scoreFailures(req, { scores: v.scores, invented: v.invented }, thresholds);
+  const judgeInvented = v.invented.map((c) => remapRefs(c, kept));
+  const failures = scoreFailures(req, { scores: v.scores, invented: judgeInvented }, thresholds);
+  const worst = v.worstLine != null ? (kept[v.worstLine - 1] ?? v.worstLine - 1) + 1 : base.worstLine;
   return {
     ...base,
     pass: failures.length === 0,
     scores: v.scores,
     mean: meanScore(v.scores, applicableDims(req)),
     heardSummaryEn: v.heardSummaryEn || base.heardSummaryEn,
-    invented,
-    worstLine: v.worstLine ?? base.worstLine,
-    fixNote: v.fix || base.fixNote,
+    invented: [...new Set([...base.invented, ...judgeInvented])],
+    faults: v.faults.map((f) => remapRefs(f, kept)),
+    worstLine: worst,
+    fixNote: v.fix ? remapRefs(v.fix, kept) : base.fixNote,
     scoreFailures: failures,
     judged: true,
     backend: config.backend.id,
@@ -235,15 +267,20 @@ export async function reviewScript(req: ReviewRequest, config: ProducerConfig = 
 }
 
 /**
- * The PRODUCER NOTE for one rewrite (prompt pack §8.4): the worst line quoted, the fix, the free-check problems
- * and the invented claims. Appended to the writer's user message; the rewrite runs at the same temperature.
+ * The PRODUCER NOTE for one rewrite (prompt pack §8.4): the worst line quoted, the fix, the free-check problems,
+ * the faults the judge heard and the invented claims. Appended to the writer's user message; the rewrite runs at
+ * the same temperature.
  */
-export function rewriteNote(review: Pick<Review, 'worstLine' | 'fixNote' | 'hardFailures' | 'softNotes' | 'invented' | 'scoreFailures'>, lines: ReviewLine[]): string {
+export function rewriteNote(
+  review: Pick<Review, 'worstLine' | 'fixNote' | 'hardFailures' | 'softNotes' | 'invented' | 'scoreFailures'> & Partial<Pick<Review, 'faults'>>,
+  lines: ReviewLine[],
+): string {
   const out = ['PRODUCER NOTE (the last draft was sent back; fix this and keep what worked):'];
   const wl = review.worstLine;
   if (wl && lines[wl - 1]) out.push(`- Line ${wl}: "${lines[wl - 1].text}"`);
   if (review.fixNote) out.push(`- ${review.fixNote}`);
   for (const h of review.hardFailures) if (h !== review.fixNote) out.push(`- ${h}`);
+  for (const f of (review.faults ?? []).slice(0, 3)) out.push(`- ${f.replace(/^L(\d+)\s*[:：-]\s*/, 'Line $1: ')}`);
   const said = out.join('\n');
   for (const claim of review.invented) {
     const text = claim.replace(/^L(\d+)\s*[:：-]\s*/, 'Line $1: ');
@@ -253,7 +290,7 @@ export function rewriteNote(review: Pick<Review, 'worstLine' | 'fixNote' | 'hard
   return [...new Set(out)].join('\n');
 }
 
-/** Which of two attempts to keep (bible §5.3): passing first, then fidelity, then the mean. */
+/** Which of two attempts to keep (bible §5.3): passing first, then fewer hard failures, then fidelity, then the mean. */
 export function betterReview(a: Review, b: Review): 'a' | 'b' {
   if (a.pass !== b.pass) return a.pass ? 'a' : 'b';
   if (a.hardFailures.length !== b.hardFailures.length) return a.hardFailures.length < b.hardFailures.length ? 'a' : 'b';
@@ -266,19 +303,25 @@ export function betterReview(a: Review, b: Review): 'a' | 'b' {
 export interface ProducerEnv {
   AI?: AiRunner | unknown;
   SARVAM_API_KEY?: string;
-  /** "workers-ai" (default when the AI binding exists), "sarvam", or "off" */
+  /** "workers-ai" (the default when the AI binding exists), "sarvam", or "off" */
   PRODUCER_JUDGE?: string;
   /** Workers AI model override */
   PRODUCER_MODEL?: string;
 }
 
-/** The configured judge backend: Workers AI by default, Sarvam when asked (or when there is no AI binding). */
+/**
+ * The configured judge backend. Workers AI Gemma 4 by default (free on the Cloudflare credits and the most accurate
+ * on the calibration set), Sarvam-105B when asked or when there is no AI binding. Gemma 4's p50 is 5.5 s, so under
+ * the 3 s box it mostly falls back to the free checks; Sarvam answers inside 3 s about two times in three but
+ * sends back about one good script in four. Pass PREFETCH_TIME_BOX_MS for segments written well ahead.
+ */
 export function producerBackend(env: ProducerEnv): JudgeBackend | null {
   const choice = (env.PRODUCER_JUDGE ?? '').toLowerCase();
   if (choice === 'off') return null;
   const ai = env.AI as AiRunner | undefined;
+  const hasAi = Boolean(ai && typeof ai.run === 'function');
   if (choice === 'sarvam' && env.SARVAM_API_KEY) return sarvamBackend(env.SARVAM_API_KEY);
-  if (ai && typeof ai.run === 'function') return workersAiBackend(ai, env.PRODUCER_MODEL || DEFAULT_JUDGE_MODEL);
+  if (hasAi) return workersAiBackend(ai!, env.PRODUCER_MODEL || DEFAULT_JUDGE_MODEL);
   if (env.SARVAM_API_KEY) return sarvamBackend(env.SARVAM_API_KEY);
   return null;
 }

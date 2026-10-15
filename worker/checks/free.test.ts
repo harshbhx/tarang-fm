@@ -167,8 +167,13 @@ describe('ad shape', () => {
 
 describe('the calibration set', () => {
   const run = (c: (typeof BASELINE)[number]) => freeChecks(c.input.type, c.input.lines, freeContextOf({ ...c.input, plan: c.plan }));
-  it('fails every one of the 9 "before" scripts', () => {
-    for (const c of BASELINE) expect(run(c).pass, c.id).toBe(false);
+  it('fails every one of the 9 "before" scripts, or (news, sized to its slate) cuts the invented line', () => {
+    for (const c of BASELINE) {
+      const r = run(c);
+      expect(!r.pass || (r.dropLines?.length ?? 0) > 0, c.id).toBe(true);
+    }
+    // News drops an invented line instead of failing the bulletin (bible §5.1): L6, the Alkapuri flyover
+    expect(run(BASELINE.find((c) => c.id === 'before-hi-02-news')!).dropLines).toContain(5);
   });
   it('passes every hand-written good script', () => {
     for (const c of GOOD) expect(run(c).hard, c.id).toEqual([]);

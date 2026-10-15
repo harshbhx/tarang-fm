@@ -13,7 +13,7 @@
  *                 The account is CLOUDFLARE_ACCOUNT_ID, else the one `wrangler whoami` reports.
  *   wai-free:<model>  the same without constrained JSON decoding (prompt-only JSON, lenient parse).
  *   sarvam        sarvam-105b, reasoning off.   sarvam-low   the same with reasoning_effort "low".
- *                 SARVAM_API_KEY from .dev.vars. At most 30 Sarvam calls per run (cached calls are free);
+ *                 SARVAM_API_KEY from .dev.vars. At most 25 Sarvam calls per run (cached calls are free);
  *                 more needs --yes.
  * Results are cached by prompt hash in tmp/calibrate/cache.json, so a rerun costs nothing.
  */
@@ -29,9 +29,9 @@ import { freeChecks } from '../worker/checks/free.ts';
 import { freeContextOf, scoreFailures, DEFAULT_THRESHOLDS } from '../worker/producer.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SARVAM_BUDGET = 30;
+const SARVAM_BUDGET = 25;
 const CALL_TIMEOUT_MS = 60_000;
-const DEFAULT_BACKENDS = ['wai:@cf/meta/llama-3.3-70b-instruct-fp8-fast', 'wai:@cf/openai/gpt-oss-120b', 'sarvam'];
+const DEFAULT_BACKENDS = ['wai-free:@cf/google/gemma-4-26b-a4b-it', 'sarvam'];
 /** ₹ per 1M tokens (in, out) for sarvam-105b */
 const SARVAM_PRICE = [15, 60];
 
@@ -130,7 +130,7 @@ async function callBackend(backend, prompt) {
           { role: 'user', content: prompt.user },
         ],
         temperature: JUDGE_TEMPERATURE,
-        max_tokens: low ? 3000 : 1400,
+        max_tokens: low ? 3000 : JUDGE_MAX_TOKENS,
         reasoning_effort: low ? 'low' : null,
         response_format: { type: 'json_schema', json_schema: { name: 'producer_check', schema: VERDICT_SCHEMA, strict: true } },
       }),
@@ -247,23 +247,32 @@ for (const backend of opts.backends) {
     }
     noise = avg(spreads);
   }
-  const lat = ok.map((r) => r.entry.ms).filter(Boolean);
   const tokIn = avg(ok.map((r) => r.entry.usage?.in ?? 0));
   const tokOut = avg(ok.map((r) => r.entry.usage?.out ?? 0));
   const neurons = avg(ok.map((r) => r.entry.usage?.neurons).filter((x) => x != null));
   const cost = backend.startsWith('sarvam') ? `₹${((tokIn * SARVAM_PRICE[0] + tokOut * SARVAM_PRICE[1]) / 1e6).toFixed(3)}/call` : neurons != null ? `${neurons.toFixed(0)} neurons/call (credits)` : 'credits';
-  // Best minMean on this backend (other thresholds fixed)
+  const lat = ok.map((r) => r.entry.ms).filter(Boolean);
+  // Best thresholds on this backend: a small grid; a false pass (a bad script on air) costs twice a false fail
   let best = null;
-  for (const minMean of [3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2]) {
-    const t = { ...DEFAULT_THRESHOLDS, minMean };
-    const errors = ok.filter((r) => (r.c.expect === 'pass') !== judgePass(r.c, r.verdict, t)).length;
-    if (!best || errors < best.errors) best = { minMean, errors };
-  }
+  for (const minMean of [3.0, 3.2, 3.4, 3.6, 3.8, 4.0])
+    for (const minPoint of [3, 4])
+      for (const minEach of [2, 3])
+        for (const fidelityFactual of [4, 5]) {
+          const t = { ...DEFAULT_THRESHOLDS, minMean, minPoint, minEach, fidelityFactual };
+          const fp = ok.filter((r) => r.c.expect === 'fail' && judgePass(r.c, r.verdict, t)).length;
+          const ff = ok.filter((r) => r.c.expect === 'pass' && !judgePass(r.c, r.verdict, t)).length;
+          const errCost = 2 * fp + ff;
+          if (!best || errCost < best.cost) best = { minMean, minPoint, minEach, fidelityFactual, fp, ff, cost: errCost };
+        }
+  // Known failures flagged: a baseline or broken case whose named fault the judge found (invented claim and low dim)
+  const knownCases = ok.filter((r) => r.c.mustInvent || r.c.lowDims);
+  const knownRecall = knownCases.length ? knownCases.filter((r) => { const k = knownHit(r.c, r.verdict); return k.inventOk && k.lowOk; }).length / knownCases.length : null;
+  const within3s = lat.length ? lat.filter((x) => x <= 3000).length / lat.length : null;
   rows.push({
     backend, n: rs.length, errors: rs.length - ok.length, mBase, mGood, mBroken,
     separation: mGood != null && badMeans.length ? mGood - avg(badMeans) : null,
     judgeFalsePass, judgeFalseFail, combinedFalsePass, combinedFalseFail, inventRecall, lowRecall, noise,
-    p50: pct(lat, 0.5), p90: pct(lat, 0.9), over3s: lat.filter((x) => x > 3000).length, tokIn, tokOut, cost, best,
+    p50: pct(lat, 0.5), p90: pct(lat, 0.9), over3s: lat.filter((x) => x > 3000).length, within3s, knownRecall, tokIn, tokOut, cost, best,
   });
   for (const r of rs) {
     const v = r.verdict;
@@ -276,10 +285,12 @@ for (const backend of opts.backends) {
   }
 }
 
-const header = '| backend | baseline mean | good mean | broken mean | separation | judge false-pass | judge false-fail | free+judge false-pass | free+judge false-fail | invented recall | low-dim recall | noise (±) | p50 / p90 ms | > 3 s | tokens in/out | cost | best minMean (errors) | parse errors |';
+const header = '| backend | baseline mean | good mean | broken mean | separation | judge false-pass | judge false-fail | free+judge false-pass | free+judge false-fail | known faults flagged | invented recall | low-dim recall | noise (±) | p50 / p90 ms | ≤ 3 s | tokens in/out | cost | best thresholds (fp/ff) | parse errors |';
 const lines = [header, '|' + '---|'.repeat(header.split('|').length - 2)];
 for (const r of rows) {
-  lines.push(`| ${r.backend} | ${f2(r.mBase)} | ${f2(r.mGood)} | ${f2(r.mBroken)} | ${f2(r.separation)} | ${r.judgeFalsePass} | ${r.judgeFalseFail} | ${r.combinedFalsePass} | ${r.combinedFalseFail} | ${r.inventRecall == null ? '-' : `${Math.round(r.inventRecall * 100)}%`} | ${r.lowRecall == null ? '-' : `${Math.round(r.lowRecall * 100)}%`} | ${f2(r.noise)} | ${r.p50 ?? '-'} / ${r.p90 ?? '-'} | ${r.over3s} | ${Math.round(r.tokIn ?? 0)}/${Math.round(r.tokOut ?? 0)} | ${r.cost} | ${r.best ? `${r.best.minMean} (${r.best.errors})` : '-'} | ${r.errors} |`);
+  const pc = (x) => (x == null ? '-' : `${Math.round(x * 100)}%`);
+  const bt = r.best ? `mean ${r.best.minMean}, point ${r.best.minPoint}, each ${r.best.minEach}, fidF ${r.best.fidelityFactual} (${r.best.fp}/${r.best.ff})` : '-';
+  lines.push(`| ${r.backend} | ${f2(r.mBase)} | ${f2(r.mGood)} | ${f2(r.mBroken)} | ${f2(r.separation)} | ${r.judgeFalsePass} | ${r.judgeFalseFail} | ${r.combinedFalsePass} | ${r.combinedFalseFail} | ${pc(r.knownRecall)} | ${pc(r.inventRecall)} | ${pc(r.lowRecall)} | ${f2(r.noise)} | ${r.p50 ?? '-'} / ${r.p90 ?? '-'} | ${pc(r.within3s)} | ${Math.round(r.tokIn ?? 0)}/${Math.round(r.tokOut ?? 0)} | ${r.cost} | ${bt} | ${r.errors} |`);
 }
 console.log(`\n${lines.join('\n')}\n`);
 for (const backend of opts.backends) {

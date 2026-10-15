@@ -111,7 +111,7 @@ export const GOOD_ONESHOT_HI: ReviewLine[] = [
 ];
 
 export const GOOD_KAHANI_IN_HI: ReviewLine[] = [
-  L('rj', 'hushed', 'एक नीला बक्सा, जो सुबह कबाड़ में बिक गया, और शाम 7 बजे से पहले उसे घर वापस आना है।'),
+  L('rj', 'hushed', 'एक नीला बक्सा, जो कबाड़ में बिक गया, और शाम 7 बजे से पहले उसे घर वापस आना है।'),
   L('rj', 'normal', 'कहानी कॉर्नर, पहली कड़ी, अब।'),
 ];
 
@@ -267,6 +267,29 @@ export const BROKEN: CalibrationCase[] = [
       lines: withLine(GOOD_AD_HI, 3, L('ad_announcer', 'excited', 'विदाई Express। आज ही घर लाइए, और हर मेहमान को प्यार से विदा कीजिए।')),
     },
     plan: { title: 'विदाई Express' },
+  },
+  {
+    id: 'broken-hi-rj-never-aired',
+    set: 'broken',
+    expect: 'fail',
+    known: 'L1 reacts to a twist that never aired: SHOW LOG says part 1 ended on someone counting coins, not on grandmother selling the trunk herself (no name, number or place: only the judge can see it)',
+    mustInvent: ['दादी', 'grandmother', 'twist', 'sold', 'बेचा'],
+    lowDims: ['fidelity'],
+    input: {
+      ...GOOD[1].input,
+      lines: withLine(GOOD_KAHANI_OUT_HI, 0, L('rj', 'excited', 'तो बक्सा दादी ने ख़ुद बेचा था! ये twist तो मैंने सपने में भी नहीं सोचा था।')),
+    },
+  },
+  {
+    id: 'broken-hi-kahani-p1-self-address',
+    set: 'broken',
+    expect: 'fail',
+    known: 'L2: Kabir (char_b) calls himself "कबीर भैया", so the listener loses who is speaking; names and kinship words are all in the outline, so the free checks pass it',
+    lowDims: ['coherence'],
+    input: {
+      ...GOOD[4].input,
+      lines: withLine(GOOD_KAHANI_P1_HI, 1, L('char_b', 'fast', 'कबीर भैया, वो खाली था! निशा दीदी, मैंने खोलकर देखा था, बस पुराने अख़बार थे।')),
+    },
   },
   {
     id: 'broken-hi-kahani-unresolved',
