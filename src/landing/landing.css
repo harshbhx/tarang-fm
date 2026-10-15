@@ -1099,7 +1099,8 @@
 }
 
 .lp-final-inner .lp-sub {
-  margin-bottom: 26px;
+  margin: 16px 0 32px;
+  font-size: var(--lp-fs-lg);
 }
 
 .lp-pills {
@@ -1107,7 +1108,7 @@
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
-  margin-top: 22px;
+  margin-top: 28px;
 }
 
 .lp-pill {
@@ -1513,7 +1514,12 @@
   position: relative;
   display: grid;
   gap: 14px;
-  padding-right: 112px;
+}
+
+/* Only the block beside a drawing narrows; the ad beat has no drawing and keeps the full width */
+.lp-stage-scene:not(:empty) + * {
+  padding-right: 96px;
+  min-height: 76px;
 }
 
 .lp-stage-scene {
@@ -1582,13 +1588,6 @@
 
 .lp-stage-name {
   font-weight: 600;
-}
-
-.lp-stage-name span {
-  margin-left: 4px;
-  font-weight: 400;
-  color: var(--lp-fg-3);
-  text-transform: capitalize;
 }
 
 .lp-stage .lp-native {
@@ -1883,9 +1882,13 @@
   }
 
   .lp-stage-col .lp-stage-scene {
-    position: static;
-    float: right;
-    margin: 0 0 4px 10px;
+    top: 0;
+    right: 0;
+  }
+
+  .lp-stage-col .lp-stage-scene:not(:empty) + * {
+    padding-right: 64px;
+    min-height: 56px;
   }
 
   .lp-stage-col .lp-stage-scene svg {
@@ -1899,10 +1902,10 @@
 
   .lp-stage-col .lp-stage .lp-native {
     font-size: 1rem;
-    line-height: 1.4;
+    line-height: 1.5;
     display: -webkit-box;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 4;
     overflow: hidden;
   }
 
@@ -1973,7 +1976,7 @@
   /* The button sits level with the title (not centred: the column grows when the reply lands, and the
      button must not move under a finger) */
   .lp-talk-demo {
-    padding-top: 128px;
+    padding-top: 144px;
   }
 }
 
@@ -2114,7 +2117,14 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Where the call is: four stops in one line */
+/* Where the call is: four stops in one line (two by two on a phone) */
+@media (max-width: 639px) {
+  .lp-talk-demo .lp-steps {
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
+  }
+}
+
 .lp-steps {
   display: flex;
   flex-wrap: wrap;
@@ -2180,7 +2190,8 @@
 }
 
 .lp-link {
-  padding: 0;
+  padding: 10px 0;
+  margin: -10px 0;
   border: 0;
   background: none;
   font: inherit;
@@ -2281,7 +2292,7 @@
 
 .lp-studio-number {
   font-family: var(--lp-font-display);
-  font-size: clamp(1.9rem, 1.3rem + 2.4vw, 3.4rem);
+  font-size: clamp(2.25rem, 1.3rem + 2.4vw, 3.4rem);
   font-weight: 620;
   font-stretch: 88%;
   line-height: 1.05;
@@ -2309,6 +2320,11 @@
 }
 
 @media (max-width: 639px) {
+  .lp-talk .lp-studio-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
   .lp-studio-scene svg {
     width: 52px;
     height: 52px;
@@ -2323,8 +2339,8 @@
   --lp-fg-3: #8a7658;
   --lp-line: rgb(60 40 10 / 0.14);
   --lp-line-2: rgb(60 40 10 / 0.26);
-  --lp-amber: #b86d12;
-  --lp-amber-hi: #9a5a0c;
+  --lp-amber: #8f530a;
+  --lp-amber-hi: #7a4608;
   --lp-glass-hi: #1f1609;
   position: relative;
   color: var(--lp-fg);
@@ -2408,7 +2424,8 @@
   font-family: var(--lp-font-mono);
   font-size: var(--lp-fs-lg);
   font-variant-numeric: tabular-nums;
-  color: var(--st);
+  /* The station's hue, darkened to read on cream (≈4.5:1) */
+  color: color-mix(in oklab, var(--st) 45%, var(--lp-fg));
   text-align: right;
 }
 
@@ -2416,12 +2433,14 @@
   grid-area: meta;
   font-size: var(--lp-fs-sm);
   color: var(--lp-fg-2);
+  text-wrap: balance;
 }
 
 .lp-station-tune {
   grid-area: tune;
   justify-self: end;
-  padding: 0;
+  padding: 11px 0;
+  margin: -11px 0;
   border: 0;
   background: none;
   font: inherit;

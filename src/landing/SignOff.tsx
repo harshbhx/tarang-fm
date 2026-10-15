@@ -1,7 +1,6 @@
 import { STATIONS } from '../../shared/stations';
 import type { StationId } from '../../shared/types';
 import StarBorder from '../components/bits/StarBorder';
-import { VOICE_COUNT } from './data';
 import { TuneButton, type Vars } from './ui';
 
 /** The sign-off: the station's own words, one button, the five stations, and what it runs on. */
@@ -33,7 +32,7 @@ export default function SignOff({ onTuneIn }: { onTuneIn: (id: StationId) => voi
           ))}
         </div>
         <p className="lp-models">
-          Bulbul v4 Flash speaks · Saaras v4 hears · Sarvam-105B writes · {VOICE_COUNT} voices · {STATIONS.length} languages
+          Bulbul v4 Flash speaks · Saaras v4 hears · Sarvam-105B writes
         </p>
       </div>
     </section>

@@ -177,7 +177,7 @@ export const VOICE_COUNT = new Set(VOICE_GROUPS.flatMap((g) => g.voices.map((v) 
 export const TAGLINE_EN: Partial<Record<StationId, string>> = {
   hi: 'Dil se suniye, dil ki baat',
   ta: "The heart's frequency",
-  bn: "Words from the heart, in the heart's tune",
+  bn: "From the heart, in the heart's tune",
   mr: 'Straight from the heart',
   gu: 'Listen with your heart',
 };
@@ -339,15 +339,19 @@ export function kahaniLine(theme: (typeof KAHANI_THEMES)[number]): StoryLine {
   return castLine(theme.role, theme.text, theme.en);
 }
 
+/** Shorten a headline to about `max` characters, cutting at a word, never mid-word. */
 const squeeze = (text: string, max: number) => {
   const clean = text.replace(/\s+/g, ' ').trim();
-  return clean.length > max ? `${clean.slice(0, max - 1).trim()}…` : clean;
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[,;:।\-–—]+$/, '').trim()}…`;
 };
 
 /** The news beat read with a real headline from right now (the static line when there is none). */
 export function newsLine(city: string | undefined, headline: Source | undefined): StoryLine {
   if (!headline) return STORY_BEATS.find((b) => b.key === 'news')!.lines[0];
-  const title = squeeze(headline.title, 110);
+  const title = squeeze(headline.title, 80);
   const where = city?.trim();
   return castLine(
     'news',

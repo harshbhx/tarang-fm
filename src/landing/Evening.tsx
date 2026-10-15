@@ -1,4 +1,4 @@
-import { AnimatePresence, m, useInView, useMotionValueEvent, useReducedMotion, useScroll, useTransform } from 'motion/react';
+import { AnimatePresence, m, useInView, useMotionValue, useMotionValueEvent, useReducedMotion, useScroll, useTransform } from 'motion/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { LISTENER_NAME_MAX } from '../../shared/constants';
 import { getStation } from '../../shared/stations';
@@ -94,13 +94,17 @@ export default function Evening({ player }: { player: VoicePlayer }) {
   );
   const beat = beats[active];
 
-  // A thin beam fills with the reader's progress; the stage follows the beat under the reading line
-  const { scrollYProgress } = useScroll({ target: listRef, offset: ['start 0.6', 'end 0.6'] });
-  const head = useTransform(scrollYProgress, (v) => `${(v * 100).toFixed(2)}%`);
+  // One reading line (lower on a phone, where the stage is pinned above the beats): the beam fills to it,
+  // the head dot sits on it, and the stage shows the beat under it
+  const { scrollYProgress } = useScroll({ target: listRef, offset: ['start end', 'end start'] });
+  const fill = useMotionValue(0);
+  const head = useTransform(fill, (v) => `${(v * 100).toFixed(2)}%`);
   useMotionValueEvent(scrollYProgress, 'change', () => {
     const stage = stageRef.current?.getBoundingClientRect();
     const pinned = !!stage && stage.width >= window.innerWidth * 0.85;
     const line = window.innerHeight * (pinned ? 0.72 : 0.5);
+    const list = listRef.current?.getBoundingClientRect();
+    if (list && list.height > 0) fill.set(Math.min(1, Math.max(0, (line - list.top) / list.height)));
     let best = 0;
     let bestDist = Infinity;
     beatRefs.current.forEach((el, i) => {
@@ -176,7 +180,7 @@ export default function Evening({ player }: { player: VoicePlayer }) {
     <section ref={sectionRef} className="lp-section lp-evening" aria-labelledby="evening-title">
       <div className="lp-wrap">
         <SectionHead id="evening-title" kicker="7:00 PM · One evening on Tarang FM" title="Tonight’s show, written for you.">
-          Scroll through an evening. Every line is written and voiced live when you tune in; press Hear it for the real voice.
+          Scroll through an evening. Every line is written and voiced live; press Hear it for the real voice.
         </SectionHead>
 
         <div className="lp-evening-grid">
@@ -275,7 +279,7 @@ export default function Evening({ player }: { player: VoicePlayer }) {
                             {initial(line.name)}
                           </span>
                           <span className="lp-stage-name">
-                            {line.name} <span>{line.style}</span>
+                            {line.name}
                           </span>
                           <SpeakerId id={line.speaker} />
                         </p>
@@ -310,7 +314,7 @@ export default function Evening({ player }: { player: VoicePlayer }) {
 
           <div className="lp-beats-col">
             <div className="lp-beam" aria-hidden="true">
-              <m.div className="lp-beam-lit" style={{ scaleY: scrollYProgress }} />
+              <m.div className="lp-beam-lit" style={{ scaleY: fill }} />
               <m.div className="lp-beam-head" style={{ top: head }} />
             </div>
             <ol ref={listRef} className="lp-beats">

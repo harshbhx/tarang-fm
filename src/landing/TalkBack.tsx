@@ -265,7 +265,7 @@ export default function TalkBack({ player }: { player: VoicePlayer }) {
   const youEn = mode === 'sample' ? (stage >= 2 ? caller.en : '') : (transcript?.en ?? '');
   const rjLine = reply;
 
-  let hint = mode === 'mic' ? 'Press and hold, say anything in your language, let go.' : 'Press and hold, like the real button. A sample caller speaks for you here.';
+  let hint = mode === 'mic' ? 'Press and hold, then let go.' : 'Press and hold, like the real button. A sample caller speaks for you here.';
   if (phase === 'holding') hint = mode === 'mic' ? 'Listening… speak, then let go.' : 'Listening… let go when you’re done.';
   else if (phase === 'short') hint = 'That was too short. Hold the button while you speak.';
   else if (phase === 'thinking') hint = 'Saaras v4 is listening back, Sarvam-105B is writing the reply…';
@@ -283,7 +283,7 @@ export default function TalkBack({ player }: { player: VoicePlayer }) {
             <SceneCallIn size={96} />
           </div>
           <SectionHead id="talk-title" kicker="7:16 PM · Call-in" title="Talk back.">
-            Hold the button, say anything in your language, let go. The RJ answers on air in about two seconds.
+            Say anything in your language. The RJ answers on air in about two seconds.
           </SectionHead>
         </div>
 
