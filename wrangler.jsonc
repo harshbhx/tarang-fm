@@ -39,7 +39,7 @@
     // Per session id (not per IP): every paid route, so one token cannot be hammered from many addresses.
     { "name": "RL_SESSION", "namespace_id": "1004", "simple": { "limit": 90, "period": 60 } },
     // POST /api/session per IP: minting tokens is cheap, so it is limited too.
-    { "name": "RL_MINT", "namespace_id": "1005", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_MINT", "namespace_id": "1005", "simple": { "limit": 30, "period": 60 } },
     // Admin routes and the phone webhook per IP: stops guessing the admin key.
     { "name": "RL_ADMIN", "namespace_id": "1006", "simple": { "limit": 20, "period": 60 } }
   ],
@@ -73,7 +73,7 @@
     // Per session id (not per IP): every paid route, so one token cannot be hammered from many addresses.
     { "name": "RL_SESSION", "namespace_id": "1004", "simple": { "limit": 90, "period": 60 } },
     // POST /api/session per IP: minting tokens is cheap, so it is limited too.
-    { "name": "RL_MINT", "namespace_id": "1005", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_MINT", "namespace_id": "1005", "simple": { "limit": 30, "period": 60 } },
     // Admin routes and the phone webhook per IP: stops guessing the admin key.
     { "name": "RL_ADMIN", "namespace_id": "1006", "simple": { "limit": 20, "period": 60 } }
       ]

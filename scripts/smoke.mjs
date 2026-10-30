@@ -15,7 +15,13 @@ const origin = base.replace(/\/+$/, '');
 let sessionToken;
 async function session() {
   if (sessionToken !== undefined) return sessionToken;
-  const res = await fetch(`${origin}/api/session`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: '{}' });
+  let res;
+  for (let i = 0; i < 3; i++) {
+    res = await fetch(`${origin}/api/session`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: '{}' });
+    // The mint limit is per IP and a CI run shares one: wait out its window
+    if (res.status !== 429) break;
+    await sleep(Number(res.headers.get('retry-after') ?? 60) * 1000 + 1000);
+  }
   if (res.status === 403) return (sessionToken = null);
   expect(res.status === 200, `POST /api/session returned ${res.status}`);
   const body = await res.json();
