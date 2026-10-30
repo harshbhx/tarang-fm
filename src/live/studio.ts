@@ -4,6 +4,7 @@
  */
 import type { LiveControlRequest, LiveControlResponse, LiveSnapshot } from '../../shared/live';
 import type { StationId } from '../../shared/types';
+import { apiFetch } from '../radio/apiSession';
 
 const ADMIN_KEY = 'tarang.liveAdminKey';
 const ADMIN_PARAM = 'admin';
@@ -66,7 +67,7 @@ export function liveControlUrl(station: StationId): string {
 /** The station's public snapshot; null when it can't be read. */
 export async function fetchLiveNow(station: StationId, signal?: AbortSignal): Promise<LiveSnapshot | null> {
   try {
-    const res = await fetch(liveNowUrl(station), { signal, cache: 'no-store' });
+    const res = await apiFetch(liveNowUrl(station), { signal, cache: 'no-store' });
     if (!res.ok) return null;
     const snapshot = (await res.json()) as LiveSnapshot | null;
     return snapshot && typeof snapshot === 'object' && typeof snapshot.state === 'string' ? snapshot : null;

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import type { StationId } from '../shared/types';
 import RadioApp from './components/RadioApp';
+import { apiFetch } from './radio/apiSession';
 import Landing from './landing/Landing';
 import { getSharedEngine, useRadio } from './radio/useRadio';
 
@@ -46,7 +47,7 @@ function Station({ view, onNavigate }: { view: 'landing' | 'listen'; onNavigate:
   useEffect(() => {
     if (view !== 'landing') return;
     const timer = window.setTimeout(() => {
-      void fetch(`/api/context?station=${state.stationId}`, { priority: 'low' } as RequestInit).catch(() => undefined);
+      void apiFetch(`/api/context?station=${state.stationId}`, { priority: 'low' } as RequestInit).catch(() => undefined);
     }, 1500);
     return () => window.clearTimeout(timer);
   }, [view, state.stationId]);

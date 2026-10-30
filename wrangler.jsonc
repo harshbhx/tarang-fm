@@ -15,12 +15,15 @@
   "durable_objects": {
     "bindings": [
       { "name": "STUDIO", "class_name": "StudioLine" },
-      { "name": "LIVE", "class_name": "LiveStation" }
+      { "name": "LIVE", "class_name": "LiveStation" },
+      // SPEND: the daily spend budget and kill switch (worker/ledger.ts), one instance for the whole site.
+      { "name": "SPEND", "class_name": "SpendGuard" }
     ]
   },
   "migrations": [
     { "tag": "studio-line-v1", "new_sqlite_classes": ["StudioLine"] },
-    { "tag": "live-station-v1", "new_sqlite_classes": ["LiveStation"] }
+    { "tag": "live-station-v1", "new_sqlite_classes": ["LiveStation"] },
+    { "tag": "spend-guard-v1", "new_sqlite_classes": ["SpendGuard"] }
   ],
   // Newsroom: the story pool (D1), near-duplicate search (Vectorize, bge-m3 1024-d cosine), tagging and embeddings
   // (Workers AI), the durable refresh (Workflow), and an hourly check that refreshes a station only if its pool aired (2 h minimum).
@@ -32,7 +35,13 @@
   "ratelimits": [
     { "name": "RL_SEGMENT", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
     { "name": "RL_TTS", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },
-    { "name": "RL_CALL", "namespace_id": "1003", "simple": { "limit": 8, "period": 60 } }
+    { "name": "RL_CALL", "namespace_id": "1003", "simple": { "limit": 8, "period": 60 } },
+    // Per session id (not per IP): every paid route, so one token cannot be hammered from many addresses.
+    { "name": "RL_SESSION", "namespace_id": "1004", "simple": { "limit": 90, "period": 60 } },
+    // POST /api/session per IP: minting tokens is cheap, so it is limited too.
+    { "name": "RL_MINT", "namespace_id": "1005", "simple": { "limit": 10, "period": 60 } },
+    // Admin routes and the phone webhook per IP: stops guessing the admin key.
+    { "name": "RL_ADMIN", "namespace_id": "1006", "simple": { "limit": 20, "period": 60 } }
   ],
   // The preview Worker (tarang-fm-preview.creharsh.workers.dev). Workflow names are account-wide, so the preview
   // runs its own; every binding is redeclared because environments don't inherit them.
@@ -49,7 +58,8 @@
       },
       "migrations": [
         { "tag": "studio-line-v1", "new_sqlite_classes": ["StudioLine"] },
-        { "tag": "live-station-v1", "new_sqlite_classes": ["LiveStation"] }
+        { "tag": "live-station-v1", "new_sqlite_classes": ["LiveStation"] },
+    { "tag": "spend-guard-v1", "new_sqlite_classes": ["SpendGuard"] }
       ],
       "d1_databases": [{ "binding": "NEWS_DB", "database_name": "tarang-news", "database_id": "37effed5-3eb6-41af-ba54-62e179b1f135", "migrations_dir": "migrations" }],
       "vectorize": [{ "binding": "NEWS_INDEX", "index_name": "tarang-news-dedupe" }],
@@ -59,7 +69,13 @@
       "ratelimits": [
         { "name": "RL_SEGMENT", "namespace_id": "1001", "simple": { "limit": 30, "period": 60 } },
         { "name": "RL_TTS", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } },
-        { "name": "RL_CALL", "namespace_id": "1003", "simple": { "limit": 8, "period": 60 } }
+        { "name": "RL_CALL", "namespace_id": "1003", "simple": { "limit": 8, "period": 60 } },
+    // Per session id (not per IP): every paid route, so one token cannot be hammered from many addresses.
+    { "name": "RL_SESSION", "namespace_id": "1004", "simple": { "limit": 90, "period": 60 } },
+    // POST /api/session per IP: minting tokens is cheap, so it is limited too.
+    { "name": "RL_MINT", "namespace_id": "1005", "simple": { "limit": 10, "period": 60 } },
+    // Admin routes and the phone webhook per IP: stops guessing the admin key.
+    { "name": "RL_ADMIN", "namespace_id": "1006", "simple": { "limit": 20, "period": 60 } }
       ]
     }
   }
