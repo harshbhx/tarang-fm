@@ -1,0 +1,56 @@
+name: README media
+
+# Records the short UI loops in the README (docs/media) with Playwright, then turns them into GIF, WebP and MP4.
+# Manual (or on a push that edits this file or the recorder). Uses the live site by default; only the "tune-in" clip plays one real, short show.
+
+on:
+  push:
+    branches: [docs/oss-polish]
+    paths: ['.github/workflows/readme-media.yml', 'scripts/record-readme-media.mjs']
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Site to record
+        default: https://tarang-fm.dualmindlab.tech
+      only:
+        description: Comma-separated clip names to record (empty for all)
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Install ffmpeg and gifsicle
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg gifsicle
+      - name: Record
+        env:
+          BASE_URL: ${{ inputs.base_url || 'https://tarang-fm.dualmindlab.tech' }}
+          ONLY: ${{ inputs.only }}
+        run: node scripts/record-readme-media.mjs media-raw
+      - name: Convert
+        run: |
+          mkdir -p media
+          for f in media-raw/*.webm; do
+            n=$(basename "$f" .webm)
+            ffmpeg -loglevel error -y -i "$f" -vf "fps=10,scale='min(iw,640)':-2:flags=lanczos,split[a][b];[a]palettegen=max_colors=64:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4" -loop 0 "media/$n.gif"
+            gifsicle -O3 --lossy=90 "media/$n.gif" -o "media/$n.gif"
+            ffmpeg -loglevel error -y -i "$f" -vf "fps=24,scale='min(iw,1100)':-2" -c:v libx264 -crf 28 -preset slow -pix_fmt yuv420p -movflags +faststart -an "media/$n.mp4"
+            ffmpeg -loglevel error -y -i "$f" -vf "fps=12,scale='min(iw,720)':-2" -loop 0 -c:v libwebp -quality 45 "media/$n.webp"
+          done
+          ls -l media
+      - uses: actions/upload-artifact@v7
+        with:
+          name: readme-media
+          path: media/
+          retention-days: 14

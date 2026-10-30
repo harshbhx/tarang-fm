@@ -7,7 +7,7 @@
   <a href="https://tarang-fm.dualmindlab.tech"><img src="https://img.shields.io/badge/live-tarang--fm.dualmindlab.tech-ff6b2c" alt="Live at tarang-fm.dualmindlab.tech"></a>
   <img src="https://img.shields.io/badge/voices-Bulbul%20V4%20Flash-6d28d9" alt="Voices: Bulbul V4 Flash">
   <img src="https://img.shields.io/badge/runs%20on-Cloudflare%20Workers-f38020?logo=cloudflare&amp;logoColor=white" alt="Runs on Cloudflare Workers">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-all%20rights%20reserved-555555" alt="License: all rights reserved"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/source-available%20%C2%B7%20all%20rights%20reserved-555555" alt="Source available, all rights reserved"></a>
 </p>
 
 <p align="center">
@@ -35,6 +35,26 @@ Works on any phone or laptop, with no install or login.
 Built for the **Sarvam Bulbul Build Challenge**: "Build something that speaks".
 
 ---
+
+## See it move
+
+<table>
+<tr>
+<td align="center" width="50%"><img src="docs/media/landing.gif" alt="The landing page: hero radio, then the evening scrolling by" /><br><sub>Landing page</sub></td>
+<td align="center" width="50%"><img src="docs/media/tune-in.gif" alt="Pressing Tune in on the radio: the station ID, then the RJ greets the listener in Hindi" /><br><sub>Tune in: a real show starts</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/media/radio-player.gif" alt="The radio player moving through a Kahani, an RJ link, news and an ad, with captions" /><br><sub>Radio player</sub></td>
+<td align="center"><img src="docs/media/live-room.gif" alt="Listen together: joining the shared live room and the RJ welcoming a listener" /><br><sub>Live room: listen together</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/media/call-button.gif" alt="Hold to talk: the call moves from you to Saaras, Sarvam-105B and Bulbul" /><br><sub>Call button: hold to talk</sub></td>
+<td align="center"><img src="docs/media/radio-phone.gif" alt="The radio on a phone" width="45%" /><br><sub>On a phone</sub></td>
+</tr>
+</table>
+
+<sub>Recorded by a GitHub Actions workflow ([`scripts/record-readme-media.mjs`](./scripts/record-readme-media.mjs)); MP4 versions are in [`docs/media`](./docs/media).</sub>
+
 
 ## 📻 What's on air
 
@@ -284,24 +304,12 @@ Every flow in detail (state machine, prefetch timing, segment pipeline, audio gr
 - **Keyboard:** <kbd>Space</kbd> pause, <kbd>←</kbd> <kbd>→</kbd> change station, <kbd>F</kbd> full screen, <kbd>C</kbd> English subtitles.
 - **Install it.** A web app manifest and icons, so "Add to Home Screen" opens it straight onto the radio.
 
-## Run it locally
+## Try it, and read the code
 
-> Running, copying or deploying this code needs written permission; see [License](#license).
-
-Needs Node 22+ and a Sarvam API key from [dashboard.sarvam.ai](https://dashboard.sarvam.ai).
-
-```bash
-git clone https://github.com/harshbhx/tarang-fm.git
-cd tarang-fm
-npm install
-echo "SARVAM_API_KEY=your_key_here" > .dev.vars
-npm run dev            # http://localhost:5173
-```
-
-Locally, bulletins use the live headline path (BBC, Bing News, Google News) until a newsroom pool exists. For Listen together, open `http://localhost:5173/live` and join a station; it starts by itself. For the Studio controls, also put `LIVE_ADMIN_TOKEN=<any long key>` in `.dev.vars` and open `http://localhost:5173/live?admin=<that key>`; the key is saved in the browser and removed from the address bar.
+The code is **source-available for viewing and evaluation**: read it, learn from it, and use the [live demo](https://tarang-fm.dualmindlab.tech). Running, copying or deploying it needs written permission (see [License](#license)), so this README does not ship a quickstart for strangers. Maintainer setup notes (env vars, Sarvam key, wrangler) are in [docs/MAINTAINING.md](./docs/MAINTAINING.md).
 
 <details>
-<summary><b>Commands</b></summary>
+<summary><b>Maintainer commands</b></summary>
 
 | Command | What it does |
 |---|---|
@@ -323,7 +331,7 @@ Locally, bulletins use the live headline path (BBC, Bing News, Google News) unti
 </details>
 
 <details>
-<summary><b>Secrets and Cloudflare resources</b></summary>
+<summary><b>Maintainer: secrets and Cloudflare resources</b></summary>
 
 Secrets (`npx wrangler secret put <NAME>`):
 
@@ -469,6 +477,7 @@ Tests sit next to the code they cover (`*.test.ts`).
 | [Tech spec](./docs/TECH-SPEC.md) | Architecture, API contracts, the audio engine, prompt design and what live testing changed |
 | [Security](./docs/SECURITY.md) | How the paid APIs are protected from scripts: threat model, route table, session tokens, rate limits, the daily budget and the kill switch |
 | [Voice casting](./docs/VOICE-CASTING.md) | Every station's cast, with the pitch audition behind each voice's grammatical gender |
+| [Maintaining](./docs/MAINTAINING.md) | Maintainer setup: env vars, Sarvam key, wrangler, deploy |
 | [Build plan](./docs/BUILD-PLAN.md) | How the build was split into parallel workstreams, and the submission checklist |
 
 ## Credits
@@ -486,6 +495,14 @@ Tests sit next to the code they cover (`*.test.ts`).
 - Hosts, ads and stories are AI-generated and fictional. News lines rephrase real reports, and the original sources are linked on screen.
 - Caller audio is sent to Sarvam for transcription and is never stored.
 
+## Fair use and abuse protection
+
+The live demo spends real Sarvam credits on every spoken line, so the Worker assumes visitors will script it and puts several layers in front of the paid routes: an origin check, a short-lived signed session token (tied to the caller's network and browser) that every API call must carry, per-IP and per-session rate limits, a voice allowlist and input caps, and a site-wide daily budget (plus a per-IP daily allowance) with an owner-only kill switch that stops all paid calls in one request. When the budget runs out the site shows a friendly "back tomorrow" instead of failing. The worst case is a bounded, known daily cost. The full picture, including what these layers do not stop, is in [docs/SECURITY.md](./docs/SECURITY.md). Please be kind to it: no scripts or load tests against the live site. Found a way around the limits? Report it privately, see [SECURITY.md](./SECURITY.md).
+
+## Community
+
+[Contributing](./CONTRIBUTING.md) · [Code of conduct](./CODE_OF_CONDUCT.md) · [Security policy](./SECURITY.md) · [Changelog](./CHANGELOG.md)
+
 ## License
 
-© 2026 Harsh Bhanushali. All rights reserved. This code is proprietary: viewing it on GitHub is fine, but using, copying, modifying or deploying any part of it needs written permission. See [LICENSE](LICENSE). Adapted third-party components keep their own licenses (see Credits).
+© 2026 Harsh Bhanushali. All rights reserved. The code is source-available: viewing it on GitHub is fine, but using, copying, modifying or deploying any part of it needs written permission. See [LICENSE](LICENSE). Adapted third-party components keep their own licenses (see Credits).
