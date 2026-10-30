@@ -11,7 +11,7 @@ import { join } from 'node:path';
 
 const base = (process.env.BASE_URL ?? 'http://localhost:4173').replace(/\/$/, '');
 const out = process.argv[2] ?? 'media-raw';
-const only = process.env.ONLY?.split(',');
+const only = process.env.ONLY ? process.env.ONLY.split(',') : null;
 mkdirSync(out, { recursive: true });
 
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
