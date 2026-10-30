@@ -5,6 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- README: first place in the Sarvam Bulbul Build Challenge, and a "try it in 10 seconds" line at the top.
 - README demo loops, community files (contributing, security, code of conduct), issue and pull request templates, docs index and maintainer notes.
 
 ## [0.1.0] - 2026-10
