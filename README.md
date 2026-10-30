@@ -36,6 +36,26 @@ Built for the **Sarvam Bulbul Build Challenge**: "Build something that speaks".
 
 ---
 
+## See it move
+
+<table>
+<tr>
+<td align="center" width="50%"><img src="docs/media/landing.gif" alt="The landing page: hero radio, then the evening scrolling by" /><br><sub>Landing page</sub></td>
+<td align="center" width="50%"><img src="docs/media/tune-in.gif" alt="Pressing Tune in on the radio: the station ID, then the RJ greets the listener in Hindi" /><br><sub>Tune in: a real show starts</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/media/radio-player.gif" alt="The radio player moving through a Kahani, an RJ link, news and an ad, with captions" /><br><sub>Radio player</sub></td>
+<td align="center"><img src="docs/media/live-room.gif" alt="Listen together: joining the shared live room and the RJ welcoming a listener" /><br><sub>Live room: listen together</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/media/call-button.gif" alt="Hold to talk: the call moves from you to Saaras, Sarvam-105B and Bulbul" /><br><sub>Call button: hold to talk</sub></td>
+<td align="center"><img src="docs/media/radio-phone.gif" alt="The radio on a phone" width="45%" /><br><sub>On a phone</sub></td>
+</tr>
+</table>
+
+<sub>Recorded by a GitHub Actions workflow ([`scripts/record-readme-media.mjs`](./scripts/record-readme-media.mjs)); MP4 versions are in [`docs/media`](./docs/media).</sub>
+
+
 ## 📻 What's on air
 
 A radio station gives every vocal style a natural job: the newsreader, the ad announcer, the late-night host, the storyteller, the kid in the drama. Bulbul V4 Flash's voice catalog is organized by exactly those styles (`news`, `ads`, `stories_dramatic`, `suspense`, `kids`, `reels` …), and radio is a format anyone in India already knows.
