@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { STATIONS } from '../../shared/stations';
 import { createAudioEngine, createRecorder } from './index';
+import { apiFetch } from '../radio/apiSession';
 
 const engine = createAudioEngine();
 const recorder = createRecorder();
@@ -127,7 +128,7 @@ export default function AudioDebug() {
 
   const playTestLine = () =>
     play('tts', () =>
-      fetch('/api/tts', {
+      apiFetch('/api/tts', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(TEST_LINE),

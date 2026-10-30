@@ -331,16 +331,19 @@ Secrets (`npx wrangler secret put <NAME>`):
 |---|---|
 | `SARVAM_API_KEY` | Everything that speaks, listens or writes |
 | `PHONE_WEBHOOK_TOKEN` | Only the studio phone line: the `?token=` the Sarvam call-end webhook must send |
-| `LIVE_ADMIN_TOKEN` | The owner's key: the Listen together Studio controls and the newsroom admin routes |
+| `LIVE_ADMIN_TOKEN` | The owner's key: the Listen together Studio controls, the newsroom admin routes and the spend kill switch |
+| `SESSION_SECRET` | Signs the short-lived API session tokens (16+ random characters). **Required in production**: without it the paid API answers 503. See [Security](./docs/SECURITY.md) |
+| `TURNSTILE_SECRET_KEY` | Optional: switches on a Cloudflare Turnstile check before a session is issued (also set the plain variable `TURNSTILE_SITE_KEY`) |
 
-Optional variables: `PRODUCER_JUDGE` (`off` turns the producer check off; `sarvam` uses Sarvam-105B as the judge) and `PRODUCER_MODEL` (a different Workers AI model for the judge).
+Optional variables: `ALLOWED_ORIGINS` (extra browser origins, e.g. a workers.dev preview), `SESSION_TTL_SECONDS`, `PHONE_HEADLINES_REQUIRE_TOKEN` (`1` makes `/api/phone/headlines` need the phone token), the daily budget caps `BUDGET_*` (see [Security](./docs/SECURITY.md)), `PRODUCER_JUDGE` (`off` turns the producer check off; `sarvam` uses Sarvam-105B as the judge) and `PRODUCER_MODEL` (a different Workers AI model for the judge).
 
 Bindings declared in `wrangler.jsonc`:
 
 | Binding | Resource |
 |---|---|
 | `PHONE` | KV namespace: show memory |
-| `STUDIO`, `LIVE` | Durable Objects `StudioLine` and `LiveStation`, created from the migrations on the first deploy |
+| `STUDIO`, `LIVE`, `SPEND` | Durable Objects `StudioLine`, `LiveStation` and `SpendGuard` (the daily budget), created from the migrations on the first deploy |
+| `RL_SEGMENT`, `RL_TTS`, `RL_CALL`, `RL_SESSION`, `RL_MINT`, `RL_ADMIN` | Rate limiting bindings (per IP, and per session for `RL_SESSION`) |
 | `NEWS_DB` | D1 database `tarang-news`; schema in `migrations/` |
 | `NEWS_INDEX` | Vectorize index `tarang-news-dedupe` (1024 dimensions, cosine; filtered on `pool` and `ts`) |
 | `AI` | Workers AI |
@@ -464,6 +467,7 @@ Tests sit next to the code they cover (`*.test.ts`).
 | [How it works](./docs/ARCHITECTURE.md) | 19 diagrams of the running system: every flow from Tune in to call-in, the phone line and the shared live show, with the code behind each |
 | [PRD](./docs/PRD.md) | What the product is, who it's for, goals and the shipped scope |
 | [Tech spec](./docs/TECH-SPEC.md) | Architecture, API contracts, the audio engine, prompt design and what live testing changed |
+| [Security](./docs/SECURITY.md) | How the paid APIs are protected from scripts: threat model, route table, session tokens, rate limits, the daily budget and the kill switch |
 | [Voice casting](./docs/VOICE-CASTING.md) | Every station's cast, with the pitch audition behind each voice's grammatical gender |
 | [Build plan](./docs/BUILD-PLAN.md) | How the build was split into parallel workstreams, and the submission checklist |
 

@@ -11,7 +11,47 @@ const allowMissingKey = flags.includes('--allow-missing-key');
 const attempts = Number(process.env.SMOKE_ATTEMPTS ?? 5);
 const origin = base.replace(/\/+$/, '');
 
+/** The site's own session: POST /api/session as the page does (null when Turnstile is on, which a script cannot pass). */
+let sessionToken;
+async function session() {
+  if (sessionToken !== undefined) return sessionToken;
+  let res;
+  for (let i = 0; i < 3; i++) {
+    res = await fetch(`${origin}/api/session`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: '{}' });
+    // The mint limit is per IP and a CI run shares one: wait out its window
+    if (res.status !== 429) break;
+    await sleep(Number(res.headers.get('retry-after') ?? 60) * 1000 + 1000);
+  }
+  if (res.status === 403) return (sessionToken = null);
+  expect(res.status === 200, `POST /api/session returned ${res.status}`);
+  const body = await res.json();
+  expect(typeof body.token === 'string' && body.token.length > 20, 'POST /api/session returned no token');
+  return (sessionToken = body.token);
+}
+
+/** A call the way the page makes it: its own Origin and the session token. */
+async function page(path, init = {}) {
+  const token = await session();
+  expect(token, 'no session (Turnstile is on)');
+  return fetch(`${origin}${path}`, { ...init, headers: { origin, 'x-tarang-session': token, ...(init.headers ?? {}) } });
+}
+
 const checks = [
+  {
+    name: 'paid API refuses callers outside the site',
+    run: async () => {
+      const body = JSON.stringify({ station: 'hi', speaker: 'not_a_cast_voice', text: 'x', pace: 1, temperature: 0.5 });
+      const headers = { 'content-type': 'application/json' };
+      const none = await fetch(`${origin}/api/tts`, { method: 'POST', headers, body });
+      expect(none.status === 403, `POST /api/tts with no Origin returned ${none.status}, expected 403`);
+      const foreign = await fetch(`${origin}/api/tts`, { method: 'POST', headers: { ...headers, origin: 'https://evil.example' }, body });
+      expect(foreign.status === 403, `POST /api/tts from a foreign Origin returned ${foreign.status}, expected 403`);
+      const noToken = await fetch(`${origin}/api/tts`, { method: 'POST', headers: { ...headers, origin }, body });
+      expect(noToken.status === 401, `POST /api/tts with no session returned ${noToken.status}, expected 401`);
+      const forged = await fetch(`${origin}/api/tts`, { method: 'POST', headers: { ...headers, origin, 'x-tarang-session': 'abc.def' }, body });
+      expect(forged.status === 401, `POST /api/tts with a forged session returned ${forged.status}, expected 401`);
+    },
+  },
   {
     name: 'landing page',
     run: async () => {
@@ -40,7 +80,8 @@ const checks = [
   {
     name: 'listener context',
     run: async () => {
-      const res = await get('/api/context?station=hi');
+      if (!(await session())) return; // Turnstile on: a script cannot get a session
+      const res = await page('/api/context?station=hi');
       expect(res.status === 200, `GET /api/context returned ${res.status}`);
       const body = await res.json();
       expect(Array.isArray(body.headlines), 'context has no headlines array');
@@ -49,7 +90,8 @@ const checks = [
   {
     name: 'TTS only speaks cast voices',
     run: async () => {
-      const res = await fetch(`${origin}/api/tts`, {
+      if (!(await session())) return;
+      const res = await page('/api/tts', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ station: 'hi', speaker: 'not_a_cast_voice', text: 'नमस्ते', pace: 1, temperature: 0.5 }),
@@ -64,11 +106,12 @@ const checks = [
   {
     name: 'studio line call table answers',
     run: async () => {
-      const recent = await get('/api/phone/recent');
+      if (!(await session())) return;
+      const recent = await page('/api/phone/recent');
       expect(recent.status === 200, `GET /api/phone/recent returned ${recent.status}`);
       expect(Array.isArray((await recent.json())?.calls), 'GET /api/phone/recent has no calls list');
       // Reaches the StudioLine Durable Object: an unclaimed call can never be marked aired
-      const res = await fetch(`${origin}/api/phone/aired`, {
+      const res = await page('/api/phone/aired', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ station: 'hi', holder: 'smoke-test-holder', ids: ['smoke-test-no-such-call'] }),

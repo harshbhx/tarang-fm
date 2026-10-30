@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createAudioEngine, type AudioEngine } from '../audio';
+import { apiFetch } from '../radio/apiSession';
 import type { StationId } from '../../shared/types';
 
 export interface SampleRequest {
@@ -84,7 +85,7 @@ export function useVoicePlayer(external?: AudioEngine): VoicePlayer {
       setState((s) => ({ ...s, id: req.id, phase: 'loading', error: undefined }));
 
       const startedAt = performance.now();
-      const response = fetch('/api/tts', {
+      const response = apiFetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

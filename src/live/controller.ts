@@ -4,6 +4,7 @@
  * listener hears the same line at the same moment.
  */
 import { TTS_SAMPLE_RATE } from '../../shared/constants';
+import { withSessionQuery } from '../radio/apiSession';
 import {
   LIVE_NAME_MAX,
   LIVE_PCM_BYTES_PER_MS,
@@ -65,6 +66,8 @@ export interface LiveControllerOptions {
   origin?: string;
   createSocket?: (url: string) => LiveSocket;
   fetch?: typeof fetch;
+  /** The API session (the page passes the real one; tests leave it out and connect without a token) */
+  session?: { token(): string | undefined; ensure(): Promise<unknown> };
   timings?: Partial<LiveTimings>;
   /** Local epoch clock (default Date.now) */
   now?: () => number;
@@ -215,6 +218,7 @@ export class LiveController implements LiveActions {
   private readonly origin: string;
   private readonly createSocket: (url: string) => LiveSocket;
   private readonly fetchFn: typeof fetch;
+  private readonly session?: LiveControllerOptions['session'];
   private readonly now: () => number;
   private readonly mono: () => number;
   private readonly random: () => number;
@@ -253,6 +257,7 @@ export class LiveController implements LiveActions {
     this.origin = options.origin ?? (typeof location !== 'undefined' ? location.origin : '');
     this.createSocket = options.createSocket ?? ((url) => new WebSocket(url));
     this.fetchFn = options.fetch ?? ((input, init) => fetch(input, init));
+    this.session = options.session;
     this.now = options.now ?? (() => Date.now());
     this.mono = options.mono ?? (() => performance.now());
     this.random = options.random ?? Math.random;
@@ -448,7 +453,16 @@ export class LiveController implements LiveActions {
 
   private connect(gen: number): void {
     if (gen !== this.gen) return;
-    const url = liveSocketUrl(this.origin, this.state.station);
+    // The socket needs a live session token: fetch one first when there is none (or it is about to end)
+    const token = this.session?.token();
+    if (this.session && token === undefined) {
+      this.session.ensure().then(
+        () => this.connect(gen),
+        () => this.lost(gen),
+      );
+      return;
+    }
+    const url = withSessionQuery(liveSocketUrl(this.origin, this.state.station), token);
     let socket: LiveSocket;
     try {
       socket = this.createSocket(url);

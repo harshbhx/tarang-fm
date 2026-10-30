@@ -1,6 +1,7 @@
 /** Typed client for the Worker API (docs/TECH-SPEC.md §5). */
 import type { CallMeta, PhoneAired, SegmentRequest, TtsRequest } from '../../shared/schemas';
 import { STUDIO_NUMBER } from '../../shared/constants';
+import { apiFetch } from './apiSession';
 import type {
   ApiError,
   CallResponse,
@@ -41,7 +42,7 @@ async function errorFrom(res: Response): Promise<ApiRequestError> {
 }
 
 async function send(url: string, init: RequestInit): Promise<Response> {
-  const res = await fetch(url, init);
+  const res = await apiFetch(url, init);
   if (!res.ok) throw await errorFrom(res);
   return res;
 }

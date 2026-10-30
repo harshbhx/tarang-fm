@@ -1,3 +1,4 @@
+import { resetSession } from './apiSession';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CallMeta, PhoneAired, SegmentRequest } from '../../shared/schemas';
 import { getStation } from '../../shared/stations';
@@ -792,7 +793,10 @@ describe('RadioController subtitles', () => {
 
   it("sends the call's subtitles choice as a form field", async () => {
     const forms: FormData[] = [];
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+    resetSession();
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      // The page's API session is minted first (src/radio/apiSession.ts)
+      if (url === '/api/session') return Response.json({ token: 'test-token', expiresAt: Date.now() + 3_600_000 });
       forms.push(init.body as FormData);
       return new Response(JSON.stringify({ transcript: '', intent: 'retry', reply: rjLine('hi', 'x') }), {
         headers: { 'content-type': 'application/json' },
@@ -806,6 +810,7 @@ describe('RadioController subtitles', () => {
       expect(forms.map((f) => f.get('subtitles'))).toEqual(['true', 'false']);
     } finally {
       vi.unstubAllGlobals();
+      resetSession();
     }
   });
 });

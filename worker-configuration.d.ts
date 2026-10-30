@@ -8,18 +8,22 @@ interface __BaseEnv_Env {
 	RL_SEGMENT: RateLimit;
 	RL_TTS: RateLimit;
 	RL_CALL: RateLimit;
+	RL_SESSION: RateLimit;
+	RL_MINT: RateLimit;
+	RL_ADMIN: RateLimit;
 	AI: Ai;
 	SARVAM_API_KEY: string;
 	PHONE_WEBHOOK_TOKEN: string;
 	LIVE_ADMIN_TOKEN: string;
 	STUDIO: DurableObjectNamespace<import("./worker/index").StudioLine>;
 	LIVE: DurableObjectNamespace<import("./worker/index").LiveStation>;
+	SPEND: DurableObjectNamespace<import("./worker/index").SpendGuard>;
 	NEWS_REFRESH: Workflow<Parameters<import("./worker/index").NewsRefresh['run']>[0]['payload']>;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./worker/index");
-		durableNamespaces: "StudioLine" | "LiveStation";
+		durableNamespaces: "StudioLine" | "LiveStation" | "SpendGuard";
 	}
 	interface PreviewEnv {
 		PHONE: KVNamespace;
@@ -28,12 +32,16 @@ declare namespace Cloudflare {
 		RL_SEGMENT: RateLimit;
 		RL_TTS: RateLimit;
 		RL_CALL: RateLimit;
+		RL_SESSION: RateLimit;
+		RL_MINT: RateLimit;
+		RL_ADMIN: RateLimit;
 		AI: Ai;
 		SARVAM_API_KEY: string;
 		PHONE_WEBHOOK_TOKEN: string;
 		LIVE_ADMIN_TOKEN: string;
 		STUDIO: DurableObjectNamespace<import("./worker/index").StudioLine>;
 		LIVE: DurableObjectNamespace<import("./worker/index").LiveStation>;
+		SPEND: DurableObjectNamespace<import("./worker/index").SpendGuard>;
 		NEWS_REFRESH: Workflow<Parameters<import("./worker/index").NewsRefresh['run']>[0]['payload']>;
 	}
 	interface Env extends __BaseEnv_Env {}

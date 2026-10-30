@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono';
+import { cors } from 'hono/cors';
 import { createMiddleware } from 'hono/factory';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { z } from 'zod';
@@ -7,6 +8,20 @@ import { CallMetaSchema, PhoneAiredSchema, SegmentRequestSchema, StationIdSchema
 import { CAST_SPEAKERS, STATION_BY_ID } from '../shared/stations';
 import type { CallResponse, PhoneCall, PhoneRecentResponse, Station } from '../shared/types';
 import { audioFile, handleCall, startCall, type CallSubtitles } from './call';
+import {
+  allowedOrigins,
+  checkOrigin,
+  clientIp,
+  issueSession,
+  rateKey,
+  readLimitedText,
+  SESSION_HEADER,
+  sessionTtl,
+  verifySession,
+  verifyTurnstile,
+} from './guard';
+import type { SpendKind } from './ledger';
+import { spendGuard } from './spend';
 import { getContext, getHeadlines, localNewsCity } from './context';
 import { phoneHeadlines, toPhoneCall, tokenMatches } from './phone';
 import { studioLine } from './studio';
@@ -20,7 +35,7 @@ import type { NewsRefreshParams } from './news/workflow';
 import { buildSegment, producerFor } from './segment';
 import { Timings } from './timing';
 
-type AppEnv = { Bindings: Env; Variables: { timings: Timings } };
+type AppEnv = { Bindings: Env; Variables: { timings: Timings; sid?: string } };
 type Ctx = Context<AppEnv>;
 
 const app = new Hono<AppEnv>().basePath('/api');
@@ -87,13 +102,24 @@ app.use('*', async (c, next) => {
   }
 });
 
+// Browsers on another origin get no CORS grant: only this site (and loopback / ALLOWED_ORIGINS) may read responses.
+const corsHeaders = cors({
+    origin: (origin, c) => (origin && allowedOrigins(c.env, new URL(c.req.url)).has(origin) ? origin : null),
+    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    allowHeaders: ['content-type', 'accept', 'authorization', SESSION_HEADER],
+    exposeHeaders: ['Server-Timing', 'X-Audio-Format', 'X-Speaker', 'Retry-After'],
+    maxAge: 600,
+});
+// (a WebSocket upgrade response must reach the browser untouched, so it skips the header middleware)
+app.use('*', (c, next) => (c.req.header('upgrade') ? next() : corsHeaders(c, next)));
+
+/** Per-IP rate limit through a Workers rate limiting binding. IPv6 callers are keyed by their /64 so rotating addresses does not help. */
 const rateLimit = (pick: (env: Partial<Env>) => RateLimit | undefined) =>
   createMiddleware<AppEnv>(async (c, next) => {
     const binding = pick(c.env);
     if (binding) {
-      const key = c.req.header('cf-connecting-ip') ?? 'local';
       try {
-        const { success } = await binding.limit({ key });
+        const { success } = await binding.limit({ key: rateKey(clientIp(c.req.raw)) });
         if (!success) {
           c.header('Retry-After', '60');
           return apiError(c, 429, 'rate_limited', 'Too many requests. Take a breath and try again in a minute.');
@@ -105,26 +131,126 @@ const rateLimit = (pick: (env: Partial<Env>) => RateLimit | undefined) =>
     await next();
   });
 
+/** Layer 1: the request must come from this site's own pages (Origin / Referer / Sec-Fetch-Site). Spoofable from curl, so never the only layer. */
+const originGate = createMiddleware<AppEnv>(async (c, next) => {
+  const verdict = checkOrigin(c.req.raw, c.env);
+  if (!verdict.ok) {
+    console.warn(`[guard] origin refused: ${verdict.reason}`);
+    return apiError(c, 403, 'forbidden_origin', 'This API only works from the Tarang FM site.');
+  }
+  await next();
+});
+
+/** Layer 2: a valid, unexpired session token from POST /api/session (header, or ?t= for WebSockets). */
+const sessionGate = createMiddleware<AppEnv>(async (c, next) => {
+  const token = c.req.header(SESSION_HEADER) ?? c.req.query('t');
+  const verdict = await verifySession(token, c.req.raw, c.env);
+  if (!verdict.ok) {
+    if (verdict.code === 'not_configured') return apiError(c, 503, 'not_configured', 'The station is not fully set up yet.');
+    return apiError(c, 401, verdict.code, 'Your listening session ended. Reload the page to tune back in.');
+  }
+  c.set('sid', verdict.claims.sid);
+  await next();
+});
+
+/** Layer 3b: a per-session limit, so one token cannot be hammered even from many IPs. */
+const sessionRate = createMiddleware<AppEnv>(async (c, next) => {
+  const sid = c.get('sid');
+  if (sid && c.env.RL_SESSION) {
+    try {
+      const { success } = await c.env.RL_SESSION.limit({ key: sid });
+      if (!success) {
+        c.header('Retry-After', '60');
+        return apiError(c, 429, 'rate_limited', 'Too many requests. Take a breath and try again in a minute.');
+      }
+    } catch (err) {
+      console.error(`[api] session rate limiter failed: ${String(err)}`);
+    }
+  }
+  await next();
+});
+
+/** Everything a paid route runs before its handler. */
+const paid = [originGate, sessionGate] as const;
+
+/** Layer 4: counts a paid action against today's budget; a Response (friendly, no spend) when it is used up or paused. */
+async function charge(c: Ctx, kind: SpendKind, units = 1): Promise<Response | undefined> {
+  const stub = spendGuard(c.env);
+  if (!stub) return undefined; // no SPEND binding: a local run without the Durable Object
+  try {
+    const result = await stub.charge(kind, units, rateKey(clientIp(c.req.raw)));
+    if (result.ok) return undefined;
+    c.header('Retry-After', '3600');
+    if (result.scope === 'ip') {
+      return apiError(c, 429, 'budget_exhausted', "You've used today's listening allowance from this connection. Come back tomorrow and the RJs will be waiting.");
+    }
+    return apiError(
+      c,
+      503,
+      'budget_exhausted',
+      result.scope === 'paused'
+        ? 'Tarang FM is taking a short break. Please try again a little later.'
+        : "Tarang FM has used up today's free airtime. The station is back at midnight UTC (5:30 am IST).",
+    );
+  } catch (err) {
+    console.error(`[api] spend guard failed: ${String(err)}`);
+    return apiError(c, 503, 'budget_unavailable', 'Tarang FM is taking a short break. Please try again in a minute.');
+  }
+}
+
+const ADMIN_RATE = rateLimit((e) => e.RL_ADMIN);
+
 const requireKey = createMiddleware<AppEnv>(async (c, next) => {
   if (!c.env.SARVAM_API_KEY) return apiError(c, 500, 'not_configured', 'SARVAM_API_KEY is not set.');
   await next();
 });
 
-async function readJson(c: Ctx): Promise<{ ok: true; value: unknown } | { ok: false }> {
+const JSON_MAX_BYTES = 64 * 1024;
+
+async function readJson(c: Ctx, maxBytes = JSON_MAX_BYTES): Promise<{ ok: true; value: unknown } | { ok: false; status?: 413 }> {
+  const body = await readLimitedText(c.req.raw, maxBytes);
+  if (!body.ok) return { ok: false, status: body.status === 413 ? 413 : undefined };
   try {
-    return { ok: true, value: await c.req.json() };
+    return { ok: true, value: JSON.parse(body.text) };
   } catch {
     return { ok: false };
   }
+}
+
+function badJson(c: Ctx, body: { ok: false; status?: 413 }) {
+  return body.status === 413 ? apiError(c, 413, 'body_too_large', 'That request is too large.') : apiError(c, 400, 'invalid_json', 'Request body must be JSON.');
 }
 
 function stationFor(id: string): Station | undefined {
   return STATION_BY_ID[id as Station['id']];
 }
 
+/** Issues a session token to the site's own pages. The page calls this on load; every paid route then requires the token. */
+app.post(
+  '/session',
+  originGate,
+  rateLimit((e) => e.RL_MINT),
+  async (c) => {
+    if (c.env.TURNSTILE_SECRET_KEY) {
+      const body = await readJson(c, 4096);
+      const token = body.ok ? (body.value as { turnstile?: unknown } | null)?.turnstile : undefined;
+      if (!(await verifyTurnstile(token, clientIp(c.req.raw), c.env))) {
+        return c.json({ error: { code: 'challenge_required', message: 'Please complete the quick check to start listening.' }, siteKey: c.env.TURNSTILE_SITE_KEY ?? null }, 403, {
+          'Cache-Control': 'no-store',
+        });
+      }
+    }
+    const session = await issueSession(c.req.raw, c.env);
+    if (!session) return apiError(c, 503, 'not_configured', 'The station is not fully set up yet.');
+    return c.json({ token: session.token, expiresAt: session.claims.exp * 1000, ttl: sessionTtl(c.env) }, 200, { 'Cache-Control': 'no-store' });
+  },
+);
+
 app.get('/health', (c) => c.json({ ok: true, sarvamKey: Boolean(c.env.SARVAM_API_KEY) }));
 
-app.get('/context', async (c) => {
+app.get('/context', ...paid, rateLimit((e) => e.RL_SEGMENT), sessionRate, async (c) => {
+  const denied = await charge(c, 'context');
+  if (denied) return denied;
   const parsed = StationIdSchema.safeParse(c.req.query('station') ?? 'hi');
   const station = parsed.success ? stationFor(parsed.data) : undefined;
   if (!station) return apiError(c, 400, 'unknown_station', 'Unknown station.');
@@ -155,13 +281,15 @@ function newsPlace(request: Request, listener: { city?: string; region?: string 
   };
 }
 
-app.post('/segment', rateLimit((e) => e.RL_SEGMENT), requireKey, async (c) => {
+app.post('/segment', ...paid, rateLimit((e) => e.RL_SEGMENT), sessionRate, requireKey, async (c) => {
   const body = await readJson(c);
-  if (!body.ok) return apiError(c, 400, 'invalid_json', 'Request body must be JSON.');
+  if (!body.ok) return badJson(c, body);
   const parsed = SegmentRequestSchema.safeParse(body.value);
   if (!parsed.success) return apiError(c, 400, 'invalid_request', issues(parsed.error));
   const station = stationFor(parsed.data.station);
   if (!station) return apiError(c, 400, 'unknown_station', 'That station is not on the dial yet.');
+  const denied = await charge(c, 'segment');
+  if (denied) return denied;
 
   // Studio calls are read once, ever: this RJ link gets only the calls nobody else has aired or is reading
   const holder = parsed.data.holder;
@@ -210,15 +338,17 @@ app.post('/segment', rateLimit((e) => e.RL_SEGMENT), requireKey, async (c) => {
   return c.json(segment, 200, { 'Cache-Control': 'no-store' });
 });
 
-app.post('/tts', rateLimit((e) => e.RL_TTS), requireKey, async (c) => {
+app.post('/tts', ...paid, rateLimit((e) => e.RL_TTS), sessionRate, requireKey, async (c) => {
   const body = await readJson(c);
-  if (!body.ok) return apiError(c, 400, 'invalid_json', 'Request body must be JSON.');
+  if (!body.ok) return badJson(c, body);
   const parsed = TtsRequestSchema.safeParse(body.value);
   if (!parsed.success) return apiError(c, 400, 'invalid_request', issues(parsed.error));
   const { speaker, text, pace, temperature, loudness, pitch } = parsed.data;
   const station = stationFor(parsed.data.station);
   if (!station) return apiError(c, 400, 'unknown_station', 'That station is not on the dial yet.');
   if (!CAST_SPEAKERS.has(speaker)) return apiError(c, 400, 'speaker_not_allowed', `Speaker ${speaker} is not in any station cast.`);
+  const denied = await charge(c, 'tts_chars', text.length);
+  if (denied) return denied;
 
   try {
     const sarvam = createSarvam(c.env.SARVAM_API_KEY);
@@ -241,8 +371,9 @@ app.post('/tts', rateLimit((e) => e.RL_TTS), requireKey, async (c) => {
   }
 });
 
-app.post('/call', rateLimit((e) => e.RL_CALL), requireKey, async (c) => {
-  const length = Number(c.req.header('content-length') ?? 0);
+app.post('/call', ...paid, rateLimit((e) => e.RL_CALL), sessionRate, requireKey, async (c) => {
+  const length = Number(c.req.header('content-length') ?? NaN);
+  if (!Number.isFinite(length) || length <= 0) return apiError(c, 411, 'length_required', 'Send the recording with a Content-Length.');
   if (length > CALL_MAX_BYTES + 64 * 1024) return apiError(c, 413, 'audio_too_large', 'Recording is too large (max 2 MB).');
 
   let form: FormData;
@@ -281,6 +412,8 @@ app.post('/call', rateLimit((e) => e.RL_CALL), requireKey, async (c) => {
   if (!parsed.success) return apiError(c, 400, 'invalid_request', issues(parsed.error));
   const station = stationFor(parsed.data.station);
   if (!station) return apiError(c, 400, 'unknown_station', 'That station is not on the dial yet.');
+  const denied = await charge(c, 'call');
+  if (denied) return denied;
 
   try {
     const sarvam = createSarvam(c.env.SARVAM_API_KEY);
@@ -305,6 +438,10 @@ app.post('/call', rateLimit((e) => e.RL_CALL), requireKey, async (c) => {
 
 /** Headlines for the phone RJ's news tool. */
 app.get('/phone/headlines', rateLimit((e) => e.RL_SEGMENT), async (c) => {
+  // Called by the Sarvam voice agent (no browser, so no session). Free RSS data, not a paid API. Opt in to a shared token with PHONE_HEADLINES_REQUIRE_TOKEN=1.
+  if (c.env.PHONE_HEADLINES_REQUIRE_TOKEN === '1' && !tokenMatches(c.req.query('token'), c.env.PHONE_WEBHOOK_TOKEN)) {
+    return apiError(c, 401, 'unauthorized', 'Bad token.');
+  }
   const parsed = StationIdSchema.safeParse(c.req.query('station') ?? 'hi');
   const station = parsed.success ? stationFor(parsed.data) : undefined;
   if (!station) return apiError(c, 400, 'unknown_station', 'Unknown station.');
@@ -314,17 +451,17 @@ app.get('/phone/headlines', rateLimit((e) => e.RL_SEGMENT), async (c) => {
 });
 
 /** Call-end webhook from the Sarvam deployment: keeps what the caller wants read on air. */
-app.post('/phone/call-end', async (c) => {
+app.post('/phone/call-end', ADMIN_RATE, async (c) => {
   if (!tokenMatches(c.req.query('token'), c.env.PHONE_WEBHOOK_TOKEN)) return apiError(c, 401, 'unauthorized', 'Bad token.');
   const body = await readJson(c);
-  if (!body.ok) return apiError(c, 400, 'invalid_json', 'Request body must be JSON.');
+  if (!body.ok) return badJson(c, body);
   const call = toPhoneCall(body.value);
   if (call) await studioLine(c.env).save(call);
   return c.json({ ok: true, stored: Boolean(call) }, 200);
 });
 
 /** Recent studio calls for the web show (numbers masked), each with when it was read on air. */
-app.get('/phone/recent', async (c) => {
+app.get('/phone/recent', ...paid, rateLimit((e) => e.RL_SEGMENT), sessionRate, async (c) => {
   const calls = await studioLine(c.env)
     .recent()
     .catch(() => [] as PhoneCall[]);
@@ -332,9 +469,9 @@ app.get('/phone/recent', async (c) => {
 });
 
 /** An RJ link has started reading these calls: they are marked as aired for every listener. */
-app.post('/phone/aired', rateLimit((e) => e.RL_SEGMENT), async (c) => {
-  const body = await readJson(c);
-  if (!body.ok) return apiError(c, 400, 'invalid_json', 'Request body must be JSON.');
+app.post('/phone/aired', ...paid, rateLimit((e) => e.RL_SEGMENT), sessionRate, async (c) => {
+  const body = await readJson(c, 4096);
+  if (!body.ok) return badJson(c, body);
   const parsed = PhoneAiredSchema.safeParse(body.value);
   if (!parsed.success) return apiError(c, 400, 'invalid_request', issues(parsed.error));
   const { ids, holder, station } = parsed.data;
@@ -352,15 +489,17 @@ function liveStation(c: Ctx): DurableObjectStub<LiveStation> | undefined {
   return station ? c.env.LIVE.get(c.env.LIVE.idFromName(station.id)) : undefined;
 }
 
-app.get('/live/:station/ws', async (c) => {
+app.get('/live/:station/ws', ...paid, rateLimit((e) => e.RL_SEGMENT), sessionRate, async (c) => {
   const stub = liveStation(c);
   if (!stub) return apiError(c, 404, 'unknown_station', 'That station is not on the dial yet.');
   if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') return apiError(c, 426, 'upgrade_required', 'Expected a WebSocket upgrade.');
+  const denied = await charge(c, 'live_join');
+  if (denied) return denied;
   return stub.fetch(c.req.raw);
 });
 
 /** A line's speech (immutable): the edge cache first, then the station. */
-app.get('/live/:station/audio/:lineId', async (c) => {
+app.get('/live/:station/audio/:lineId', ...paid, rateLimit((e) => e.RL_TTS), sessionRate, async (c) => {
   const stub = liveStation(c);
   if (!stub) return apiError(c, 404, 'unknown_station', 'That station is not on the dial yet.');
   if (!LINE_ID.test(c.req.param('lineId'))) return apiError(c, 404, 'not_found', 'No audio for that line.');
@@ -381,7 +520,7 @@ app.get('/live/:station/audio/:lineId', async (c) => {
 });
 
 /** Studio switch: start or stop a station's shared show (owner only, bearer admin key). */
-app.post('/live/:station/control', async (c) => {
+app.post('/live/:station/control', ADMIN_RATE, async (c) => {
   const stub = liveStation(c);
   if (!stub) return apiError(c, 404, 'unknown_station', 'That station is not on the dial yet.');
   const auth = c.req.header('authorization') ?? '';
@@ -391,7 +530,7 @@ app.post('/live/:station/control', async (c) => {
   return new Response(res.body, res);
 });
 
-app.get('/live/:station/now', async (c) => {
+app.get('/live/:station/now', ...paid, rateLimit((e) => e.RL_SEGMENT), sessionRate, async (c) => {
   const stub = liveStation(c);
   if (!stub) return apiError(c, 404, 'unknown_station', 'That station is not on the dial yet.');
   const res = await stub.fetch(c.req.raw);
@@ -406,7 +545,7 @@ function isAdmin(c: Ctx): boolean {
 }
 
 /** Starts a newsroom refresh now: {station, kind: refresh|topup|local|process, state?, city?}. */
-app.post('/news/refresh', async (c) => {
+app.post('/news/refresh', ADMIN_RATE, async (c) => {
   if (!isAdmin(c)) return apiError(c, 401, 'unauthorized', 'Wrong admin key.');
   const body = await readJson(c);
   const v = (body.ok ? body.value : {}) as Partial<NewsRefreshParams>;
@@ -418,7 +557,7 @@ app.post('/news/refresh', async (c) => {
 });
 
 /** Pool health: refresh rows, feed results from the edge, and unaired stories per bucket. */
-app.get('/news/status', async (c) => {
+app.get('/news/status', ADMIN_RATE, async (c) => {
   if (!isAdmin(c)) return apiError(c, 401, 'unauthorized', 'Wrong admin key.');
   const db = c.env.NEWS_DB;
   const [refresh, feeds, pool] = await Promise.all([
@@ -427,6 +566,25 @@ app.get('/news/status', async (c) => {
     db.prepare('SELECT pool, bucket, COUNT(*) AS items, COUNT(DISTINCT cluster_id) AS stories, SUM(tagged) AS tagged, SUM(embedded) AS embedded FROM news_item WHERE expires_at > ? GROUP BY pool, bucket').bind(Date.now()).all(),
   ]);
   return c.json({ refresh: refresh.results, feeds: feeds.results, pool: pool.results }, 200, { 'Cache-Control': 'no-store' });
+});
+
+/** Spend status and the kill switch (owner only, bearer admin key): POST {"paused": true} stops every paid call at once. */
+app.get('/admin/spend', ADMIN_RATE, async (c) => {
+  if (!isAdmin(c)) return apiError(c, 401, 'unauthorized', 'Wrong admin key.');
+  const stub = spendGuard(c.env);
+  if (!stub) return apiError(c, 404, 'not_configured', 'No spend guard on this deployment.');
+  return c.json(await stub.status(), 200, { 'Cache-Control': 'no-store' });
+});
+
+app.post('/admin/spend', ADMIN_RATE, async (c) => {
+  if (!isAdmin(c)) return apiError(c, 401, 'unauthorized', 'Wrong admin key.');
+  const stub = spendGuard(c.env);
+  if (!stub) return apiError(c, 404, 'not_configured', 'No spend guard on this deployment.');
+  const body = await readJson(c, 1024);
+  const paused = body.ok ? (body.value as { paused?: unknown } | null)?.paused : undefined;
+  if (typeof paused !== 'boolean') return apiError(c, 400, 'invalid_request', 'Send {"paused": true} or {"paused": false}.');
+  await stub.setPaused(paused);
+  return c.json(await stub.status(), 200, { 'Cache-Control': 'no-store' });
 });
 
 app.notFound((c) => apiError(c, 404, 'not_found', `No route for ${c.req.method} ${c.req.path}.`));
@@ -455,3 +613,4 @@ export default {
 
 /** Durable Object classes must be exported by the Worker's entry module. */
 export { StudioLine } from './studio';
+export { SpendGuard } from './spend';
