@@ -19,7 +19,7 @@
     "check:diagrams": "node scripts/check-diagrams.mjs"
   },
   "dependencies": {
-    "hono": "^4.13.13",
+    "hono": "^4.13.14",
     "motion": "^14.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
