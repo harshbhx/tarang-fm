@@ -1,9 +1,12 @@
 name: README media
 
 # Records the short UI loops in the README (docs/media) with Playwright, then turns them into GIF, WebP and MP4.
-# Manual only. Uses the live site by default; only the "tune-in" clip plays one real, short show.
+# Manual (or on a push that edits this file or the recorder). Uses the live site by default; only the "tune-in" clip plays one real, short show.
 
 on:
+  push:
+    branches: [docs/oss-polish]
+    paths: ['.github/workflows/readme-media.yml', 'scripts/record-readme-media.mjs']
   workflow_dispatch:
     inputs:
       base_url:
@@ -32,7 +35,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Record
         env:
-          BASE_URL: ${{ inputs.base_url }}
+          BASE_URL: ${{ inputs.base_url || 'https://tarang-fm.dualmindlab.tech' }}
           ONLY: ${{ inputs.only }}
         run: node scripts/record-readme-media.mjs media-raw
       - name: Convert
