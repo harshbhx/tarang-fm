@@ -35,9 +35,10 @@ describe('SpendLedger', () => {
   });
   it('resets at the next UTC day', () => {
     const l = new SpendLedger(memory(), limits);
-    l.charge('tts_chars', 100, 'a', DAY1);
-    expect(l.charge('tts_chars', 1, 'a', DAY1).ok).toBe(false);
-    expect(l.charge('tts_chars', 1, 'a', DAY2)).toEqual({ ok: true });
+    l.charge('tts_chars', 60, 'a', DAY1);
+    l.charge('tts_chars', 40, 'b', DAY1);
+    expect(l.charge('tts_chars', 1, 'c', DAY1).ok).toBe(false);
+    expect(l.charge('tts_chars', 1, 'c', DAY2)).toEqual({ ok: true });
   });
   it('keeps kinds apart and always charges at least one unit', () => {
     const l = new SpendLedger(memory(), { ...limits, call: { global: 2, perIp: 2 } });
