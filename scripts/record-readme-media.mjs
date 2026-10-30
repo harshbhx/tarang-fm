@@ -57,9 +57,7 @@ await clip('landing', desktop, async (page) => {
   await page.goto(base + '/');
   await page.waitForTimeout(2500);
   const total = await page.evaluate(() => document.documentElement.scrollHeight - innerHeight);
-  await smoothScroll(page, Math.min(total, 5200), 9000);
-  await page.waitForTimeout(800);
-  await smoothScroll(page, 0, 1500);
+  await smoothScroll(page, Math.min(total, 5200), 6500);
   await page.waitForTimeout(500);
 });
 
@@ -75,23 +73,18 @@ await clip('call-button', desktop, async (page) => {
   await page.mouse.down();
   await page.waitForTimeout(3200);
   await page.mouse.up();
-  await page.waitForTimeout(5500);
+  await page.waitForTimeout(4500);
 });
 
-// 3. Radio player: every state of the on-air radio, from mock data
+// 3. Radio player: states of the on-air radio, from mock data
+const chip = (page, name) => page.getByRole('button', { name, exact: true }).first().click();
 await clip('radio-player', desktop, async (page) => {
   await page.goto(base + '/?preview=ui');
-  await page.locator('.radio').first().scrollIntoViewIfNeeded();
-  await page.waitForTimeout(2500);
-  const cc = page.getByRole('button', { name: /subtitles/i }).first();
-  if (await cc.count()) await cc.click().catch(() => {});
-  await page.waitForTimeout(2500);
-  await page.keyboard.press('ArrowRight');
-  await page.waitForTimeout(1800);
-  await page.keyboard.press('ArrowRight');
-  await page.waitForTimeout(1800);
-  await page.getByRole('button', { name: 'Full screen' }).click().catch(() => {});
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(1500);
+  for (const name of ['Tuning', 'Hindi Kahani', 'Marathi RJ', 'Tamil news', 'Bangla ad']) {
+    await chip(page, name);
+    await page.waitForTimeout(2200);
+  }
 });
 
 // 4. Radio on a phone
@@ -103,13 +96,15 @@ await clip('radio-phone', phone, async (page) => {
   await page.waitForTimeout(2500);
 }, { mobile: true });
 
-// 5. Live room: Listen together, every state from mock data
+// 5. Live room: Listen together, states from mock data
 await clip('live-room', desktop, async (page) => {
   await page.goto(base + '/?preview=live');
-  await page.waitForTimeout(3000);
-  await smoothScroll(page, 600, 3000);
-  await page.waitForTimeout(3000);
-  await smoothScroll(page, 1400, 3000);
+  await page.waitForTimeout(2200);
+  for (const name of ['Name entry, 9 listening', 'Connecting', 'Warming up']) {
+    await chip(page, name);
+    await page.waitForTimeout(2200);
+  }
+  await page.getByRole('button', { name: /Hello up next/ }).first().click();
   await page.waitForTimeout(2500);
 });
 
@@ -118,7 +113,7 @@ await clip('tune-in', desktop, async (page) => {
   await page.goto(base + '/listen');
   await page.waitForTimeout(2000);
   await page.getByRole('button', { name: /Tune in to Hindi 91\.1/i }).click();
-  await page.waitForTimeout(24000);
+  await page.waitForTimeout(16000);
 });
 
 await browser.close();
