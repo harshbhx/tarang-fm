@@ -1,0 +1,8 @@
+name: Idea
+description: A station, language, show format or feature
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes: {label: The idea, description: What would listeners get?}
+    validations: {required: true}
