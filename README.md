@@ -497,7 +497,7 @@ Tests sit next to the code they cover (`*.test.ts`).
 
 ## Fair use and abuse protection
 
-The live demo spends real Sarvam credits on every spoken line, so it is protected: per-IP rate limits on every route that costs money, a voice allowlist on `/api/tts`, a 6-minute idle pause on your own show, a capped live show per station, and owner-only admin routes. Please be kind to it: no scripts or load tests against the live site. Found a way around the limits? Report it privately, see [SECURITY.md](./SECURITY.md).
+The live demo spends real Sarvam credits on every spoken line, so the Worker assumes visitors will script it and puts several layers in front of the paid routes: an origin check, a short-lived signed session token (tied to the caller's network and browser) that every API call must carry, per-IP and per-session rate limits, a voice allowlist and input caps, and a site-wide daily budget (plus a per-IP daily allowance) with an owner-only kill switch that stops all paid calls in one request. When the budget runs out the site shows a friendly "back tomorrow" instead of failing. The worst case is a bounded, known daily cost. The full picture, including what these layers do not stop, is in [docs/SECURITY.md](./docs/SECURITY.md). Please be kind to it: no scripts or load tests against the live site. Found a way around the limits? Report it privately, see [SECURITY.md](./SECURITY.md).
 
 ## Community
 
