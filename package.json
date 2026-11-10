@@ -26,20 +26,20 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.65.0",
+    "@cloudflare/vite-plugin": "^1.67.0",
     "@cloudflare/workers-types": "^5.20261014.1",
-    "@playwright/test": "1.64.1",
-    "@tailwindcss/vite": "^4.3.3",
-    "@types/node": "^26.6.5",
+    "@playwright/test": "1.65.0",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.2",
-    "sarvamai": "^1.1.12",
+    "@vitejs/plugin-react": "^6.2.1",
+    "sarvamai": "^1.1.15",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.5",
-    "vitest": "^5.0.5",
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0",
     "wrangler": "^4.151.0"
   },
   "engines": {
