@@ -2,7 +2,7 @@
 
 <p align="center"><b>An AI radio station in your language, where every voice is Sarvam Bulbul V4 Flash.</b></p>
 
-<p align="center">🏆 <b>First place, Sarvam Bulbul Build Challenge</b></p>
+<p align="center">🏆 <b>First place, Sarvam Bulbul Build Challenge</b> · <a href="https://x.com/SarvamForDevs/status/2112207014785175938">announcement on X</a></p>
 
 <p align="center"><b>Try it in 10 seconds:</b> open the <a href="https://tarang-fm.dualmindlab.tech">live link</a> and press <b>Tune in</b>.</p>
 
@@ -36,7 +36,7 @@ Works on any phone or laptop, with no install or login.
   <img src="docs/images/radio-phone.jpg" alt="The radio on a phone: Hindi 91.1 playing a Kahani, with the speaker's Bulbul voice ID and an English subtitle under the Hindi caption" width="24%" />
 </p>
 
-Built for the **Sarvam Bulbul Build Challenge** ("Build something that speaks"), where it won first place.
+Built for the **Sarvam Bulbul Build Challenge** ("Build something that speaks"), where it won first place ([Sarvam's announcement on X](https://x.com/SarvamForDevs/status/2112207014785175938)).
 
 ---
 
